@@ -1,0 +1,2 @@
+Replaced with the latest dark hollow relief-style RIVALS wordmark generated in ChatGPT.
+Asset resized to 512x128 with transparent padding for the WoW header.
