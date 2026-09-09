@@ -2,7 +2,7 @@
 
 **Make every duel part of your story.** Rivals is a World of Warcraft Classic Era addon that adds a personal duel rating, match history, and opponent insights to the Character and Inspect windows.
 
-**Current version:** 0.19.0-beta · **Client:** Classic Era (Interface 11509)
+**Current version:** 0.20.0-beta · **Client:** Classic Era (Interface 11509)
 
 ## Features
 
@@ -11,7 +11,7 @@
 - **Detailed History:** Browse results with mode and period filters. Tooltips show rating changes, opponent estimates, and recorded item activations and long cooldowns.
 - **Matchups:** Review opponents and classes by recency, with class colors, win/loss records, local rating estimates, and dedicated matchup drilldowns.
 - **Lifetime and seasons:** Keep a lifetime record while starting your own local seasons. Switch periods through the interface and explore your rating graph.
-- **Whole-duel placements:** Each eligible duel counts as one placement. Animated progress slots reveal accumulated gains when you open Overview.
+- **Whole-duel placements:** Each eligible duel counts as one placement. Animated progress slots reveal accumulated gains when you open Overview. Completing each requirement highlights its text and blips, and graduation to Established receives a one-time celebration.
 - **Inspect other players:** See shared Rivals profiles alongside your own local matchup record. Profile sharing is enabled by default and can be turned off in Manage.
 - **Interrupted-duel recovery:** Request a connected opponent's saved report, preview its impact, and choose whether to accept it. Acceptance can be undone, with the original report preserved.
 

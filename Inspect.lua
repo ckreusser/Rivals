@@ -2,6 +2,18 @@ local _, DP = ...
 local I = {prefix = "RivalsInspect1", sequence = 0}
 DP.Inspect = I
 
+-- Classic addon whispers follow faction restrictions even for visible players.
+-- A connected enemy can otherwise produce a misleading "player not found" error.
+function DP.CanWhisperUnit(unit)
+    if not unit or not UnitExists(unit) or not UnitIsPlayer(unit) then return false end
+    if UnitIsConnected and not UnitIsConnected(unit) then return false end
+    if UnitFactionGroup then
+        local own, other = UnitFactionGroup("player"), UnitFactionGroup(unit)
+        if not own or not other or own ~= other then return false end
+    end
+    return true
+end
+
 local function Qualified(name)
     if type(name) ~= "string" or name == "" or name:find("[%s|]") then return nil end
     if not name:find("-", 1, true) then name = name .. "-" .. GetNormalizedRealmName() end
@@ -183,6 +195,19 @@ end
 function I.Request()
     local target = I.target
     if not target then return end
+    local unit = target.unit
+    if not unit then
+        for _, candidate in ipairs({"target", "mouseover"}) do
+            if UnitGUID(candidate) == target.guid then unit = candidate; break end
+        end
+    end
+    if unit and (UnitGUID(unit) ~= target.guid or not DP.CanWhisperUnit(unit)) then
+        I.pending, I.profile, I.remoteInstalled = nil, nil, nil
+        I.noAddon = false
+        I.status = "Shared profile unavailable for this player"
+        if I.Render then I.Render() end
+        return
+    end
     if I.lastRequest and GetTime() - I.lastRequest < 3 then return end
     I.lastRequest = GetTime()
     I.sequence = I.sequence + 1
@@ -266,8 +291,8 @@ function I.Install()
     -- strip anchored to the actual horizontal center of InspectFrame instead.
     local content = CreateFrame("Frame", nil, panel)
     content:SetWidth(292)
-    content:SetPoint("TOP", panel, "TOP", 0, 28)
-    content:SetPoint("BOTTOM", panel, "BOTTOM", 0, 0)
+    content:SetPoint("TOP", panel, "TOP", 0, 33)
+    content:SetPoint("BOTTOM", panel, "BOTTOM", 0, 5)
 
     local function Label(y, font)
         local label = content:CreateFontString(nil, "OVERLAY", font or "GameFontHighlightSmall")
@@ -280,70 +305,55 @@ function I.Install()
         return label
     end
 
-    -- Mirror the owner's Overview geometry: heading, rating card, placement
-    -- progress, record/best tiles, then a Rivals-only local matchup section.
-    local heading = Label(-109, "GameFontNormalLarge")
-    heading:SetText("DUEL RATING")
-    heading:SetTextColor(.72, .66, .50, 1)
-    local leftFiligree = content:CreateTexture(nil, "ARTWORK")
-    if leftFiligree.SetAtlas then leftFiligree:SetAtlas("PetJournal-BattleSlotTitle-Left", true) end
-    leftFiligree:SetSize(25, 25)
-    leftFiligree:SetPoint("CENTER", heading, "CENTER", -72, 0)
-    leftFiligree:SetVertexColor(.72, .66, .50, .98)
-    leftFiligree:SetBlendMode("BLEND")
-    local rightFiligree = content:CreateTexture(nil, "ARTWORK")
-    if rightFiligree.SetAtlas then rightFiligree:SetAtlas("PetJournal-BattleSlotTitle-Right", true) end
-    rightFiligree:SetSize(25, 25)
-    rightFiligree:SetPoint("CENTER", heading, "CENTER", 72, 0)
-    rightFiligree:SetVertexColor(.72, .66, .50, .98)
-    rightFiligree:SetBlendMode("BLEND")
-
-    for i = 0, 41 do
-        local glow = math.sin((i / 41) * math.pi)
-        DP.Theme.Fill(content, 2, -144 - i * 2, 288, 2,
+    -- Share Overview's plaque, card heights, and spacing inside Inspect's
+    -- centered content strip.
+    for i = 0, 45 do
+        local glow = math.sin((i / 45) * math.pi)
+        DP.Theme.Fill(content, 2, -132 - i * 2, 288, 2,
             .035 + glow * .035, .055 + glow * .055, .09 + glow * .08)
     end
-    DP.Theme.Border(content, 0, -142, 292, 88)
-    DP.Theme.Border(content, 3, -145, 286, 82)
-    local value = Label(-154, "GameFontNormalHuge")
-    local status = Label(-184, "GameFontHighlightSmall")
-    local duelText = PositionedLabel(12, -196, 118, "GameFontHighlightSmall")
-    local rivalText = PositionedLabel(162, -196, 118, "GameFontHighlightSmall")
-    local duelProgress = DP.Theme.ProgressRow(content, 10, 71, -211, {.18, .59, 1})
-    local rivalProgress = DP.Theme.ProgressRow(content, 5, 221, -211, {.68, .38, 1})
+    local ratingCard = DP.Theme.Border(content, 0, -130, 292, 96)
+    DP.Theme.Border(content, 3, -133, 286, 90)
+    panel.ratingHeader = DP.Theme.RatingHeader(content, ratingCard)
+    local value = Label(-146, "GameFontNormalHuge")
+    local status = Label(-179, "GameFontHighlightSmall")
+    local duelText = PositionedLabel(12, -193, 118, "GameFontHighlightSmall")
+    local rivalText = PositionedLabel(162, -193, 118, "GameFontHighlightSmall")
+    local duelProgress = DP.Theme.ProgressRow(content, 10, 71, -208, {.18, .59, 1})
+    local rivalProgress = DP.Theme.ProgressRow(content, 5, 221, -208, {.68, .38, 1})
 
-    DP.Theme.Fill(content, 0, -238, 292, 52, .065, .08, .095)
-    DP.Theme.Border(content, 0, -238, 142, 52)
-    DP.Theme.Border(content, 150, -238, 142, 52)
-    DP.Theme.Fill(content, 145.5, -246, 1, 36, .30, .29, .25)
-    local record = PositionedLabel(8, -238, 126, "GameFontHighlight")
-    record:SetHeight(52); record:SetJustifyV("MIDDLE")
-    local peak = PositionedLabel(158, -238, 126, "GameFontHighlight")
-    peak:SetHeight(52); peak:SetJustifyV("MIDDLE")
+    local leftSlab = DP.Theme.StatSlab(content, 0, -240, 142, 54, false)
+    local rightSlab = DP.Theme.StatSlab(content, 150, -240, 142, 54, true)
+    DP.Theme.Fill(content, 145, -246, 1, 42, .38, .30, .18)
+    DP.Theme.Fill(content, 146, -246, 1, 42, .10, .085, .06)
+    local record = leftSlab:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    record:SetAllPoints(leftSlab); record:SetJustifyH("CENTER"); record:SetJustifyV("MIDDLE")
+    local peak = rightSlab:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    peak:SetAllPoints(rightSlab); peak:SetJustifyH("CENTER"); peak:SetJustifyV("MIDDLE")
 
     -- The owner does not have this card because it is specifically the local
     -- relationship between you and the Rival being inspected.
-    DP.Theme.Fill(content, 0, -296, 292, 54, .055, .075, .095)
-    DP.Theme.Border(content, 0, -296, 292, 54)
-    DP.Theme.Fill(content, 145.5, -312, 1, 24, .30, .29, .25)
-    local matchupTitle = Label(-304, "GameFontNormalSmall")
+    DP.Theme.Fill(content, 0, -304, 292, 54, .055, .075, .095)
+    DP.Theme.Border(content, 0, -304, 292, 54)
+    DP.Theme.Fill(content, 145.5, -320, 1, 24, .30, .29, .25)
+    local matchupTitle = Label(-312, "GameFontNormalSmall")
     matchupTitle:SetText("YOUR MATCHUP")
-    local personalRecord = PositionedLabel(8, -316, 126, "GameFontHighlight")
+    local personalRecord = PositionedLabel(8, -324, 126, "GameFontHighlight")
     personalRecord:SetHeight(30); personalRecord:SetJustifyV("MIDDLE")
-    local personalEstimate = PositionedLabel(158, -316, 126, "GameFontHighlight")
+    local personalEstimate = PositionedLabel(158, -324, 126, "GameFontHighlight")
     personalEstimate:SetHeight(30); personalEstimate:SetJustifyV("MIDDLE")
 
     -- Inspect has less usable vertical space than the Character pane. Keep
     -- streak information as a compact summary line instead of another full card.
-    local streakText = Label(-360, "GameFontHighlightSmall")
-    streakText:ClearAllPoints(); streakText:SetPoint("TOPLEFT", 0, -360); streakText:SetWidth(292); streakText:SetJustifyH("CENTER")
+    local streakText = Label(-366, "GameFontHighlightSmall")
+    streakText:ClearAllPoints(); streakText:SetPoint("TOPLEFT", 0, -366); streakText:SetWidth(292); streakText:SetJustifyH("CENTER")
     streakText:SetHeight(18); streakText:SetJustifyV("MIDDLE")
     local bestText = streakText -- kept as an alias for existing refresh/test references
 
-    local refresh = DP.Theme.Button(content, "Refresh profile", 76, -385, 140)
-    refresh:ClearAllPoints(); refresh:SetSize(140, 22); refresh:SetPoint("TOPLEFT", 76, -385); refresh:SetText("Refresh profile")
-    local note = Label(-414, "GameFontDisableSmall")
-    note:ClearAllPoints(); note:SetPoint("TOPLEFT", 0, -414); note:SetWidth(292); note:SetJustifyH("CENTER")
+    local refresh = DP.Theme.Button(content, "Refresh profile", 76, -389, 140)
+    refresh:ClearAllPoints(); refresh:SetSize(140, 22); refresh:SetPoint("TOPLEFT", 76, -389); refresh:SetText("Refresh profile")
+    local note = Label(-418, "GameFontDisableSmall")
+    note:ClearAllPoints(); note:SetPoint("TOPLEFT", 0, -418); note:SetWidth(292); note:SetJustifyH("CENTER")
     note:SetHeight(16); note:SetJustifyV("MIDDLE")
     refresh:SetScript("OnClick", I.Request)
 
@@ -443,7 +453,7 @@ function I.Install()
         I.profile, I.pending, I.target = nil, nil, nil
         I.remoteInstalled, I.noAddon = nil, false
         if name and guid then
-            I.target = {name = name .. "-" .. ((realm and realm ~= "") and realm or GetNormalizedRealmName()), guid = guid, class = class}
+            I.target = {name = name .. "-" .. ((realm and realm ~= "") and realm or GetNormalizedRealmName()), guid = guid, class = class, unit = unit}
             I.status = "Requesting shared profile..."
             I.Request()
         else I.status = "Inspected player unavailable" end

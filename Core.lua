@@ -1,5 +1,5 @@
 local addonName, DP = ...
-local VERSION, TRACE_LIMIT, ACTIVITY_LIMIT = "0.19.0-beta", 1000, 200
+local VERSION, TRACE_LIMIT, ACTIVITY_LIMIT = "0.20.0-beta", 1000, 200
 local frame = CreateFrame("Frame")
 local db, observer, tracker, parsers, ready, rating
 local seasons, selectedPeriod = {}, nil
@@ -74,11 +74,11 @@ function DP.RetryRecovery()
     if not recovery then return end
     -- Historical opponents may be offline; addon whispers to them produce server errors.
     -- Resolve the live target at send time, never from a saved opponent list.
-    if UnitExists("target") and UnitIsPlayer("target") and (not UnitIsConnected or UnitIsConnected("target")) then
+    if DP.CanWhisperUnit("target") then
         local name, realm = UnitName("target")
         if name then recovery:Request({name = name .. "-" .. ((realm and realm ~= "") and realm or GetNormalizedRealmName()), guid = UnitGUID("target")}) end
     else
-        recovery:SetStatus("Target the connected opponent before retrying recovery.")
+        recovery:SetStatus("Target a connected same-faction opponent before retrying recovery.")
     end
 end
 
@@ -205,7 +205,7 @@ local function UnitIdentity(unit)
     if not realm or realm == "" then realm = GetNormalizedRealmName() end
     local _, class = UnitClass(unit)
     return {name = name .. "-" .. realm, guid = UnitGUID(unit), class = class,
-        level = UnitLevel(unit)}
+        level = UnitLevel(unit), whisperBlocked = not DP.CanWhisperUnit(unit)}
 end
 
 local function FindIdentity(name)
@@ -467,8 +467,9 @@ local function Initialize()
     if C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix then pcall(C_ChatInfo.RegisterAddonMessagePrefix, DP.Recovery.prefix) end
     verifier = DP.Verification.New({
         canSend = function(entry)
+            if entry.session and entry.session.identity and entry.session.identity.whisperBlocked then return false end
             for _, unit in ipairs({"target", "mouseover"}) do
-                if UnitExists(unit) and UnitGUID(unit) == entry.guid and UnitIsConnected and not UnitIsConnected(unit) then return false end
+                if UnitExists(unit) and UnitGUID(unit) == entry.guid and not DP.CanWhisperUnit(unit) then return false end
             end
             return not entry.offline
         end,

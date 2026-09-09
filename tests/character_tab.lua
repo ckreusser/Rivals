@@ -10,6 +10,24 @@ function CreateFrame(kind, name, parent, template)
     function f:SetVertexColor(...) self.vertexColor = {...} end
     function f:SetTextColor(...) self.textColor = {...} end
     function f:SetFontString() end
+    function f:CreateAnimationGroup()
+        local group = {animations = {}, playCount = 0}
+        function group:CreateAnimation(kind)
+            local anim = {kind = kind}
+            for _, key in ipairs({"Order", "Duration", "StartDelay", "Origin", "ScaleFrom", "ScaleTo", "Smoothing", "Offset"}) do
+                anim["Set" .. key] = function(self, ...) self[key] = {...} end
+            end
+            self.animations[#self.animations + 1] = anim
+            return anim
+        end
+        function group:Play() self.playing = true; self.playCount = self.playCount + 1 end
+        function group:Stop() self.playing = false end
+        return group
+    end
+    function f:GetStringWidth() return #(self.text or "") * 5 end
+    function f:SetScale(scale) self.scale = scale end
+    function f:GetFont() return "Fonts/FRIZQT__.TTF", 10, "" end
+    function f:SetFont(font, size, flags) self.fontSize = size end
     function f:SetParent(parent) self.parent = parent end
     function f:EnableMouseWheel() end
     function f:SetValueStep() end
@@ -329,3 +347,112 @@ assert(not screen.scripts.OnUpdate)
 DP.ProgressCheckpoint = oldCheckpoint
 state.effective, state.distinct, state.placements = oldEffective, oldDistinct, oldPlacements
 print("PASS: hidden gains queue, delayed catch-up, interrupted reveal retries and completed gains stay viewed")
+
+local savedCheckpoint = DP.ProgressCheckpoint
+local savedPlacements, savedDistinct = state.placements, state.distinct
+local milestoneCheckpoint = {duels = 9, opponents = 4}
+DP.ProgressCheckpoint = function() return milestoneCheckpoint end
+local sweeps = RivalsCharacterPanel.milestoneSweeps
+assert(#sweeps == 3)
+for _, sweep in ipairs(sweeps) do sweep:Stop() end
+state.placements, state.distinct = 10, 4
+DP.RefreshProgress(); screen.scripts.OnUpdate(screen, 10)
+assert(sweeps[1].scripts.OnUpdate and not sweeps[2].scripts.OnUpdate)
+sweeps[1].scripts.OnUpdate(sweeps[1], .5)
+local visibleBands = 0
+for _, band in ipairs(sweeps[1].bands) do
+    if band.visible then visibleBands = visibleBands + 1 end
+end
+assert(visibleBands > 0)
+for i, band in ipairs(sweeps[1].bands) do
+    assert(band == RivalsCharacterPanel.progressRows[1].slots[i].flash)
+end
+sweeps[1].scripts.OnUpdate(sweeps[1], 2)
+assert(not sweeps[1].scripts.OnUpdate)
+state.distinct = 5
+DP.RefreshProgress(); screen.scripts.OnUpdate(screen, 10)
+assert(not sweeps[1].scripts.OnUpdate and sweeps[2].scripts.OnUpdate and not sweeps[3].scripts.OnUpdate)
+for _, sweep in ipairs(sweeps) do sweep:Stop() end
+DP.RefreshProgress()
+assert(not screen.scripts.OnUpdate and not sweeps[3].scripts.OnUpdate)
+RivalsCharacterPanel.establishedPromotion:Play(0)
+assert(state.placements == 10 and state.distinct == 5 and milestoneCheckpoint.duels == 10 and milestoneCheckpoint.opponents == 5)
+assert(RivalsCharacterPanel.devMilestoneButton == nil)
+assert(RivalsCharacterPanel.establishedPromotion.scripts.OnUpdate)
+DP.SelectDuelView("History")
+for _, sweep in ipairs(sweeps) do assert(not sweep.scripts.OnUpdate) end
+DP.ProgressCheckpoint = savedCheckpoint
+state.placements, state.distinct = savedPlacements, savedDistinct
+DP.SelectDuelView("Overview")
+assert(sweeps[3].scripts.OnUpdate) -- Returning to Overview replays only the card.
+assert(not sweeps[1].scripts.OnUpdate and not sweeps[2].scripts.OnUpdate)
+sweeps[3]:Stop()
+DP.SelectDuelView("Overview")
+assert(sweeps[3].scripts.OnUpdate)
+print("PASS: milestone thresholds, visible sweep, completion, no repeat, stat-safe dev preview and hide cleanup")
+local caption = CreateFrame()
+caption:SetText("|cff79bdff10 / 10 duels|r")
+local originalCaption = caption:GetText()
+local glyphSweep = DP.Theme.CompletionSweep(screen, blips, caption, {121/255, 189/255, 1})
+glyphSweep:Play(0, .8)
+glyphSweep.scripts.OnUpdate(glyphSweep, .4)
+assert(caption:GetText() ~= originalCaption)
+assert(caption:GetText():gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "") == "10 / 10 duels")
+glyphSweep:Stop()
+assert(caption:GetText() == originalCaption)
+print("PASS: completion sweep uses existing blips and glyph colors, preserving caption text and restoring colors")
+
+local promotion = RivalsCharacterPanel.establishedPromotion
+local savedPromotionCheckpoint = DP.ProgressCheckpoint
+local savedPromotionPlacements, savedPromotionDistinct = state.placements, state.distinct
+local graduation = {duels = 10, opponents = 5, promotionPending = true}
+DP.ProgressCheckpoint = function() return graduation end
+state.placements, state.distinct = 10, 5
+DP.SelectDuelView("Overview")
+assert(promotion.checkpoint == graduation and promotion.scripts.OnUpdate)
+promotion.scripts.OnUpdate(promotion, 1)
+DP.SelectDuelView("History")
+assert(not promotion.scripts.OnUpdate and not graduation.promotionSeen)
+DP.SelectDuelView("Overview")
+assert(promotion.scripts.OnUpdate)
+promotion.scripts.OnUpdate(promotion, 10)
+assert(graduation.promotionSeen and not graduation.promotionPending)
+DP.SelectDuelView("Overview")
+assert(not promotion.scripts.OnUpdate)
+RivalsCharacterPanel.establishedPromotion:Play(0)
+assert(promotion.scripts.OnUpdate and not promotion.checkpoint)
+promotion.scripts.OnUpdate(promotion, 10)
+assert(graduation.promotionSeen and state.placements == 10 and state.distinct == 5)
+DP.ProgressCheckpoint = savedPromotionCheckpoint
+state.placements, state.distinct = savedPromotionPlacements, savedPromotionDistinct
+print("PASS: Established promotion retries after interruption, persists completion and dev preview leaves state untouched")
+
+promotion:Play(0)
+promotion.scripts.OnUpdate(promotion, .25)
+assert(promotion.title:GetText() == "Provisional" and promotion.title.alpha == 1 and promotion.word.alpha == 0)
+promotion.scripts.OnUpdate(promotion, .95)
+assert(promotion.title:GetText() == "Established" and promotion.title.alpha == 0 and promotion.word.alpha == 1)
+local enlarged = promotion.word.width
+promotion.scripts.OnUpdate(promotion, .6)
+local previous = promotion.word.width
+for i = 1, 60 do
+    promotion.scripts.OnUpdate(promotion, .02)
+    assert(promotion.word.width <= previous + .00001)
+    previous = promotion.word.width
+    assert(promotion.motion.scale == nil)
+end
+assert(promotion.word.width < enlarged)
+promotion.scripts.OnUpdate(promotion, .06)
+assert(promotion.motion.point[4] == 0 and promotion.motion.point[5] == 0)
+assert(#promotion.stars == 10)
+for i, star in ipairs(promotion.stars) do
+    assert(star.point[2] == promotion.motion and star.point[5] == 0)
+end
+assert(promotion.stars[1].point[4] < 0 and promotion.stars[5].point[4] == 0 and promotion.stars[9].point[4] > 0)
+promotion.scripts.OnUpdate(promotion, .19)
+assert(promotion.word.alpha == 0 and promotion.title.alpha == 1)
+promotion.scripts.OnUpdate(promotion, .79)
+assert(promotion.scripts.OnUpdate and promotion.alpha == 1)
+promotion.scripts.OnUpdate(promotion, .42)
+assert(not promotion.scripts.OnUpdate)
+print("PASS: bitmap shrink is monotonic, all glows share its center, native text takes over at rest, and one-second glow hold is preserved")

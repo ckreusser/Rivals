@@ -1,0 +1,1 @@
+White RGBA Established word rasterized using Pillow and FrizQuadrata from https://legionfonts.com/fonts/frizquadrata. Font not installed or bundled. Texture tinted in-game.

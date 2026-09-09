@@ -1,6 +1,229 @@
 local _, DP = ...
 local T = {}
 DP.Theme = T
+-- Keep the sweep texture inside the target rectangle. Shifting its UVs moves
+-- the light; a one-unit horizontal shift per vertical unit gives a 45-degree edge.
+function T.LightSweep(parent, target, color, diagonal)
+    local sweep = CreateFrame("Frame", nil, parent)
+    sweep:SetAllPoints(target)
+    sweep:SetFrameLevel(target:GetFrameLevel() + 5)
+    local band = sweep:CreateTexture(nil, "OVERLAY")
+    band:SetTexture("Interface\\AddOns\\Rivals\\Textures\\LightSweep.tga", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+    band:SetVertexColor(color[1], color[2], color[3])
+    band:SetBlendMode("ADD")
+    if band.SetSnapToPixelGrid then band:SetSnapToPixelGrid(false) end
+    if band.SetTexelSnappingBias then band:SetTexelSnappingBias(0) end
+    band:SetAllPoints(target)
+    sweep.bands = {band}
+    function sweep:Stop()
+        self:SetScript("OnUpdate", nil)
+        band:Hide(); self:Hide()
+    end
+    function sweep:Play(delay, duration)
+        self:Stop(); self:Show()
+        local elapsed = -(delay or 0)
+        duration = duration or .8
+        self:SetScript("OnUpdate", function(self, dt)
+            elapsed = elapsed + dt
+            if elapsed < 0 then return end
+            if elapsed >= duration then self:Stop(); return end
+            local width, height = target:GetWidth(), target:GetHeight()
+            local span = width * .10
+            local slope = diagonal and height or 0
+            local t = elapsed / duration
+            local center = -span + (width + 2 * span + slope) * t
+            local left = -center / span + .5
+            local right = (width - center) / span + .5
+            local bottom = slope / span
+            band:SetTexCoord(left, 0, left + bottom, 1, right, 0, right + bottom, 1)
+            band:SetAlpha(math.sin(math.pi * t) * .46)
+            band:Show()
+        end)
+    end
+    sweep:SetScript("OnHide", function(self) self:Stop() end)
+    sweep:Hide()
+    return sweep
+end
+-- Animate the glyph colors and the existing inset blip flashes themselves.
+-- There is no luminous rectangle behind the text or between the sockets.
+function T.EstablishedPromotion(parent, card, status)
+    local fx = CreateFrame("Frame", nil, parent)
+    fx:SetPoint("TOPLEFT", card, "TOPLEFT", 4, -4)
+    fx:SetSize(card:GetWidth() - 8, card:GetHeight() - 8)
+    fx:SetFrameLevel(card:GetFrameLevel() + 10)
+    local field = fx:CreateTexture(nil, "BACKGROUND")
+    field:SetAllPoints(fx); field:SetColorTexture(.025, .045, .06, .97)
+    -- Keep one unscaled coordinate space. The animated word is a filtered
+    -- bitmap; only its dimensions change, never the font raster or frame scale.
+    local motion = CreateFrame("Frame", nil, fx)
+    motion:SetSize(1, 1)
+    motion:SetPoint("CENTER", status, "CENTER", 0, 0)
+    motion:SetFrameLevel(fx:GetFrameLevel() + 1)
+    local title = motion:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    title:SetPoint("CENTER", motion, "CENTER", 0, 0)
+    title:SetJustifyH("CENTER")
+    local word = motion:CreateTexture(nil, "OVERLAY")
+    word:SetTexture("Interface\\AddOns\\Rivals\\Textures\\EstablishedText.tga")
+    word:SetVertexColor(101/255, 230/255, 173/255)
+    word:SetPoint("CENTER", motion, "CENTER", 0, 0)
+    if word.SetSnapToPixelGrid then word:SetSnapToPixelGrid(false) end
+    if word.SetTexelSnappingBias then word:SetTexelSnappingBias(0) end
+    fx.title, fx.motion, fx.word = title, motion, word
+    local flash = fx:CreateTexture(nil, "ARTWORK")
+    flash:SetAllPoints(fx); flash:SetColorTexture(1, .86, .55, 1)
+    flash:SetBlendMode("ADD")
+    local glow = fx:CreateTexture(nil, "ARTWORK")
+    glow:SetTexture("Interface\\AddOns\\Rivals\\Textures\\PromotionGlow.tga")
+    glow:SetVertexColor(1, .85, .48); glow:SetBlendMode("ADD")
+    glow:SetPoint("CENTER", status, "CENTER", 0, 8)
+    -- Repeat the friendly FC star pair across the word, keeping the glow
+    -- attached to its measured width throughout the scaling animation.
+    local stars = {}
+    for i = 1, 10 do
+        local rear = i % 2 == 1
+        local star = motion:CreateTexture(nil, "ARTWORK", nil, rear and -2 or -1)
+        star:SetTexture("Interface\\Cooldown\\star4")
+        star:SetBlendMode("ADD")
+        star:SetPoint("CENTER", motion, "CENTER", 0, 0)
+        if star.SetSnapToPixelGrid then star:SetSnapToPixelGrid(false) end
+        if star.SetTexelSnappingBias then star:SetTexelSnappingBias(0) end
+        if rear then star:SetVertexColor(1, .78, .08)
+        else star:SetVertexColor(1, 1, .68) end
+        stars[i] = star
+    end
+    fx.stars = stars
+    local sparks = {}
+    for i = 1, 18 do
+        local spark = fx:CreateTexture(nil, "ARTWORK")
+        spark:SetTexture("Interface\\AddOns\\Rivals\\Textures\\PromotionGlow.tga")
+        spark:SetVertexColor(1, .85, .48); spark:SetBlendMode("ADD")
+        sparks[i] = spark
+    end
+    function fx:Stop()
+        self:SetScript("OnUpdate", nil); self:Hide(); self.checkpoint = nil
+    end
+    function fx:Play(delay, checkpoint)
+        self:Stop(); self.checkpoint = checkpoint
+        self:SetAlpha(0); self:Show()
+        local font, size, flags = status:GetFont()
+        title:SetFont(font, size, flags)
+        title:SetText("Established")
+        local establishedWidth = title:GetStringWidth()
+        local lastPromoted
+        local elapsed = -(delay or 0)
+        self:SetScript("OnUpdate", function(self, dt)
+            elapsed = elapsed + dt
+            if elapsed < 0 then return end
+            if elapsed >= 4.45 then
+                if self.checkpoint then
+                    self.checkpoint.promotionSeen = true
+                    self.checkpoint.promotionPending = nil
+                end
+                self:Stop(); return
+            end
+            self:SetAlpha(math.min(1, elapsed / .2, (4.45 - elapsed) / .4))
+            local promoted = elapsed >= 1.05
+            local burstAge = elapsed - 1.05
+            local scale, x, y = 1, 0, 0
+            if not promoted then
+                local tension = math.max(0, (elapsed - .3) / .75)
+                x, y = math.sin(elapsed * 91) * tension * 2.4, math.sin(elapsed * 127) * tension * 1.5
+            else
+                local grow = math.min(1, burstAge / .16)
+                local settle = math.max(0, math.min(1, (elapsed - 1.65) / 1.4))
+                local remaining = 1 - settle^3 * (settle * (settle * 6 - 15) + 10)
+                scale = 1 + .65 * (1 - (1 - grow)^3) * remaining
+                y = 10 * grow * remaining
+            end
+            motion:SetPoint("CENTER", status, "CENTER", x, y)
+            if lastPromoted ~= promoted then
+                title:SetText(promoted and "Established" or "Provisional")
+                lastPromoted = promoted
+            end
+            if promoted then title:SetTextColor(101/255, 230/255, 173/255)
+            else title:SetTextColor(1, 202/255, 103/255) end
+            local handoff = math.max(0, math.min(1, (elapsed - 3.05) / .18))
+            title:SetAlpha(promoted and handoff or 1)
+            word:SetAlpha(promoted and (1 - handoff) or 0)
+            word:SetSize(establishedWidth * scale, establishedWidth * (71/467) * scale)
+            local burst = promoted and math.max(0, 1 - burstAge / .45) or 0
+            flash:SetAlpha(burst * burst * .38)
+            glow:SetSize(160 + 70 * (1 - burst), 54)
+            glow:SetAlpha(burst * .95)
+            local rearPulse = .5 + .5 * math.sin(math.max(0, burstAge) * 4.2)
+            local innerPulse = .5 + .5 * math.sin(math.max(0, burstAge) * 4.2 + math.pi * .72)
+            local textWidth = establishedWidth * scale
+            for i, star in ipairs(stars) do
+                local rear = i % 2 == 1
+                local pulse = rear and rearPulse or innerPulse
+                local diameter = (textWidth * (rear and .40 or .34) + 5 * pulse)
+                star:SetPoint("CENTER", motion, "CENTER", (math.floor((i - 1) / 2) - 2) * textWidth / 5, 0)
+                star:SetSize(diameter, diameter)
+                star:SetAlpha(promoted and (.30 + .16 * pulse) or 0)
+                if star.SetRotation then star:SetRotation(math.max(0, burstAge) * (rear and .75 or -1.05)) end
+            end
+            local travel = math.max(0, math.min(1, burstAge / .65))
+            for i, spark in ipairs(sparks) do
+                local angle = i * math.pi * 2 / #sparks
+                spark:ClearAllPoints()
+                spark:SetPoint("CENTER", status, "CENTER", math.cos(angle) * (18 + 104 * travel), 8 + math.sin(angle) * (3 + 25 * travel))
+                spark:SetSize(9 - 5 * travel, 9 - 5 * travel)
+                spark:SetAlpha(promoted and (1 - travel)^2 or 0)
+            end
+        end)
+    end
+    fx:SetScript("OnHide", function(self) self:Stop() end)
+    fx:Hide()
+    return fx
+end
+function T.CompletionSweep(parent, row, label, color)
+    local sweep = CreateFrame("Frame", nil, parent)
+    sweep.bands = {}
+    for i, slot in ipairs(row.slots) do sweep.bands[i] = slot.flash end
+    local original, painted
+    function sweep:Stop()
+        self:SetScript("OnUpdate", nil)
+        if original and label:GetText() == painted then label:SetText(original) end
+        original, painted = nil, nil
+        for _, slot in ipairs(row.slots) do slot:Paint(slot.display or 0, 0) end
+        self:Hide()
+    end
+    function sweep:Play(delay, duration)
+        self:Stop(); self:Show()
+        local elapsed = -(delay or 0)
+        duration = duration or .8
+        self:SetScript("OnUpdate", function(self, dt)
+            elapsed = elapsed + dt
+            if elapsed < 0 then return end
+            if elapsed >= duration then self:Stop(); return end
+            local current = label:GetText() or ""
+            if current ~= painted then original = current end
+            local text = (original or ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+            local center = -.2 + 1.4 * elapsed / duration
+            local function Glow(x)
+                local distance = math.abs(x - center) / .2
+                return distance < 1 and math.cos(distance * math.pi / 2)^2 or 0
+            end
+            local pieces = {}
+            -- Placement captions use ASCII; inline colors preserve font shaping,
+            -- spacing and glyph transparency without an overlay surface.
+            for i = 1, #text do
+                local glow = Glow((i - .5) / #text)
+                pieces[i] = string.format("|cff%02x%02x%02x%s|r",
+                    math.floor(255 * (color[1] + (1 - color[1]) * glow)),
+                    math.floor(255 * (color[2] + (1 - color[2]) * glow)),
+                    math.floor(255 * (color[3] + (1 - color[3]) * glow)), text:sub(i, i))
+            end
+            painted = table.concat(pieces); label:SetText(painted)
+            for i, slot in ipairs(row.slots) do
+                slot:Paint(slot.display or 0, Glow((i - .5) / #row.slots) * .85)
+            end
+        end)
+    end
+    sweep:SetScript("OnHide", function(self) self:Stop() end)
+    sweep:Hide()
+    return sweep
+end
 -- Match Zurk Maps' physical-pixel border layout: round once, then disable
 -- independent texture snapping so opposite edges cannot drift apart.
 function T.ProgressRow(parent, count, center, y, color)

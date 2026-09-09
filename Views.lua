@@ -192,6 +192,7 @@ function DP.InstallViews(panel, getRating, getRecords, overview)
     local function Select(view, selectedFilter, label, source)
         current, filter, filterLabel, filterSource, page = view, selectedFilter, label, source, 1
         refresh()
+        if view == "Overview" and DP.PlayOverviewSweep then DP.PlayOverviewSweep() end
     end
     for i, spec in ipairs({{"Overview", "Overview"}, {"History", "History"}, {"Matchups", "Opponents"}, {"Rivals", "Leaderboard"}}) do
         local label, view = spec[1], spec[2]

@@ -111,3 +111,13 @@ GameTooltip.unit = "player"
 GameTooltip.scripts.OnTooltipSetUnit(GameTooltip)
 assert(#GameTooltip.lines == 0)
 print("PASS: local player tooltip records, duplicate guard, unknown players and no network requests")
+
+local oldFaction, oldTarget = UnitFactionGroup, I.target
+local sentBeforeEnemy, sequenceBeforeEnemy = #sent, I.sequence
+UnitFactionGroup = function(unit) return unit == "player" and "Alliance" or "Horde" end
+I.target = {name = "Bob-Realm", guid = UnitGUID("target"), unit = "target"}
+I.Request()
+assert(#sent == sentBeforeEnemy and I.sequence == sequenceBeforeEnemy)
+assert(not I.pending and not I.noAddon and I.status == "Shared profile unavailable for this player")
+UnitFactionGroup, I.target = oldFaction, oldTarget
+print("PASS: enemy Inspect sends no request and does not misclassify blocked messaging as a missing addon")

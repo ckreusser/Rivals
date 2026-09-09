@@ -43,6 +43,7 @@ function CreateFrame()
     function f:RegisterEvent(event) self.events[event] = true end
     function f:SetScript(event, fn) self.scripts[event] = fn end
     function f:SetText(text) self.text = text end
+    function f:GetText() return self.text end
     for _, key in ipairs({"SetSize", "SetPoint", "SetMovable", "EnableMouse", "RegisterForDrag",
         "StartMoving", "StopMovingOrSizing", "SetMultiLine", "SetAutoFocus", "SetFontObject",
         "SetWidth", "SetMaxLetters", "SetScrollChild", "Show", "Hide", "SetFocus", "HighlightText"}) do

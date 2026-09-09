@@ -115,6 +115,15 @@ DP.RetryRecovery(); assert(#requested == 0)
 UnitIsConnected = function() return true end
 DP.RetryRecovery()
 assert(#requested == 1 and requested[1].guid == UnitGUID("target"))
+local oldFaction = UnitFactionGroup
+UnitFactionGroup = function(unit) return unit == "player" and "Alliance" or "Horde" end
+fire("PLAYER_TARGET_CHANGED")
+DP.RetryRecovery()
+assert(#requested == 1, "Enemy targeting and manual retry must not send recovery requests")
+UnitFactionGroup = function() return "Alliance" end
+DP.RetryRecovery()
+assert(#requested == 2, "Same-faction recovery remains available")
+UnitFactionGroup = oldFaction
 DP.Recovery.Request, UnitIsConnected = request, connected
 print("PASS: recovery skips historical and disconnected targets, requests only current live player")
 UnitExists = function(unit) return unit == "player" end
@@ -127,3 +136,14 @@ assert(o.pending.identity.guid == "Player-1-B" and o.pending.verificationToken)
 UnitExists = exists
 fire("UI_INFO_MESSAGE", 0, "Duel cancelled.")
 print("PASS: matching peer hello supplies missing target identity; unrelated sender rejected")
+
+local savedFaction, savedChat = UnitFactionGroup, C_ChatInfo
+local blockedSends = 0
+C_ChatInfo = {SendAddonMessage = function() blockedSends = blockedSends + 1 end}
+UnitFactionGroup = function(unit) return unit == "player" and "Alliance" or "Horde" end
+fire("DUEL_REQUESTED", "Bob-Realm")
+assert(o.pending.identity.whisperBlocked)
+assert(blockedSends == 0, "Enemy duel handshake must not whisper")
+fire("UI_INFO_MESSAGE", 0, "Duel cancelled.")
+UnitFactionGroup, C_ChatInfo = savedFaction, savedChat
+print("PASS: opposite-faction targets skip recovery and duel handshake transport")

@@ -1,3 +1,25 @@
+## 0.20.0-beta
+
+### Interface and animations
+
+- Updated Inspect Duel Rating to match Overview's Zurk Maps-style header plaque, taller rating card, beveled stat cards, and spacing; moved the Inspect content up 5px.
+- Added a narrow diagonal light sweep when opening Overview.
+- Added independent completion highlights for 10 eligible duels and 5 distinct opponents, lighting only each section's text and progress blips.
+- Added a one-time Provisional-to-Established celebration on the first Overview opening after qualifying: the card darkens, Provisional rumbles, and a light burst reveals Established.
+- The promotion text grows and settles into its normal position, with five evenly spaced Zurk Maps-style glows that remain for one second after settling.
+- Used a rendered text texture during resizing, then blended back to the native status label to keep the promotion aligned and smooth.
+- Preserved interrupted promotion playback for the next opening and removed the development preview button.
+
+### Fixes
+
+- Prevented opposite-faction targets from triggering recovery whispers and duel-verification handshakes that could produce misleading player-not-found messages.
+- Blocked unavailable Inspect profile requests without incorrectly reporting that the other player lacks Rivals.
+
+### Validation
+
+- Expanded regression checks for completion highlights, promotion timing and alignment, replay handling, and faction-aware messaging.
+- Passed the full Lua 5.1 and mocked-client regression suite.
+
 ## 0.19.0-beta
 
 ### Rating protection

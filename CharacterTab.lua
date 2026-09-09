@@ -103,6 +103,28 @@ function DP.InstallCharacterTab(getRating, getRecords)
     local reveal
     local fallbackCheckpoint = {duels = 0, opponents = 0}
     panel.progressRows = {duelProgress, rivalProgress}
+    local duelSweep, opponentSweep
+    local overviewSweep = DP.Theme.LightSweep(overview, ratingCard, {1, .82, .42}, true)
+    local promotion
+    function DP.PlayOverviewSweep()
+        overviewSweep:Play(0, .40)
+        local state = getRating()
+        local checkpoint = DP.ProgressCheckpoint and DP.ProgressCheckpoint() or fallbackCheckpoint
+        if not state or DP.Rating.Provisional(state) or checkpoint.promotionSeen then return end
+        if promotion.checkpoint == checkpoint then return end
+        -- Existing Established profiles do not receive a retroactive graduation.
+        if not checkpoint.promotionPending and checkpoint.duels >= 10 and checkpoint.opponents >= 5 then
+            checkpoint.promotionSeen = true; return
+        end
+        checkpoint.promotionPending = true
+        local steps = math.max(10 - checkpoint.duels, 5 - checkpoint.opponents)
+        promotion:Play(.35 + math.max(0, steps - 1) * .24 + .44 + .9, checkpoint)
+    end
+    overview:SetScript("OnShow", DP.PlayOverviewSweep)
+    local function Celebrate(duelsDone, opponentsDone)
+        if duelsDone then duelSweep:Play(0, .8) end
+        if opponentsDone then opponentSweep:Play(0, .8) end
+    end
     -- A simple recessed line in the open channel.
     DP.Theme.Fill(overview, 175, -246, 1, 42, .38, .30, .18)
     DP.Theme.Fill(overview, 176, -246, 1, 42, .10, .085, .06)
@@ -115,10 +137,15 @@ function DP.InstallCharacterTab(getRating, getRecords)
     end
     local number = Text(-146, "GameFontNormalHuge")
     local placement = Text(-179, "GameFontHighlightSmall")
+    promotion = DP.Theme.EstablishedPromotion(overview, ratingCard, placement)
+    panel.establishedPromotion = promotion
     local progressText = Text(-193, "GameFontHighlightSmall")
     progressText:ClearAllPoints(); progressText:SetPoint("TOPLEFT", 42, -193); progressText:SetWidth(118)
     local opponentProgress = Text(-193, "GameFontHighlightSmall")
     opponentProgress:ClearAllPoints(); opponentProgress:SetPoint("TOPLEFT", 192, -193); opponentProgress:SetWidth(118)
+    duelSweep = DP.Theme.CompletionSweep(overview, duelProgress, progressText, {121/255, 189/255, 1})
+    opponentSweep = DP.Theme.CompletionSweep(overview, rivalProgress, opponentProgress, {229/255, 185/255, 1})
+    panel.milestoneSweeps = {duelSweep, opponentSweep, overviewSweep}
     local stats = leftSlab:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     stats:SetAllPoints(leftSlab); stats:SetJustifyH("CENTER"); stats:SetJustifyV("MIDDLE")
     local peak = rightSlab:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
@@ -169,13 +196,20 @@ function DP.InstallCharacterTab(getRating, getRecords)
         overview:SetScript("OnUpdate", nil)
         reveal = nil
     end
-    overview:SetScript("OnHide", StopReveal)
+    overview:SetScript("OnHide", function()
+        StopReveal()
+        promotion:Stop()
+        for _, sweep in ipairs(panel.milestoneSweeps) do sweep:Stop() end
+    end)
     function DP.RefreshProgress()
         if not panel:IsShown() or not overview:IsShown() then StopReveal(); return end
         local state = getRating()
         if not state then return end
         local checkpoint = DP.ProgressCheckpoint and DP.ProgressCheckpoint() or fallbackCheckpoint
+        if promotion.checkpoint and promotion.checkpoint ~= checkpoint then promotion:Stop() end
         local duels, opponents = math.min(10, DP.Rating.PlacementCount(state)), math.min(5, state.distinct)
+        if not checkpoint.promotionSeen and duels >= 10 and opponents >= 5 and
+            (checkpoint.duels < 10 or checkpoint.opponents < 5) then checkpoint.promotionPending = true end
         if reveal and reveal.checkpoint == checkpoint and reveal.duels == duels and reveal.opponents == opponents then return end
         StopReveal()
         local fromDuels, fromOpponents = math.floor(math.min(checkpoint.duels, duels)), math.floor(math.min(checkpoint.opponents, opponents))
@@ -195,6 +229,7 @@ function DP.InstallCharacterTab(getRating, getRecords)
             DrawProgress(math.min(duels, fromDuels + completed),
                 math.min(opponents, fromOpponents + completed), elapsed)
             if elapsed >= duration then
+                Celebrate(fromDuels < 10 and duels >= 10, fromOpponents < 5 and opponents >= 5)
                 checkpoint.duels, checkpoint.opponents = duels, opponents
                 DrawProgress(duels, opponents); StopReveal()
             end
