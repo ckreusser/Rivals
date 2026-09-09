@@ -40,6 +40,7 @@ function CreateFrame(kind, name, parent, template)
     function f:SetTexture() end
     function f:CreateMaskTexture() return CreateFrame() end
     function f:AddMaskTexture(mask) self.mask = mask end
+    function f:SetDrawLayer(layer) self.drawLayer = layer end
     function f:SetBlendMode(mode) self.blendMode = mode end
     function f:SetAlpha(alpha) self.alpha = alpha end
     function f:SetTexCoord() end
@@ -51,6 +52,8 @@ function CreateFrame(kind, name, parent, template)
     function f:SetJustifyV() end
     function f:SetSize(width, height) self.width, self.height = width, height end
     function f:SetWidth(width) self.width = width end
+    function f:GetWidth() return self.width or 0 end
+    function f:GetHeight() return self.height or 0 end
     function f:SetHeight(height) self.height = height end
     function f:SetPushedTextOffset(x, y) self.pushedTextOffset = {x, y} end
     function f:SetWordWrap() end
@@ -86,7 +89,7 @@ assert(CharacterFrameTab6.point[2] == CharacterFrameTab5)
 assert(CharacterFrameTab6.text == "Duels")
 CharacterFrameTab6.scripts.OnClick()
 assert(RivalsCharacterPanel:IsShown() and not HonorFrame:IsShown())
-assert(#RivalsCharacterPanel.chrome == 4)
+assert(#RivalsCharacterPanel.chrome == 4) -- One complete, matching frame texture set.
 assert(RivalsCharacterPanel.logo and RivalsCharacterPanel.logo:IsShown())
 assert(not RivalsCharacterPanel.logo.mask and RivalsCharacterPanel.logo.blendMode == "BLEND")
 for _, texture in ipairs(RivalsCharacterPanel.chrome) do assert(texture:IsShown()) end

@@ -1,3 +1,29 @@
+## 0.19.0-beta
+
+### Rating protection
+
+- Added level-disparity penalties: rewards halve for every two levels of winner advantage and reach zero at a ten-level gap. Unknown levels cannot award rating.
+- Added diminishing returns after eight consecutive Rated wins against the same opponent: wins 9–11 receive 50%, 25%, and 12.5%; win 12 onward receives zero.
+- Added rolling seven-day limits of 12 rewarded wins and 64 gross overall rating points per opponent. Losses do not refund these budgets.
+- Preserved opponent history and guard counters independently of the visible profile cache. Seasons inherit lifetime protections.
+- Prevented retreat wins, wins under five seconds, and newly accepted peer-recovered results from awarding rating or placement credit. Results remain in history; otherwise eligible retreat and short-duel losses still cost rating.
+- Added explanations for protection decisions to History tooltips. Existing results retain their original rating calculations.
+
+### Interface
+
+- Added a compact, normal-case “Duel Rating” header plaque attached to the rating card.
+- Refined Overview spacing, including the status, counters, and progress blips.
+- Replaced the shared stat-box background with mirrored beveled slabs, masked interiors, and a plain center divider.
+- Widened the Lifetime dropdown to mirror the Prefer Rated button.
+- Refined close-button alignment while preserving the matching frame textures and other tabs' button positions.
+- Added the Zurk-style Rivals icon to the in-game addon selection menu.
+- Confirmed the sharing button uses https://www.curseforge.com/wow/addons/rivals.
+
+### Validation
+
+- Expanded regression coverage for rating protections and UI behavior.
+- Updated documentation with protection rules, limitations, and possible future anti-boosting measures.
+
 ## 0.18.7-beta
 
 - Updated the README with current features, installation instructions, commands, and data limitations; refreshed UI test fixtures for the current layout and Inspect presence protocol.

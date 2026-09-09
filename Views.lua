@@ -135,6 +135,15 @@ end
 
 function V.Reason(d)
     if not d then return "No rating data" end
+    local guards = {['level-disparity-or-unknown'] = "No rating: level gap is 10+ or levels are unknown",
+        ['level-disparity'] = "Reduced rating: lower-level opponent",
+        ['opponent-win-streak'] = "Reduced rating: more than 8 consecutive wins vs this opponent",
+        ['weekly-opponent-wins'] = "No rating: 12 wins vs this opponent in 7 days",
+        ['weekly-opponent-gain'] = "Rating capped: 64 points vs this opponent in 7 days",
+        ['retreat-no-rating'] = "No rating gain: duel ended in retreat",
+        ['short-duel'] = "No rating gain: duel lasted less than 5 seconds",
+        ['recovered-evidence-incomplete'] = "No rating: recovered result lacks observed duel evidence"}
+    if guards[d.guardReason] then return guards[d.guardReason] end
     if d.eligible then
         return d.weight == 0 and "History only: repeat limit" or string.format("%.0f%% rating value", d.weight * 100)
     end
@@ -349,8 +358,15 @@ function DP.InstallViews(panel, getRating, getRecords, overview)
         local topFilterView = current == "History" or current == "Opponents" or current == "Classes" or current == "MatchupDetail"
         local historyTab = current == "History"
         local matchupTabs = current == "Opponents" or current == "Classes"
-        periodButton:SetAnchor((historyTab or matchupTabs) and 30 or 180,
-            current == "Overview" and -350 or (current == "Details" or current == "Graph") and -395 or -104)
+        local overviewPeriod = current == "Overview"
+        periodButton:SetVisibleWidth(overviewPeriod and modeButton:GetWidth() or
+            (periodButton.usesNativeAssets and 126 or 142))
+        -- Native artwork begins six pixels inside the logical anchor. Mirror
+        -- the left button around the 30..322 content bounds using visible art.
+        local periodX = overviewPeriod and (322 - modeButton:GetWidth() - (periodButton.usesNativeAssets and 6 or 0)) or
+            ((historyTab or matchupTabs) and 30 or 180)
+        periodButton:SetAnchor(periodX,
+            current == "Overview" and -345 or (current == "Details" or current == "Graph") and -395 or -104)
         if historyMode.SetAnchor then historyMode:SetAnchor(current == "History" and 180 or 30, current == "MatchupDetail" and -137 or -104) end
         periodButton:SetShown(current == "Overview" or current == "Details" or current == "Graph" or topFilterView)
         local activeNav = (current == "Opponents" or current == "Classes" or current == "MatchupDetail") and "Matchups" or
@@ -500,6 +516,7 @@ function DP.InstallViews(panel, getRating, getRecords, overview)
                         table.insert(row.tipLines, "Mode: " .. mode)
                     end
                     if item.modeFailure then table.insert(row.tipLines, item.modeFailure) end
+                    if d and d.guardReason then table.insert(row.tipLines, "|cffadb5c2" .. V.Reason(d) .. "|r") end
                     if d and d.eligible then
                         table.insert(row.tipLines, "")
                         table.insert(row.tipLines, "|cffffce70Rating changes|r")

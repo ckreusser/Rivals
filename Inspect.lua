@@ -221,6 +221,7 @@ function I.Install()
     panel.logoFrame:SetPoint("TOPLEFT", panel, "TOPLEFT", 94, -27)
     if panel.logoFrame.SetClipsChildren then panel.logoFrame:SetClipsChildren(true) end
     panel.logoFrame:SetFrameLevel(panel:GetFrameLevel() + 2)
+    DP.Promos.Attach(panel.logoFrame)
     panel.logoShadowFar = panel.logoFrame:CreateTexture(nil, "ARTWORK")
     panel.logoShadowFar:SetTexture("Interface\\AddOns\\Rivals\\Textures\\RivalsHeaderShadow.tga")
     panel.logoShadowFar:SetTexCoord(0.031250, 0.968750, 0.101562, 0.898438)
@@ -352,7 +353,7 @@ function I.Install()
     invite:Hide()
     invite:SetScript("OnClick", function()
         if not I.target or not I.target.name or not SendChatMessage then return end
-        SendChatMessage("Rivals addon: https://www.curseforge.com/wow/addons/rivals", "WHISPER", nil, I.target.name)
+        SendChatMessage("Rivals addon: " .. DP.Promos.url, "WHISPER", nil, I.target.name)
     end)
 
     local function TargetShortName()

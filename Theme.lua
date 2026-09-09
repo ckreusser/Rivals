@@ -136,6 +136,84 @@ function T.Border(parent, x, y, width, height)
     end
     return box
 end
+-- The same connected atlas assembly used by Zurk Maps' title plaque.
+function T.RatingHeader(parent, card)
+    local header = CreateFrame("Frame", nil, parent)
+    local height, ornamentHeight = 22, 24
+    header:SetSize(card:GetWidth() * .5, height)
+    header:SetPoint("BOTTOM", card, "TOP", 0, -4)
+    header:SetFrameLevel(card:GetFrameLevel() + 2)
+    T.Fill(header, 0, -1, card:GetWidth() * .5, height - 2, .018, .012, .008, .98)
+    for _, side in ipairs({"top", "bottom"}) do
+        local trim = header:CreateTexture(nil, "BORDER")
+        local anchor = side == "top" and "TOP" or "BOTTOM"
+        -- Tuck both rules into the endcap stems instead of extending the
+        -- bounds outward; the ornamental ends remain slightly taller.
+        local offset = side == "top" and 1 or -1
+        trim:SetPoint(anchor .. "LEFT", header, anchor .. "LEFT", 3, offset)
+        trim:SetPoint(anchor .. "RIGHT", header, anchor .. "RIGHT", -3, offset)
+        if trim.SetAtlas then
+            trim:SetAtlas("battlefieldminimap-border-" .. side)
+            trim:SetVertexColor(.72, .66, .50, .97); trim:SetHeight(8)
+        else
+            trim:SetColorTexture(.72, .66, .50, .97); trim:SetHeight(1)
+        end
+    end
+    for _, side in ipairs({"Left", "Right"}) do
+        local trim = header:CreateTexture(nil, "OVERLAY")
+        local aspect = 1
+        if trim.SetAtlas then
+            trim:SetAtlas("PetJournal-BattleSlotTitle-" .. side, true)
+            if trim:GetHeight() > 0 then aspect = trim:GetWidth() / trim:GetHeight() end
+            trim:SetVertexColor(.72, .66, .50, .97)
+        else trim:SetColorTexture(.72, .66, .50, .97); aspect = 1 / ornamentHeight end
+        trim:SetSize(ornamentHeight * aspect, ornamentHeight)
+        trim:SetPoint(side == "Left" and "RIGHT" or "LEFT", header, side:upper(), side == "Left" and 4 or -4, 0)
+    end
+    local text = header:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    text:SetPoint("TOPLEFT", 8, 0); text:SetPoint("BOTTOMRIGHT", -8, 0)
+    text:SetJustifyH("CENTER"); text:SetJustifyV("MIDDLE"); text:SetWordWrap(false)
+    text:SetTextColor(.88, .80, .62, 1); text:SetText("Duel Rating")
+    return header
+end
+
+function T.StatSlab(parent, x, y, width, height, mirrored)
+    -- Clipped corners and opposing bevel light distinguish two separate slabs;
+    -- no background crosses the channel between them.
+    local slab = CreateFrame("Frame", nil, parent)
+    slab:SetPoint("TOPLEFT", x, y); slab:SetSize(width, height)
+    local mask = slab:CreateMaskTexture()
+    mask:SetTexture("Interface\\AddOns\\Rivals\\Textures\\StatSlabMask.tga", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+    mask:SetAllPoints(slab)
+    slab.interiorMask = mask
+    local function Interior(...)
+        local texture = T.Fill(slab, ...)
+        texture:AddMaskTexture(mask)
+        return texture
+    end
+    local function Edge(...)
+        local texture = T.Fill(slab, ...)
+        texture:SetDrawLayer("BORDER")
+        return texture
+    end
+    for row = 0, height - 1 do
+        local inset = math.max(0, 3 - math.min(row, height - 1 - row))
+        local glow = 1 - row / (height - 1)
+        Interior(inset, -row, width - 2 * inset, 1, .045 + .025 * glow, .055 + .03 * glow, .065 + .035 * glow)
+        local edge = row == 0 or row == height - 1
+        if edge then
+            Edge(inset, -row, width - 2 * inset, 1, row == 0 and .40 or .16, row == 0 and .33 or .14, row == 0 and .23 or .10)
+        else
+            local light, dark = mirrored and .16 or .36, mirrored and .36 or .16
+            Edge(inset, -row, 1, 1, light, light * .82, light * .57)
+            Edge(width - inset - 1, -row, 1, 1, dark, dark * .82, dark * .57)
+        end
+    end
+    Interior(4, -2, width - 8, 1, .19, .19, .17, .6)
+    Interior(4, -height + 2, width - 8, 1, .012, .015, .02)
+    return slab
+end
+
 function T.ClassName(name, class)
     local color = RAID_CLASS_COLORS and RAID_CLASS_COLORS[class]
     if not color then return name end
@@ -207,6 +285,16 @@ function T.DropDown(parent, x, y, width, getOptions, onSelect)
     dropdown.isDropdown = true
     dropdown.usesNativeAssets = native and true or false
     dropdown.logicalWidth = width
+
+    function dropdown:SetVisibleWidth(visibleWidth)
+        if self.usesNativeAssets then
+            -- The native middle strip has 16px of visible endcap artwork.
+            UIDropDownMenu_SetWidth(self, math.max(40, visibleWidth - 16))
+            if UIDropDownMenu_SetButtonWidth then UIDropDownMenu_SetButtonWidth(self, visibleWidth + 16) end
+        else
+            self:SetWidth(visibleWidth)
+        end
+    end
 
     function dropdown:SetAnchor(anchorX, anchorY)
         self.logicalX, self.logicalY = anchorX, anchorY

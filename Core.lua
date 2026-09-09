@@ -1,5 +1,5 @@
 local addonName, DP = ...
-local VERSION, TRACE_LIMIT, ACTIVITY_LIMIT = "0.17.0-beta", 1000, 200
+local VERSION, TRACE_LIMIT, ACTIVITY_LIMIT = "0.19.0-beta", 1000, 200
 local frame = CreateFrame("Frame")
 local db, observer, tracker, parsers, ready, rating
 local seasons, selectedPeriod = {}, nil
@@ -53,6 +53,7 @@ function DP.ReviewRecovery(item, undo)
         observer.results = fresh.records
         if not undo then observer.nextSequence = fresh.record.id + 1 end
         rating, seasons = fresh.rating, fresh.seasons
+        observer.duelTargets, observer.ratingGuards = rating.opponents, rating.targets
         for _, period in ipairs(observer.seasons) do seasons[period.id] = seasons[period.id] or DP.Rating.New() end
         for _, record in ipairs(observer.results) do
             record.ratingDecision = rating.applied[record.id]
@@ -222,6 +223,7 @@ end
 local function Request(name, direction, excluded, identity)
     if not ready or type(name) ~= "string" or name == "" then return end
     local id = tracker:Request(name, direction, excluded, GetTime(), identity or FindIdentity(name))
+    if tracker.session and not tracker.session.playerLevel then tracker.session.playerLevel = UnitLevel("player") end
     if tracker.session and not tracker.session.modePreference then tracker.session.modePreference = db.duelMode or "rated" end
     if tracker.session and not tracker.session.startedTimestamp then tracker.session.startedTimestamp = time() end
     if tracker.session and tracker.session.periodId == nil then tracker.session.periodId = observer.activeSeason or false end
@@ -378,6 +380,7 @@ local function Initialize()
     rating, ratingError = DP.Periods.Rebuild(observer.results)
     if not rating then Say(ratingError .. "; capture disabled and data preserved."); return end
     seasons = ratingError
+    observer.duelTargets, observer.ratingGuards = rating.opponents, rating.targets
     -- Migration baseline: existing progress is already earned, not a new gain.
     -- Subsequent gains stay pending across reloads until their reveal completes.
     observer.progressSeen = observer.progressSeen or {}
@@ -389,7 +392,7 @@ local function Initialize()
     Seed("lifetime", rating)
     for id, state in pairs(seasons) do Seed("season:" .. id, state) end
     observer.seasons = observer.seasons or {}
-    recovery = DP.Recovery.New({guid = player.guid, playerClass = player.class, now = time, after = C_Timer.After,
+    recovery = DP.Recovery.New({guid = player.guid, playerClass = player.class, guardPolicy = 1, now = time, after = C_Timer.After,
         statusChanged = function() if DP.RefreshDuelViews then DP.RefreshDuelViews() end end,
         enabled = function() return db.verifyResults ~= false end,
         nextToken = function()
@@ -412,6 +415,8 @@ local function Initialize()
         record.captureVersion = VERSION
         if record.kind == "result" then
             record.modelVersion = 3
+            record.guardPolicy = 1
+            record.playerLevel = record.session and record.session.playerLevel
             if record.session and verifier then verifier:LockMode(record.session) end
             record.duelMode = record.session and record.session.duelMode or "casual"
             record.modeReason = record.session and record.session.modeReason or "No matched pre-duel agreement"

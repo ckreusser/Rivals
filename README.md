@@ -2,7 +2,7 @@
 
 **Make every duel part of your story.** Rivals is a World of Warcraft Classic Era addon that adds a personal duel rating, match history, and opponent insights to the Character and Inspect windows.
 
-**Current version:** 0.18.7-beta · **Client:** Classic Era (Interface 11509)
+**Current version:** 0.19.0-beta · **Client:** Classic Era (Interface 11509)
 
 ## Features
 
@@ -29,6 +29,24 @@ When installing from GitHub's source ZIP, rename the extracted `Rivals-main` fol
 Ratings begin at **1500** and use a local Elo model. Repeat matches against the same opponent within 24 hours have diminishing rating impact. Eligible duels still count as whole placements; establishing an overall rating requires **10 eligible duels against at least 5 distinct opponents**.
 
 Rivals keeps separate rated, casual, unconfirmed, and legacy records. Local class-matchup ratings have their own placement requirements. Starting a season does not erase your lifetime history.
+
+### Rating protection (0.19.0 and later)
+
+New results use the following guards in addition to the existing 24-hour repeat limit. Earlier results retain their original rating rules, while their recorded rated encounters seed the opponent counters.
+
+| Guard | Rule |
+| --- | --- |
+| Level advantage | Rewards halve for every two levels the winner is above the loser: 2 levels = 50%, 4 = 25%, 8 = 6.25%, and 10 or more = zero. Beating a higher-level player receives the normal multiplier. The same multiplier applies to the loser's loss and local reciprocal estimates. |
+| Consecutive wins against one character | The first eight have no additional streak penalty; wins 9, 10, and 11 receive 50%, 25%, and 12.5%. Win 12 and subsequent wins receive zero. Wins against other opponents and Casual losses do not reset this opponent's Rated streak. |
+| Seven-day wins | After 12 wins against one character within a rolling seven days, further wins award zero until older wins expire. A deliberate loss does not refund this budget. |
+| Seven-day rating gains | At most 64 overall rating points can be gained from one character in a rolling seven days. This counts gross gains, so losses do not refund the budget. |
+| Observable evidence | Unknown levels and newly accepted peer-recovered results transfer no rating or placement credit. Wins by retreat or in duels under five seconds award no rating or placement credit; otherwise eligible losses still cost rating, so retreating cannot dodge a normal loss. W/L history remains available. |
+
+Multipliers combine; they never increase the existing repeat allowance. Fully suppressed protection results also provide no placement or opponent-diversity credit. Seasons inherit lifetime guard decisions, so changing seasons does not reset the limits. History tooltips explain protection decisions.
+
+Opponent identities and guard counters are stored with the character's saved duel journal, independently of the visible Rivals profile cache. **Clear Rivals cache** removes shared profiles, not duel history or rating protection. The journal rebuilds the counters after reloads and accepted recovery changes.
+
+These are conservative reward rules, not accusations of cheating: a legitimate fast win can also receive no rating. Rivals records character GUIDs, not verified account identities. Local saved data and addon code can be edited or deleted, so these guards cannot make self-reported ratings tamper-proof or reliably identify alternate characters owned by one person. See [RATING-PROTECTION.md](RATING-PROTECTION.md) for the threat model and potential follow-up guards.
 
 ## Useful commands
 

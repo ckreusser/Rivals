@@ -28,6 +28,7 @@ function DP.InstallCharacterTab(getRating, getRecords)
     panel.logoFrame:SetPoint("TOPLEFT", panel, "TOPLEFT", 102, -39)
     if panel.logoFrame.SetClipsChildren then panel.logoFrame:SetClipsChildren(true) end
     panel.logoFrame:SetFrameLevel(panel:GetFrameLevel() + 2)
+    DP.Promos.Attach(panel.logoFrame)
     panel.logoShadowFar = panel.logoFrame:CreateTexture(nil, "ARTWORK")
     panel.logoShadowFar:SetTexture("Interface\\AddOns\\Rivals\\Textures\\RivalsHeaderShadow.tga")
     panel.logoShadowFar:SetTexCoord(0.031250, 0.968750, 0.101562, 0.898438)
@@ -57,7 +58,13 @@ function DP.InstallCharacterTab(getRating, getRecords)
     panel.logo:SetVertexColor(.98, .98, .98, .97)
     panel.logo:SetBlendMode("BLEND")
     panel.logoFrame:Hide()
-    local portraitPoints
+    local portraitPoints, closePoints
+    local function RestoreCloseButton()
+        if not closePoints or not CharacterFrameCloseButton then return end
+        CharacterFrameCloseButton:ClearAllPoints()
+        for _, point in ipairs(closePoints) do CharacterFrameCloseButton:SetPoint(unpack(point)) end
+        closePoints = nil
+    end
     local function RestorePortrait()
         if not portraitPoints or not CharacterFramePortrait then return end
         CharacterFramePortrait:ClearAllPoints()
@@ -66,6 +73,7 @@ function DP.InstallCharacterTab(getRating, getRecords)
     end
     panel:SetScript("OnHide", function()
         RestorePortrait()
+        RestoreCloseButton()
         panel.logoFrame:Hide()
         for _, texture in ipairs(panel.chrome) do texture:Hide() end
     end)
@@ -73,29 +81,31 @@ function DP.InstallCharacterTab(getRating, getRecords)
     content:SetPoint("TOPLEFT", panel, "TOPLEFT", 6, 0)
     content:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", 6, 0)
     local overview = CreateFrame("Frame", nil, content)
-    overview:SetAllPoints(content)
+    overview:SetPoint("TOPLEFT", content, "TOPLEFT", 0, 5)
+    overview:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", 0, 5)
     -- Fill the Rivals pane all the way to the inner bottom edge of the Character frame.
     DP.Theme.Fill(panel, 18, -74, 324, 354, .035, .045, .06, .96)
     -- A symmetrical gold frame and graduated midnight-blue field make rating
     -- the focal point without a faction stripe cutting through its border.
-    for i = 0, 41 do
-        local glow = math.sin((i / 41) * math.pi)
-        DP.Theme.Fill(overview, 32, -144 - i * 2, 288, 2,
+    for i = 0, 45 do
+        local glow = math.sin((i / 45) * math.pi)
+        DP.Theme.Fill(overview, 32, -132 - i * 2, 288, 2,
             .035 + glow * .035, .055 + glow * .055, .09 + glow * .08)
     end
-    DP.Theme.Border(overview, 30, -142, 292, 88)
-    DP.Theme.Border(overview, 33, -145, 286, 82)
-    DP.Theme.Border(overview, 30, -238, 142, 52)
-    DP.Theme.Border(overview, 180, -238, 142, 52)
-    DP.Theme.Border(overview, 30, -302, 292, 40)
-    local duelProgress = DP.Theme.ProgressRow(overview, 10, 101, -211, {.18, .59, 1})
-    local rivalProgress = DP.Theme.ProgressRow(overview, 5, 251, -211, {.68, .38, 1})
+    local ratingCard = DP.Theme.Border(overview, 30, -130, 292, 96)
+    DP.Theme.Border(overview, 33, -133, 286, 90)
+    panel.ratingHeader = DP.Theme.RatingHeader(overview, ratingCard)
+    local leftSlab = DP.Theme.StatSlab(overview, 30, -240, 142, 54, false)
+    local rightSlab = DP.Theme.StatSlab(overview, 180, -240, 142, 54, true)
+    DP.Theme.Border(overview, 30, -304, 292, 38)
+    local duelProgress = DP.Theme.ProgressRow(overview, 10, 101, -208, {.18, .59, 1})
+    local rivalProgress = DP.Theme.ProgressRow(overview, 5, 251, -208, {.68, .38, 1})
     local reveal
     local fallbackCheckpoint = {duels = 0, opponents = 0}
     panel.progressRows = {duelProgress, rivalProgress}
-    DP.Theme.Fill(overview, 30, -238, 292, 52, .065, .08, .095)
-    DP.Theme.Fill(overview, 175.5, -246, 1, 36, .30, .29, .25)
-    DP.Theme.Fill(overview, 30, -302, 292, 1, .25, .26, .27)
+    -- A simple recessed line in the open channel.
+    DP.Theme.Fill(overview, 175, -246, 1, 42, .38, .30, .18)
+    DP.Theme.Fill(overview, 176, -246, 1, 42, .10, .085, .06)
     local function Text(y, font)
         local label = overview:CreateFontString(nil, "OVERLAY", font or "GameFontHighlight")
         label:SetPoint("TOPLEFT", 30, y)
@@ -103,33 +113,18 @@ function DP.InstallCharacterTab(getRating, getRecords)
         label:SetJustifyH("CENTER")
         return label
     end
-    local heading = Text(-109, "GameFontNormalLarge")
-    heading:SetWidth(292); heading:SetJustifyH("CENTER"); heading:SetText("DUEL RATING")
-    heading:SetTextColor(.72, .66, .50, 1)
-    local leftFiligree = overview:CreateTexture(nil, "ARTWORK")
-    if leftFiligree.SetAtlas then leftFiligree:SetAtlas("PetJournal-BattleSlotTitle-Left", true) end
-    leftFiligree:SetSize(25, 25)
-    leftFiligree:SetPoint("CENTER", heading, "CENTER", -72, 0)
-    leftFiligree:SetVertexColor(.72, .66, .50, .98)
-    leftFiligree:SetBlendMode("BLEND")
-    local rightFiligree = overview:CreateTexture(nil, "ARTWORK")
-    if rightFiligree.SetAtlas then rightFiligree:SetAtlas("PetJournal-BattleSlotTitle-Right", true) end
-    rightFiligree:SetSize(25, 25)
-    rightFiligree:SetPoint("CENTER", heading, "CENTER", 72, 0)
-    rightFiligree:SetVertexColor(.72, .66, .50, .98)
-    rightFiligree:SetBlendMode("BLEND")
-    local number = Text(-154, "GameFontNormalHuge")
-    local placement = Text(-184, "GameFontHighlightSmall")
-    local progressText = Text(-196, "GameFontHighlightSmall")
-    progressText:ClearAllPoints(); progressText:SetPoint("TOPLEFT", 42, -196); progressText:SetWidth(118)
-    local opponentProgress = Text(-196, "GameFontHighlightSmall")
-    opponentProgress:ClearAllPoints(); opponentProgress:SetPoint("TOPLEFT", 192, -196); opponentProgress:SetWidth(118)
-    local stats = Text(-238, "GameFontHighlight")
-    stats:SetWidth(142); stats:SetHeight(52); stats:SetJustifyV("MIDDLE")
-    local peak = Text(-238, "GameFontHighlight")
-    peak:ClearAllPoints(); peak:SetPoint("TOPLEFT", 180, -238); peak:SetWidth(142); peak:SetHeight(52); peak:SetJustifyV("MIDDLE")
-    local last = Text(-302, "GameFontHighlightSmall")
-    last:SetHeight(40); last:SetJustifyV("MIDDLE")
+    local number = Text(-146, "GameFontNormalHuge")
+    local placement = Text(-179, "GameFontHighlightSmall")
+    local progressText = Text(-193, "GameFontHighlightSmall")
+    progressText:ClearAllPoints(); progressText:SetPoint("TOPLEFT", 42, -193); progressText:SetWidth(118)
+    local opponentProgress = Text(-193, "GameFontHighlightSmall")
+    opponentProgress:ClearAllPoints(); opponentProgress:SetPoint("TOPLEFT", 192, -193); opponentProgress:SetWidth(118)
+    local stats = leftSlab:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    stats:SetAllPoints(leftSlab); stats:SetJustifyH("CENTER"); stats:SetJustifyV("MIDDLE")
+    local peak = rightSlab:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    peak:SetAllPoints(rightSlab); peak:SetJustifyH("CENTER"); peak:SetJustifyV("MIDDLE")
+    local last = Text(-304, "GameFontHighlightSmall")
+    last:SetHeight(38); last:SetJustifyV("MIDDLE")
     local note = Text(-378, "GameFontDisableSmall")
     note:SetText("Local estimates from your recorded duels.\nEarlier diagnostic captures do not affect rating.")
     local button = DP.Theme.Button(overview, "Record details", 30, -395, 94)
@@ -231,6 +226,15 @@ function DP.InstallCharacterTab(getRating, getRecords)
     end
     DP.InstallViews(content, getRating, getRecords, overview)
     panel:SetScript("OnShow", function()
+        local close = CharacterFrameCloseButton
+        if close and close.GetNumPoints and not closePoints then
+            closePoints = {}
+            for i = 1, close:GetNumPoints() do closePoints[i] = {close:GetPoint(i)} end
+            close:ClearAllPoints()
+            for _, point in ipairs(closePoints) do
+                close:SetPoint(point[1], point[2], point[3], (point[4] or 0) - 2, point[5] or 0)
+            end
+        end
         if CharacterFramePortrait and not portraitPoints then
             portraitPoints = {}
             for i = 1, CharacterFramePortrait:GetNumPoints() do

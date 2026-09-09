@@ -52,6 +52,10 @@ DP.duelViewControls.boardFilter.scripts.OnClick()
 assert(DP.duelViewControls.page.text == "1 record")
 DP.duelViewControls.clearProfiles.scripts.OnClick()
 assert(next(settings.sharedProfiles) == nil and rating.rating == 1500)
+for _, savedObserver in pairs(RivalsDB.observers) do
+    assert(savedObserver.duelTargets and savedObserver.ratingGuards)
+    assert(next(savedObserver.duelTargets), "Clearing profiles must preserve dueled targets")
+end
 DP.SelectDuelView("Leaderboard") -- Reopen Rivals after clearing its cache from Manage.
 assert(DP.duelViewControls.page.text == "0 records")
 DP.SelectDuelView("Overview")

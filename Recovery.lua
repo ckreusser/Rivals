@@ -168,7 +168,7 @@ function R:Preview(item)
         local s = record.session
         if s and s.verificationToken == item.token and s.identity and s.identity.guid == item.guid then return nil, "Already recorded." end
     end
-    local record = {id = self.observer.nextSequence, kind = "result", modelVersion = 3,
+    local record = {id = self.observer.nextSequence, kind = "result", modelVersion = 3, guardPolicy = self.config.guardPolicy,
         timestamp = item.timestamp, status = "matched-request-history-only", provenance = "peer-recovery",
         acceptedPeerReport = true, acceptedAt = self.config.now(), won = item.won, opponent = item.name,
         winner = item.won and self.observer.name or item.name, loser = item.won and item.name or self.observer.name,
