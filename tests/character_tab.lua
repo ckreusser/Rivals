@@ -58,7 +58,7 @@ function CreateFrame(kind, name, parent, template)
     function f:SetTexture() end
     function f:CreateMaskTexture() return CreateFrame() end
     function f:AddMaskTexture(mask) self.mask = mask end
-    function f:SetDrawLayer(layer) self.drawLayer = layer end
+    function f:SetDrawLayer(layer, sublevel) self.drawLayer, self.sublevel = layer, sublevel end
     function f:SetBlendMode(mode) self.blendMode = mode end
     function f:SetAlpha(alpha) self.alpha = alpha end
     function f:SetTexCoord() end
@@ -129,6 +129,9 @@ DP.SelectDuelView("History")
 local controls = DP.duelViewControls
 assert(controls.nav.Matchups.text == "Matchups" and controls.nav.Rivals.text == "Rivals")
 assert(not controls.nav.Classes and not controls.nav.Opponents)
+assert(controls.historySource.selectedValue == "all" and controls.historySource.text:find("All encounters", 1, true))
+-- The remaining legacy History assertions exercise Duel-only rows explicitly.
+DP.SetHistorySource("duels")
 assert(controls.page.text == "12 records")
 assert(controls.rows[1].tipTitle == "Win vs Bob")
 controls.body.scripts.OnMouseWheel(nil, -1)
@@ -263,8 +266,13 @@ assert(controls.nav.History.buttonState == "NORMAL")
 DP.SelectDuelView("Overview")
 print("PASS: navigation marks selection without locking the pressed state and Manage shares the back-button row")
 
+DP.WorldPvP.SetOverviewMode("world", true)
 controls.nav.Matchups.scripts.OnClick()
+assert(controls.matchupSource.selectedValue == "world")
 assert(controls.nav.Matchups.buttonState == "NORMAL")
+-- Local Matchups source changes remain stable while switching Opponents/Classes.
+controls.matchupSource:SelectValue("duels")
+DP.WorldPvP.SetOverviewMode("duels", true)
 assert(controls.nav.History.buttonState == "NORMAL")
 controls.classes.scripts.OnClick()
 assert(controls.classes.selected and not controls.matchups.selected)
@@ -456,3 +464,37 @@ assert(promotion.scripts.OnUpdate and promotion.alpha == 1)
 promotion.scripts.OnUpdate(promotion, .42)
 assert(not promotion.scripts.OnUpdate)
 print("PASS: bitmap shrink is monotonic, all glows share its center, native text takes over at rest, and one-second glow hold is preserved")
+
+local originalTooltip = GameTooltip
+local hoveredItem, hoveredSpell
+GameTooltip = {SetOwner=function() end, Show=function() end, Hide=function() end,
+    SetHyperlink=function(_, link) hoveredItem=link end,
+    SetSpellByID=function(_, id) hoveredSpell=id end}
+DP.SelectDuelView("History")
+assert(controls.rows[1].duelRecord)
+controls.rows[1].scripts.OnEnter(controls.rows[1])
+assert(DP.Usage.historyTip and DP.Usage.historyTip:IsShown())
+controls.rows[1].scripts.OnLeave(controls.rows[1])
+assert(not DP.Usage.historyTip:IsShown())
+controls.rows[1].scripts.OnClick(controls.rows[1])
+assert(DP.Usage.window:IsShown())
+local usageRecord={won=true,opponent="Rival",timestamp=1800000000,session={usage={player={
+    gem={spellID=23725,name="Gift of Life",kind="item",count=1},
+    reck={spellID=1719,name="Recklessness",kind="cooldown",cooldown=1800,count=1},
+    racial={spellID=20572,name="Blood Fury",kind="racial",count=1}
+}}}}
+DP.Usage.OpenDetails(usageRecord)
+assert(DP.Usage.window.header and DP.Usage.window.close and DP.Usage.window.tableHeader)
+for _, button in ipairs(DP.Usage.window.entryButtons or {}) do
+    if button:IsShown() and button.entry then button.scripts.OnEnter(button) end
+end
+assert(hoveredItem=="item:19341" and hoveredSpell==20572)
+DP.Usage.window:Hide()
+assert(not DP.Usage.window:IsShown())
+GameTooltip=originalTooltip
+DP.SelectDuelView("Overview")
+print("PASS: History click opens closable usage details with native item and spell hover tooltips")
+
+assert(blips.slots[1].light.sublevel > blips.slots[1].fill.sublevel)
+assert(rivals.slots[1].light.sublevel > rivals.slots[1].fill.sublevel)
+print("PASS: blue and purple blip highlights render explicitly above their fills")

@@ -3,13 +3,19 @@ local P = {url = "https://www.curseforge.com/wow/addons/rivals"}
 DP.Promos = P
 
 P.messages = {
-    "Make your duels count. Rivals tracks your duel rating, match history, and rivalries in your Character window.",
-    "Who's your toughest matchup? Rivals tracks your record against opponents and classes so you can follow your progress.",
-    "Run it back. Rivals keeps your duel history, rating changes, and personal best in one place.",
-    "Just practicing or playing for rating? Rivals supports Casual and Rated duels, with both players agreeing before a Rated match.",
-    "Build your record. Rivals offers lifetime tracking, local seasons, and a rating graph for your Classic Era duels.",
-    "Know your rivals. Inspect another Rivals user to see their shared duel profile alongside your own matchup record.",
-    "From your first placement to your next personal best: Rivals adds duel progression to Classic Era.",
+    "Turn every duel into a record. Rivals adds an Elo-style duel rating, placements, personal bests, rating history, and protections against artificial boosting.",
+
+    "See what actually happened in every duel. Rivals records items, engineering gadgets, long cooldowns, inferred specs, and a timestamped combat log.",
+
+    "Your duel history should be more than a vague memory. Rivals keeps detailed match records with rating changes, Rival estimates, used gear, cooldowns, specs, and combat events.",
+
+    "Find out who you can beat and who has your number. Rivals tracks opponent and class matchups, lifetime results, local seasons, and rating progression.",
+
+    "Rated or just practicing? Rivals supports Rated and Casual duels. When both players run Rivals, Rated matches can be Rivals Verified before the fight.",
+
+    "Inspect another Rivals player to see their shared duel profile, rating, record, and your matchup history against them—all inside the Character and Inspect panes.",
+
+    "Classic Era dueling, with progression. Rivals turns your duels into a rating, detailed history, matchup profile, and a record you can actually build over time.",
 }
 
 function P.Click(_, button)

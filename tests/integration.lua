@@ -10,7 +10,7 @@ local savedCombatLog, savedBaseCooldown = CombatLogGetCurrentEventInfo, GetSpell
 function CombatLogGetCurrentEventInfo()
     return GetTime(), "SPELL_CAST_SUCCESS", false, "Player-1-A", "Alice", 0, 0, "Player-1-A", "Alice", 0, 0, 999901, "Test long cooldown"
 end
-function GetSpellBaseCooldown() return 600000 end
+function GetSpellBaseCooldown() return 180000 end
 fire("COMBAT_LOG_EVENT_UNFILTERED")
 CombatLogGetCurrentEventInfo, GetSpellBaseCooldown = savedCombatLog, savedBaseCooldown
 fire("DUEL_FINISHED")
@@ -18,6 +18,7 @@ advance(1)
 fire("CHAT_MSG_SYSTEM", "Alice has defeated Bob in a duel.")
 assert(#o.results == 1 and o.results[1].won)
 assert(o.results[1].session.usage.player["999901"].count == 1)
+assert(#o.results[1].session.combatLog.myActions == 1 and #o.results[1].session.combatLog.toMe == 0)
 fire("COMBAT_LOG_EVENT_UNFILTERED")
 advance(3)
 assert(#o.activity == 0)

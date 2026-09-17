@@ -1,5 +1,5 @@
 local addonName, DP = ...
-local VERSION, TRACE_LIMIT, ACTIVITY_LIMIT = "0.20.0-beta", 1000, 200
+local VERSION, TRACE_LIMIT, ACTIVITY_LIMIT = "0.21.42-beta", 1000, 200
 local frame = CreateFrame("Frame")
 local db, observer, tracker, parsers, ready, rating
 local seasons, selectedPeriod = {}, nil
@@ -35,9 +35,9 @@ function DP.ReviewRecovery(item, undo)
     window.apply:SetText(undo and "Undo acceptance" or "Apply to local record")
     local oldRating = rating.rating
     local scope = item.periodId and ("Lifetime and Season " .. item.periodId) or "Lifetime only (no saved season assignment)"
-    window.text:SetText(string.format("%s vs %s — %s\n\nLifetime: %.2f -> %.2f (%+.2f)\n%s\n\nPeer-reported; not independently observed.\nThis updates W/L, repeat counts and later ratings.\n%s",
+    window.text:SetText(string.format("%s vs %s — %s\n\nLifetime: %.2f -> %.2f (%+.2f)\n%s\n\nRival Report; not independently observed.\nThis updates W/L, repeat counts and later ratings.\n%s",
         item.won and "Win" or "Loss", item.name, date("%m/%d %H:%M", item.timestamp), oldRating, preview.rating.rating,
-        preview.rating.rating - oldRating, scope, undo and "The original report returns to Interrupted." or "The evidence label remains peer-reported."))
+        preview.rating.rating - oldRating, scope, undo and "The original report returns to Interrupted." or "The evidence label remains Rival Report."))
     window.apply:SetScript("OnClick", function()
         if tracker.session then Say("Finish the current duel before applying this report."); window:Hide(); return end
         local fresh, failure
@@ -65,7 +65,7 @@ function DP.ReviewRecovery(item, undo)
             recordId = fresh.record.id, token = fresh.record.session.verificationToken, opponent = fresh.record.opponent,
             before = oldRating, after = rating.rating, originalAcceptedAt = fresh.record.acceptedAt}
         window:Hide()
-        Say(string.format("%s. Lifetime rating: %.2f -> %.2f.", undo and "Acceptance undone; report restored" or "Recovered report accepted locally", oldRating, rating.rating))
+        Say(string.format("%s. Lifetime rating: %.2f -> %.2f.", undo and "Acceptance undone; report restored" or "Rival Report accepted locally", oldRating, rating.rating))
         if DP.RefreshCharacterTab then DP.RefreshCharacterTab() end
     end)
     window:Show()
@@ -94,7 +94,7 @@ function DP.ToggleDuelMode(mode)
     if not db then return end
     if tracker and tracker.session then Say("Change mode after the current duel or request ends."); return end
     db.duelMode = mode or (db.duelMode == "casual" and "rated" or "casual")
-    Say("Next duel preference: " .. DP.DuelModeLabel() .. ". Rated requires agreement from both clients.")
+    Say("Next duel preference: " .. DP.DuelModeLabel() .. ". Rated requires Rivals verification from both players.")
     if DP.RefreshCharacterTab then DP.RefreshCharacterTab() end
 end
 
@@ -155,6 +155,56 @@ local function DisplayRecords()
     local records = {}
     for _, r in ipairs(observer.results) do if r.periodId == selectedPeriod then records[#records + 1] = r end end
     return records
+end
+
+function DP.AllDuelRecords()
+    return observer and observer.results or {}
+end
+
+local function SpecTargetMatches(target, profile)
+    if not target or not profile then return false end
+    local session = target.session or target
+    local identity = session and session.identity
+    if profile.guid and identity and identity.guid then return profile.guid == identity.guid end
+    local targetName = (identity and identity.name) or target.opponent or session.opponent
+    local profileName = profile.name
+    if not targetName or not profileName then return false end
+    local a = tostring(targetName):match("^([^-]+)") or tostring(targetName)
+    local b = tostring(profileName):match("^([^-]+)") or tostring(profileName)
+    return a:lower() == b:lower()
+end
+
+local function BindInspectSpecToOneDuel(profile)
+    if not profile or not DP.Specs or not DP.Specs.BindInspect then return false end
+
+    -- An in-progress duel is the strongest possible binding: the inspect happened
+    -- while this exact session is current.
+    if tracker and tracker.session and SpecTargetMatches(tracker.session, profile) then
+        return DP.Specs.BindInspect(tracker.session, profile)
+    end
+
+    -- If the player explicitly has one duel's tooltip/details open, bind the
+    -- inspection to that record only, never to every duel against this opponent.
+    local focused = DP.Usage and DP.Usage.SpecTargetRecord and DP.Usage.SpecTargetRecord()
+    if focused and SpecTargetMatches(focused, profile) then
+        return DP.Specs.BindInspect(focused, profile)
+    end
+
+    -- Normal post-duel workflow: inspecting the opponent shortly after the match
+    -- upgrades only the most recent matching duel. Older meetings remain untouched
+    -- because the opponent may have respecced between them.
+    if observer and observer.results then
+        local now = time and time() or 0
+        for i = #observer.results, 1, -1 do
+            local record = observer.results[i]
+            if SpecTargetMatches(record, profile) then
+                local age = now > 0 and record.timestamp and (now - record.timestamp) or 0
+                if age >= 0 and age <= 600 then return DP.Specs.BindInspect(record, profile) end
+                break
+            end
+        end
+    end
+    return false
 end
 
 function DP.CyclePeriod()
@@ -222,6 +272,7 @@ end
 
 local function Request(name, direction, excluded, identity)
     if not ready or type(name) ~= "string" or name == "" then return end
+    if DP.WorldPvP and DP.WorldPvP.active then DP.WorldPvP.Finish("formal-duel-start") end
     local id = tracker:Request(name, direction, excluded, GetTime(), identity or FindIdentity(name))
     if tracker.session and not tracker.session.playerLevel then tracker.session.playerLevel = UnitLevel("player") end
     if tracker.session and not tracker.session.modePreference then tracker.session.modePreference = db.duelMode or "rated" end
@@ -363,6 +414,7 @@ local function Initialize()
     end
     RivalsDB = RivalsDB or {schemaVersion = 1, traceEnabled = false, observers = {}}
     db = RivalsDB
+    if DP.Specs and DP.Specs.Initialize then DP.Specs.Initialize(db) end
     -- Sharing is the normal Rivals experience. Preserve an explicit legacy OFF,
     -- but migrate unset installs/settings to the new default.
     if db.shareProfile == nil then db.shareProfile = true end
@@ -374,6 +426,20 @@ local function Initialize()
         db.observers[player.guid] = observer
     end
     observer.name, observer.locale = player.name, GetLocale()
+    if DP.WorldPvP and DP.WorldPvP.Initialize then
+        DP.WorldPvP.Initialize(observer, db, {
+            changed = function()
+                if DP.RefreshCharacterTab then DP.RefreshCharacterTab() end
+                if DP.RefreshDuelViews then DP.RefreshDuelViews() end
+            end,
+            saved = function(record)
+                local color = DP.WorldPvP.ResultColor and DP.WorldPvP.ResultColor(record.resultKey) or "|cffffce70"
+                Say(color .. (record.resultLabel or "World PvP") .. "|r: " ..
+                    string.format("%dv%d, %d %s, %s", record.friendlyCount or 1, record.enemyCount or 0, record.enemyDeaths or 0,
+                        (record.enemyDeaths or 0) == 1 and "kill" or "kills", record.playerDied and "death" or "survived"))
+            end,
+        })
+    end
     local version, build = GetBuildInfo()
     observer.build = tostring(version) .. "." .. tostring(build)
     local ratingError
@@ -481,7 +547,7 @@ local function Initialize()
         end,
         modeReady = function(session)
             Say(session.modePreference == "rated" and session.peerMode == "rated" and
-                "Both clients selected Rated. Mode locks at the duel start." or "Casual agreed: this duel will not change ratings.")
+                "Rivals Rated agreement complete. Mode locks at the duel start." or "Casual agreed: this duel will not change ratings.")
             if DP.RefreshCharacterTab then DP.RefreshCharacterTab() end
         end,
         enabled = function() return db.verifyResults ~= false end,
@@ -506,10 +572,11 @@ local function Initialize()
     DP.InstallCharacterTab(DisplayRating, DisplayRecords)
     for _, event in ipairs({"DUEL_REQUESTED", "DUEL_FINISHED", "DUEL_INBOUNDS", "DUEL_OUTOFBOUNDS",
         "DUEL_TO_THE_DEATH_REQUESTED", "CHAT_MSG_SYSTEM", "UI_INFO_MESSAGE", "UI_ERROR_MESSAGE",
-        "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED", "PLAYER_TARGET_CHANGED", "PLAYER_ENTERING_WORLD",
+        "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED", "PLAYER_TARGET_CHANGED", "UPDATE_MOUSEOVER_UNIT", "NAME_PLATE_UNIT_ADDED", "PLAYER_ENTERING_WORLD",
         "PLAYER_DEAD", "PLAYER_LOGOUT", "START_TIMER", "MIRROR_TIMER_START", "ADDON_LOADED", "CHAT_MSG_ADDON",
         "ADDON_ACTION_BLOCKED", "ADDON_ACTION_FORBIDDEN", "COMBAT_LOG_EVENT_UNFILTERED",
-        "BAG_UPDATE_DELAYED", "PLAYER_EQUIPMENT_CHANGED", "GET_ITEM_INFO_RECEIVED"}) do
+        "BAG_UPDATE_DELAYED", "PLAYER_EQUIPMENT_CHANGED", "GET_ITEM_INFO_RECEIVED", "INSPECT_READY",
+        "CHAT_MSG_COMBAT_HONOR_GAIN"}) do
         local ok = pcall(frame.RegisterEvent, frame, event)
         if not ok then Trace("UNSUPPORTED_EVENT", event) end
     end
@@ -532,8 +599,10 @@ frame:SetScript("OnEvent", function(_, event, ...)
     if not ready then return end
     if event == "COMBAT_LOG_EVENT_UNFILTERED" then
         if tracker.session then DP.Usage.Combat(tracker.session, UnitGUID("player")) end
+        if DP.WorldPvP and DP.WorldPvP.Combat then DP.WorldPvP.Combat(UnitGUID("player")) end
         return
     end
+    if DP.WorldPvP and DP.WorldPvP.Event then DP.WorldPvP.Event(event, ...) end
     if event == "BAG_UPDATE_DELAYED" or event == "PLAYER_EQUIPMENT_CHANGED" or event == "GET_ITEM_INFO_RECEIVED" then
         DP.Usage.Scan(); return
     end
@@ -556,6 +625,18 @@ frame:SetScript("OnEvent", function(_, event, ...)
                 PersistSession()
             end
             verifier:Receive(message, sender)
+        end
+        return
+    end
+    if event == "INSPECT_READY" then
+        local guid = ...
+        local profile = DP.Specs and DP.Specs.CaptureInspect and DP.Specs.CaptureInspect(guid, InspectFrame and InspectFrame.unit)
+        if profile then
+            local bound = BindInspectSpecToOneDuel(profile)
+            if DP.Inspect and DP.Inspect.SpecUpdated then DP.Inspect.SpecUpdated(guid, profile) end
+            if bound and DP.Usage and DP.Usage.RefreshSpecDisplays then DP.Usage.RefreshSpecDisplays() end
+            if DP.RefreshDuelViews then DP.RefreshDuelViews() end
+            if DP.RefreshCharacterTab then DP.RefreshCharacterTab() end
         end
         return
     end
@@ -679,6 +760,9 @@ SlashCmdList.RIVALS = function(command)
     elseif command == "season" then
         selectedPeriod = observer.activeSeason
         if DP.RefreshCharacterTab then DP.RefreshCharacterTab() end
+    elseif command == "world" then
+        if DP.WorldPvP and DP.WorldPvP.SetOverviewMode then DP.WorldPvP.SetOverviewMode("world") end
+        if DP.SelectDuelView then DP.SelectDuelView("Overview"); ToggleCharacter("RivalsCharacterPanel", true) end
     elseif command == "graph" then
         if DP.SelectDuelView then DP.SelectDuelView("Graph"); ToggleCharacter("RivalsCharacterPanel", true) end
     elseif command == "mode rated" or command == "mode casual" then
@@ -708,7 +792,7 @@ SlashCmdList.RIVALS = function(command)
         Say(#observer.results .. " captured results; " .. #observer.trace .. " trace events; trace " ..
             (db.traceEnabled and "on" or "off") .. "; session " .. (tracker.session and tracker.session.state or "idle") .. ".")
     else
-        Say("/rivals rating | graph | history | opponents | classes | leaderboard | lifetime | season | season start | export | status | mode rated | mode casual | verify on | verify off | share on | share off")
+        Say("/rivals rating | world | graph | history | opponents | classes | leaderboard | lifetime | season | season start | export | status | mode rated | mode casual | verify on | verify off | share on | share off")
         Say("/rivals rating opens your local profile. Enable trace only for diagnostics.")
     end
 end

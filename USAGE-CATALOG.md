@@ -1,0 +1,7 @@
+# Duel usage catalog
+
+UsageCatalog.lua contains unambiguous on-use spell-to-item associations derived from the local CMaNGOS ClassicDB item_template snapshot (ClassicDB_1_12_1_z2815.sql.gz). Source: https://github.com/cmangos/classic-db.
+
+The catalog provides item identity and quality when the client has not cached an item, and lets opponent activations be recognized without owning the item. Deprecated/test item entries are omitted. Tidal Charm ignores its deprecated duplicate. Spells shared by differently named items are not assigned an arbitrary item identity. The local inventory scan records all carried/equipped candidates and resolves an activation against the item actually equipped at cast time. For example, Reckless Charge is shared by Horned Viking Helmet and Goblin Rocket Helmet; Rivals now records whichever helmet the local player is actually wearing instead of letting bag scan order choose one.
+
+Existing usage records retain their original counts. Display-time lookup upgrades identifiable spell-only records. Unrecorded old activations cannot be reconstructed. Potions/Consumables groups consumables; Engineering Gadgets groups engineering explosives and devices such as grenades, dynamite, bombs, rocket gear, reflectors, target dummies, and Gnomish/Goblin devices; Equipment groups other on-use items. Racial activations are recorded independently of the three-minute cooldown threshold.

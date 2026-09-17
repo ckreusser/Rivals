@@ -1,19 +1,22 @@
 ## Interface: 11509
 ## Title: Rivals
 ## IconTexture: Interface\AddOns\Rivals\Textures\Rivals_Icon.tga
-## Notes: Classic Era local duel rating, records, and diagnostic export.
+## Notes: Classic Era duel rating, open-world PvP encounters, records, and rivalry tracking.
 ## Author: Ckreu
-## Version: 0.20.0-beta
+## Version: 0.21.42-beta
 ## SavedVariables: RivalsDB
 
 Parser.lua
 Tracker.lua
+UsageCatalog.lua
+Specs.lua
 Usage.lua
 Rating.lua
 Verification.lua
 Recovery.lua
 Periods.lua
 Theme.lua
+WorldPvP.lua
 Views.lua
 Promos.lua
 CharacterTab.lua

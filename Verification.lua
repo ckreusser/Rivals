@@ -6,10 +6,10 @@ V.prefix = "RivalsResult1"
 
 function V.Label(record)
     local status = record.verification and record.verification.status
-    if status == "peer-reported" then return "Peer-reported; accepted locally"
-    elseif status == "confirmed" then return "Confirmed by both clients"
+    if status == "peer-reported" then return "Rival Report"
+    elseif status == "confirmed" then return "Rivals Verified"
     elseif status == "disputed" then return "Disputed" end
-    return "Local only"
+    return "Local Record"
 end
 
 function V.New(config)
@@ -86,14 +86,14 @@ function V:LockMode(session)
     if not session or session.modeLocked then return end
     session.modeLocked = true
     session.duelMode = session.modePreference == "rated" and session.peerMode == "rated" and session.modeAcknowledged and "rated" or "casual"
-    session.modeReason = session.duelMode == "rated" and "Both clients agreed to Rated" or
+    session.modeReason = session.duelMode == "rated" and "Rivals verification completed for Rated" or
         (session.modePreference == "casual" or session.peerMode == "casual") and "Casual preference" or "Rated agreement not completed before start"
     if session.duelMode ~= "rated" and session.modeReason ~= "Casual preference" then
         local entry = self.entries[session.verificationToken]
         session.modeFailure = not self.config.enabled() and "Verification is disabled on this client" or
-            not session.identity and "Opponent identity was unavailable" or
-            (not entry or not entry.peerToken) and "No completed handshake with opponent" or
-            not session.peerMode and "Opponent mode was not received before start" or
+            not session.identity and "Opponent could not be verified before the duel" or
+            (not entry or not entry.peerToken) and "Rivals verification was not completed before start" or
+            not session.peerMode and "Rival mode preference was not received before start" or
             not session.modeAcknowledged and "Our preference was not acknowledged before start" or "Agreement incomplete at start"
     end
     self:Trace("VERIFY_MODE_LOCK", session.verificationToken or "none", session.modePreference or "unset",
@@ -104,13 +104,13 @@ end
 function V.AgreementStatus(session, enabled)
     if not session then return enabled == false and "Verification off: Rated agreement unavailable" or "No active duel; preference applies to the next duel" end
     if session.modeLocked then
-        if session.duelMode == "rated" then return "This duel: Rated\nBoth clients agreed before start" end
+        if session.duelMode == "rated" then return "This duel: Rated\nRivals verification completed before start" end
         return "This duel: Casual\n" .. (session.modeFailure or session.modeReason or "No Rated agreement")
     end
     if enabled == false then return "Waiting for start: Casual fallback\nVerification is disabled on this client" end
     if session.modePreference == "casual" or session.peerMode == "casual" then return "Casual selected\nThis duel will not affect rating" end
     if session.peerMode == "rated" and session.modeAcknowledged then return "Rated agreement ready\nLocks when the duel starts" end
-    return "Waiting for Rated agreement\nNo Rated guarantee until both clients agree"
+    return "Waiting for Rated agreement\nNo Rated guarantee until Rivals verification completes"
 end
 
 function V:Cancel(session)

@@ -1,0 +1,28 @@
+Lua 5.1 syntax: all Lua files passed.
+Original tests/run.py: stops at verification.lua:42.
+Diagnostic continuation (later results may depend on prior test state):
+verification.lua: [string "<python>"]:42: assertion failed!
+stack traceback:
+	[string "<python>"]:42: in main chunk
+	[C]: in function 'assert'
+
+recovery.lua: [string "<python>"]:65: assertion failed!
+stack traceback:
+	[string "<python>"]:65: in main chunk
+	[C]: in function 'assert'
+
+character_tab.lua: [string "<python>"]:246: attempt to compare string with number
+stack traceback:
+	[string "<python>"]:246: in main chunk
+
+world_overview.lua: [string "<python>"]:30: assertion failed!
+stack traceback:
+	[string "<python>"]:30: in main chunk
+	[C]: in function 'assert'
+
+promos.lua: [string "<python>"]:25: assertion failed!
+stack traceback:
+	[string "<python>"]:25: in main chunk
+	[C]: in function 'assert'
+
+No in-game testing performed. Runtime source and bundled tests preserved from supplied ZIP.

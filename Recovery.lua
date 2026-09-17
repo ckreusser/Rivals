@@ -88,7 +88,7 @@ function R:Request(identity)
     if self.config.after then self.config.after(20, function()
         local pending = self.pending[identity.guid]
         if pending and pending.nonce == nonce and not pending.replied then
-            self:SetStatus("No reply. Check both clients are updated and verification is on.")
+            self:SetStatus("No reply. Check both players have an updated Rivals client and verification is on.")
         end
     end) end
 end

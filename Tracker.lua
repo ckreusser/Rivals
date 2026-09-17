@@ -43,6 +43,7 @@ function Tracker:Countdown(seconds, now)
     if not s or s.state == "awaiting-result" or s.excluded then return false end
     if s.lastCountdown and seconds >= s.lastCountdown then return false end
     s.state = "countdown-observed"
+    if not s.acceptedAt then s.acceptedAt = now end
     s.lastCountdown = seconds
     s.estimatedStartAt = now + seconds
     return true

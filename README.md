@@ -1,15 +1,17 @@
 # Rivals
 
-**Make every duel part of your story.** Rivals is a World of Warcraft Classic Era addon that adds a personal duel rating, match history, and opponent insights to the Character and Inspect windows.
+**Make every fight part of your story.** Rivals is a World of Warcraft Classic Era addon that adds a personal duel rating, duel history, open-world PvP encounters, and opponent insights to the Character and Inspect windows.
 
-**Current version:** 0.20.0-beta · **Client:** Classic Era (Interface 11509)
+**Current version:** 0.21.42-beta · **Client:** Classic Era (Interface 11509)
 
 ## Features
 
 - **Your duel profile:** View your rating, personal best, rated record, and placement progress in Character → Duels.
 - **Rated and Casual duels:** Choose a preference for your next duel. Rated mode requires agreement from both clients before the duel starts.
-- **Detailed History:** Browse results with mode and period filters. Tooltips show rating changes, opponent estimates, and recorded item activations and long cooldowns.
+- **Detailed History:** Browse duels and World PvP encounters in one chronological record. Duel filters preserve mode and season browsing; World PvP cards include Blizzard zone-map art and the recorded fight marker.
 - **Matchups:** Review opponents and classes by recency, with class colors, win/loss records, local rating estimates, and dedicated matchup drilldowns.
+- **World PvP:** Automatically record open-world player fights without changing Duel Rating. Rivals tracks player headcounts, kills/deaths, honorable kills, location, item/cooldown use, combat events, and encounter-scoped spec evidence.
+- **Outnumbered fights:** Solo 1v2+ successes receive dedicated Outnumbered Victory recognition, while partial kills, escapes, trades and deaths keep the actual fight context.
 - **Lifetime and seasons:** Keep a lifetime record while starting your own local seasons. Switch periods through the interface and explore your rating graph.
 - **Whole-duel placements:** Each eligible duel counts as one placement. Animated progress slots reveal accumulated gains when you open Overview. Completing each requirement highlights its text and blips, and graduation to Established receives a one-time celebration.
 - **Inspect other players:** See shared Rivals profiles alongside your own local matchup record. Profile sharing is enabled by default and can be turned off in Manage.
@@ -53,7 +55,8 @@ These are conservative reward rules, not accusations of cheating: a legitimate f
 | Command | Action |
 | --- | --- |
 | `/rivals` | Open your duel profile |
-| `/rivals history` | Browse recorded duels |
+| `/rivals history` | Browse recorded encounters |
+| `/rivals world` | Open the World PvP overview |
 | `/rivals graph` | View rating history |
 | `/rivals opponents` | Browse opponent matchups |
 | `/rivals classes` | Browse class matchups |
@@ -71,7 +74,9 @@ These are conservative reward rules, not accusations of cheating: a legitimate f
 
 Rivals is a **local record**, not a Blizzard rating service or a realm-wide leaderboard. Opponent ratings are estimates learned from your recorded duels. Shared profiles are self-reported, and client agreement is not proof against tampering.
 
-Item and cooldown tracking records observed successful casts during duels. It recognizes item-use spells learned from carried/equipped items and abilities with an available base cooldown of **10 minutes or more**. Coverage is partial, especially for unfamiliar opponent items. **N/A means no qualifying usage was recorded**, not proof that nothing was used. Older results cannot be backfilled.
+World PvP is a **history and rivalry system, not an Elo rating**. Encounters close after 60 seconds without PvP activity so long Classic Era crowd-control/reset sequences remain one fight. Map markers use the player position Rivals observed during the encounter; participant headcounts are reconstructed from combat-log involvement and are not a claim about every nearby player.
+
+Item and cooldown tracking records observed successful casts during duels and tracked World PvP encounters. It recognizes item-use spells learned from carried/equipped items and abilities with an available base cooldown of **3 minutes or more**. Coverage is partial, especially for unfamiliar opponent items. **N/A means no qualifying usage was recorded**, not proof that nothing was used. Older results cannot be backfilled.
 
 Recovered peer reports are explicitly labeled. They change your record only after you accept the preview; undo recalculates affected ratings. A forced game shutdown can lose data that has not yet been saved.
 

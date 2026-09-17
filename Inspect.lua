@@ -56,15 +56,19 @@ end
 
 
 local function CurrentSpecName()
+    if DP.Specs and DP.Specs.CurrentPlayerSpec then
+        local label = DP.Specs.CurrentPlayerSpec()
+        if label then return label end
+    end
     if not GetNumTalentTabs or not GetTalentTabInfo then return nil end
     local bestName, bestPoints = nil, -1
-    local count = GetNumTalentTabs(false, false) or 0
+    local count = GetNumTalentTabs(false) or 0
     for i = 1, count do
-        local name, _, points = GetTalentTabInfo(i)
-        points = tonumber(points) or 0
-        if name and points > bestPoints then
-            bestName, bestPoints = name, points
-        end
+        local a, b, c, d, e = GetTalentTabInfo(i)
+        local name, points
+        if type(b) == "string" then name, points = b, tonumber(e) or 0
+        else name, points = a, tonumber(c) or 0 end
+        if name and points > bestPoints then bestName, bestPoints = name, points end
     end
     if bestName and bestPoints > 0 then return bestName end
     return nil
@@ -175,6 +179,10 @@ function I.Receive(prefix, message, channel, sender)
         I.profile.name = name
         I.profile.class = I.profile.class or (I.target and I.target.class)
         I.profile.duels = (I.profile.wins or 0) + (I.profile.losses or 0)
+        if DP.Specs and DP.Specs.RememberShared and I.profile.spec then
+            DP.Specs.RememberShared(parsed.guid, name, I.profile.class, I.profile.spec)
+            if DP.Usage and DP.Usage.RefreshSpecDisplays then DP.Usage.RefreshSpecDisplays() end
+        end
         I.remoteInstalled = true
         I.noAddon = false
         I.settings.sharedProfiles[parsed.guid] = I.profile
@@ -338,6 +346,12 @@ function I.Install()
     DP.Theme.Fill(content, 145.5, -320, 1, 24, .30, .29, .25)
     local matchupTitle = Label(-312, "GameFontNormalSmall")
     matchupTitle:SetText("YOUR MATCHUP")
+    local matchupSpec = content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    if matchupSpec.GetFont and matchupSpec.SetFont then
+        local path, size, flags = matchupSpec:GetFont()
+        if path and size then matchupSpec:SetFont(path, math.max(8, size - 1), flags) end
+    end
+    if matchupSpec.SetWordWrap then matchupSpec:SetWordWrap(false) end
     local personalRecord = PositionedLabel(8, -324, 126, "GameFontHighlight")
     personalRecord:SetHeight(30); personalRecord:SetJustifyV("MIDDLE")
     local personalEstimate = PositionedLabel(158, -324, 126, "GameFontHighlight")
@@ -409,9 +423,31 @@ function I.Install()
         if shortName then
             local displayName = shortName
             if I.target and I.target.class then displayName = DP.Theme.ClassName(displayName, I.target.class) end
-            matchupTitle:SetText((priorDuels == 1 and "Your matchup vs " or "Your matchups vs ") .. displayName)
+            local spec
+            if I.currentInspectSpec and I.target and I.currentInspectSpec.guid == I.target.guid then
+                spec = I.currentInspectSpec.label
+            elseif I.target and DP.Specs and DP.Specs.ResolveIdentity then
+                spec = DP.Specs.ResolveIdentity(I.target.guid, I.target.name)
+            end
+            local main = (priorDuels == 1 and "Your matchup vs " or "Your matchups vs ") .. displayName
+            matchupTitle:SetText(main)
+            matchupSpec:SetText(spec and ("|cff8f98a6(" .. spec .. ")|r") or "")
+            local mainWidth = matchupTitle.GetStringWidth and matchupTitle:GetStringWidth() or 180
+            local specWidth = spec and matchupSpec.GetStringWidth and matchupSpec:GetStringWidth() or 0
+            local gap = spec and 4 or 0
+            local total = mainWidth + gap + specWidth
+            matchupTitle:ClearAllPoints(); matchupTitle:SetPoint("TOPLEFT", math.max(0, (292 - total) / 2), -312)
+            matchupTitle:SetWidth(mainWidth + 1); matchupTitle:SetJustifyH("LEFT")
+            if spec then
+                matchupSpec:ClearAllPoints(); matchupSpec:SetPoint("LEFT", matchupTitle, "RIGHT", gap, -1)
+                matchupSpec:SetWidth(specWidth + 1); matchupSpec:SetJustifyH("LEFT"); matchupSpec:Show()
+            else
+                matchupSpec:Hide()
+            end
         else
             matchupTitle:SetText(priorDuels == 1 and "Your matchup" or "Your matchups")
+            matchupTitle:ClearAllPoints(); matchupTitle:SetPoint("TOPLEFT", 0, -312); matchupTitle:SetWidth(292); matchupTitle:SetJustifyH("CENTER")
+            matchupSpec:Hide()
         end
         if known then
             personalRecord:SetText(string.format("|cff65e6ad%d|r — |cffff8888%d|r\nYour record", known.wins, known.losses))
@@ -443,6 +479,14 @@ function I.Install()
         end
     end
 
+
+    function I.SpecUpdated(guid, profile)
+        if I.target and I.target.guid == guid then
+            I.currentInspectSpec = profile
+            if I.Render then I.Render() end
+        end
+    end
+
     panel:SetScript("OnShow", function()
         panel.logoFrame:Show()
         local unit = InspectFrame.unit
@@ -451,10 +495,12 @@ function I.Install()
         local guid = unit and UnitGUID(unit)
         local _, class = unit and UnitClass(unit)
         I.profile, I.pending, I.target = nil, nil, nil
+        I.currentInspectSpec = nil
         I.remoteInstalled, I.noAddon = nil, false
         if name and guid then
             I.target = {name = name .. "-" .. ((realm and realm ~= "") and realm or GetNormalizedRealmName()), guid = guid, class = class, unit = unit}
             I.status = "Requesting shared profile..."
+            if NotifyInspect and (not CanInspect or CanInspect(unit, false)) then pcall(NotifyInspect, unit) end
             I.Request()
         else I.status = "Inspected player unavailable" end
         I.Render()
@@ -473,6 +519,6 @@ function I.Install()
     I.panel = panel
     I.ui = {content = content, value = value, status = status, duelProgress = duelProgress, rivalProgress = rivalProgress,
         duelText = duelText, rivalText = rivalText, record = record, peak = peak,
-        matchupTitle = matchupTitle, personalRecord = personalRecord, personalEstimate = personalEstimate,
+        matchupTitle = matchupTitle, matchupSpec = matchupSpec, personalRecord = personalRecord, personalEstimate = personalEstimate,
         streak = streakText, best = bestText, note = note, refresh = refresh, invite = invite}
 end

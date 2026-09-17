@@ -7,40 +7,55 @@ function T.LightSweep(parent, target, color, diagonal)
     local sweep = CreateFrame("Frame", nil, parent)
     sweep:SetAllPoints(target)
     sweep:SetFrameLevel(target:GetFrameLevel() + 5)
+    if sweep.SetClipsChildren then sweep:SetClipsChildren(true) end
+
+    -- Move a real gradient texture across the card instead of rewriting its UV
+    -- coordinates every frame. Classic's texture sampler can break the heavily
+    -- skewed/out-of-range UVs into visible blocks; fixed UVs stay smooth.
     local band = sweep:CreateTexture(nil, "OVERLAY")
-    band:SetTexture("Interface\\AddOns\\Rivals\\Textures\\LightSweep.tga", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+    band:SetTexture("Interface\\AddOns\\Rivals\\Textures\\LightSweep.tga")
+    band:SetTexCoord(0, 1, 0, 1)
     band:SetVertexColor(color[1], color[2], color[3])
     band:SetBlendMode("ADD")
     if band.SetSnapToPixelGrid then band:SetSnapToPixelGrid(false) end
     if band.SetTexelSnappingBias then band:SetTexelSnappingBias(0) end
-    band:SetAllPoints(target)
+    if diagonal and band.SetRotation then band:SetRotation(math.rad(-12)) end
     sweep.bands = {band}
+
     function sweep:Stop()
         self:SetScript("OnUpdate", nil)
-        band:Hide(); self:Hide()
+        band:Hide()
+        self:Hide()
     end
+
     function sweep:Play(delay, duration)
-        self:Stop(); self:Show()
+        self:SetScript("OnUpdate", nil)
+        self:Show(); band:Show()
         local elapsed = -(delay or 0)
         duration = duration or .8
+        local width = math.max(1, target:GetWidth())
+        local height = math.max(1, target:GetHeight())
+        local bandWidth = math.max(76, width * .28)
+        band:SetSize(bandWidth, height * (diagonal and 1.8 or 1.05))
+        band:SetAlpha(0)
         self:SetScript("OnUpdate", function(self, dt)
             elapsed = elapsed + dt
             if elapsed < 0 then return end
             if elapsed >= duration then self:Stop(); return end
-            local width, height = target:GetWidth(), target:GetHeight()
-            local span = width * .10
-            local slope = diagonal and height or 0
             local t = elapsed / duration
-            local center = -span + (width + 2 * span + slope) * t
-            local left = -center / span + .5
-            local right = (width - center) / span + .5
-            local bottom = slope / span
-            band:SetTexCoord(left, 0, left + bottom, 1, right, 0, right + bottom, 1)
-            band:SetAlpha(math.sin(math.pi * t) * .46)
-            band:Show()
+            -- smoothstep avoids the tiny start/stop hitch that made the old
+            -- sweep look choppy on low or uneven frame rates.
+            local eased = t * t * (3 - 2 * t)
+            local x = -bandWidth * .55 + (width + bandWidth * 1.10) * eased
+            band:ClearAllPoints()
+            band:SetPoint("CENTER", sweep, "LEFT", x, 0)
+            band:SetAlpha(math.sin(math.pi * t) * .42)
         end)
     end
-    sweep:SetScript("OnHide", function(self) self:Stop() end)
+    sweep:SetScript("OnHide", function(self)
+        self:SetScript("OnUpdate", nil)
+        band:Hide()
+    end)
     sweep:Hide()
     return sweep
 end
@@ -251,6 +266,9 @@ function T.ProgressRow(parent, count, center, y, color)
         slot.fill = Texture(slot, "ARTWORK", color[1] * .65, color[2] * .65, color[3] * .65)
         slot.light = Texture(slot, "ARTWORK", .35 + color[1] * .65, .35 + color[2] * .65, .35 + color[3] * .65)
         slot.shade = Texture(slot, "ARTWORK", color[1] * .30, color[2] * .30, color[3] * .30)
+        slot.fill:SetDrawLayer("ARTWORK", 0)
+        slot.shade:SetDrawLayer("ARTWORK", 1)
+        slot.light:SetDrawLayer("ARTWORK", 2)
         slot.flash = Texture(slot, "OVERLAY", .8, .9, 1, .6)
         function slot:Paint(value, glow)
             self.display = value
@@ -359,44 +377,118 @@ function T.Border(parent, x, y, width, height)
     end
     return box
 end
--- The same connected atlas assembly used by Zurk Maps' title plaque.
-function T.RatingHeader(parent, card)
-    local header = CreateFrame("Frame", nil, parent)
-    local height, ornamentHeight = 22, 24
-    header:SetSize(card:GetWidth() * .5, height)
-    header:SetPoint("BOTTOM", card, "TOP", 0, -4)
-    header:SetFrameLevel(card:GetFrameLevel() + 2)
-    T.Fill(header, 0, -1, card:GetWidth() * .5, height - 2, .018, .012, .008, .98)
-    for _, side in ipairs({"top", "bottom"}) do
-        local trim = header:CreateTexture(nil, "BORDER")
-        local anchor = side == "top" and "TOP" or "BOTTOM"
-        -- Tuck both rules into the endcap stems instead of extending the
-        -- bounds outward; the ornamental ends remain slightly taller.
-        local offset = side == "top" and 1 or -1
-        trim:SetPoint(anchor .. "LEFT", header, anchor .. "LEFT", 3, offset)
-        trim:SetPoint(anchor .. "RIGHT", header, anchor .. "RIGHT", -3, offset)
-        if trim.SetAtlas then
-            trim:SetAtlas("battlefieldminimap-border-" .. side)
-            trim:SetVertexColor(.72, .66, .50, .97); trim:SetHeight(8)
+-- The connected title-plaque assembly used by Zurk Maps. Keep the ornament
+-- construction in one place so Rivals' rating card and secondary windows use
+-- the exact same endcaps, trim, fill, and text placement.
+-- Native decorative divider used between paired stat slabs. The BattleBar
+-- atlas has the same visual language as the gold Rivals framing and avoids
+-- the hand-drawn two-pixel rule looking like an arbitrary separator.
+function T.StatDivider(parent, x, y, height)
+    local divider = parent:CreateTexture(nil, "OVERLAY")
+    divider:SetPoint("CENTER", parent, "TOPLEFT", x, y)
+    if divider.SetAtlas then
+        divider:SetAtlas("BattleBar-ButtonBG-Divider", true)
+        local nativeW, nativeH = divider:GetWidth(), divider:GetHeight()
+        local h = height or 42
+        local aspect = (nativeW and nativeH and nativeH > 0) and (nativeW / nativeH) or .30
+        divider:SetSize(math.max(10, h * aspect), h)
+        divider:SetVertexColor(.84, .56, .31, .92)
+    else
+        divider:SetTexture("Interface\\Buttons\\WHITE8X8")
+        divider:SetSize(2, height or 42)
+        divider:SetVertexColor(.84, .56, .31, .92)
+    end
+    return divider
+end
+
+function T.PlaqueHeader(parent, width, label, fontObject)
+    -- Match the Zurk Maps title plaque geometry and colors exactly.  The
+    -- center background occupies the plaque itself; native Blizzard filigree
+    -- endcaps overlap the plaque edges and the top/bottom trim tucks beneath
+    -- those endcaps.  Do not add a second inset border/background box here.
+    local plaque = CreateFrame("Frame", nil, parent)
+    plaque:SetSize(width, 18)
+    if plaque.SetFrameLevel and parent.GetFrameLevel then plaque:SetFrameLevel(parent:GetFrameLevel() + 8) end
+
+    plaque.bg = plaque:CreateTexture(nil, "BACKGROUND")
+    plaque.bg:SetTexture("Interface\\Tooltips\\UI-Tooltip-Background")
+    plaque.bg:SetVertexColor(0.018, 0.012, 0.008, 0.97)
+
+    plaque.border = CreateFrame("Frame", nil, plaque)
+    plaque.border:SetAllPoints(plaque)
+    plaque.border:SetFrameLevel(plaque:GetFrameLevel() + 1)
+    plaque.border:EnableMouse(false)
+
+    plaque.borderR = 0.84
+    plaque.borderG = 0.56
+    plaque.borderB = 0.31
+    plaque.filigreeOverlap = 4
+    plaque.trimHeight = 8
+
+    local function ApplyAtlas(texture, atlasName, useAtlasSize)
+        texture:SetVertexColor(plaque.borderR, plaque.borderG, plaque.borderB, 0.97)
+        if texture.SetAtlas then
+            texture:SetAtlas(atlasName, useAtlasSize and true or false)
         else
-            trim:SetColorTexture(.72, .66, .50, .97); trim:SetHeight(1)
+            texture:SetColorTexture(plaque.borderR, plaque.borderG, plaque.borderB, 1)
         end
     end
-    for _, side in ipairs({"Left", "Right"}) do
-        local trim = header:CreateTexture(nil, "OVERLAY")
-        local aspect = 1
-        if trim.SetAtlas then
-            trim:SetAtlas("PetJournal-BattleSlotTitle-" .. side, true)
-            if trim:GetHeight() > 0 then aspect = trim:GetWidth() / trim:GetHeight() end
-            trim:SetVertexColor(.72, .66, .50, .97)
-        else trim:SetColorTexture(.72, .66, .50, .97); aspect = 1 / ornamentHeight end
-        trim:SetSize(ornamentHeight * aspect, ornamentHeight)
-        trim:SetPoint(side == "Left" and "RIGHT" or "LEFT", header, side:upper(), side == "Left" and 4 or -4, 0)
+
+    plaque.topTrim = plaque.border:CreateTexture(nil, "BORDER")
+    ApplyAtlas(plaque.topTrim, "battlefieldminimap-border-top")
+
+    plaque.bottomTrim = plaque.border:CreateTexture(nil, "BORDER")
+    ApplyAtlas(plaque.bottomTrim, "battlefieldminimap-border-bottom")
+
+    plaque.leftTrim = plaque.border:CreateTexture(nil, "OVERLAY")
+    ApplyAtlas(plaque.leftTrim, "PetJournal-BattleSlotTitle-Left", true)
+
+    plaque.rightTrim = plaque.border:CreateTexture(nil, "OVERLAY")
+    ApplyAtlas(plaque.rightTrim, "PetJournal-BattleSlotTitle-Right", true)
+
+    local filigreeAspect = 1
+    if plaque.leftTrim:GetHeight() and plaque.leftTrim:GetHeight() > 0 then
+        filigreeAspect = plaque.leftTrim:GetWidth() / plaque.leftTrim:GetHeight()
     end
-    local text = header:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    text:SetPoint("TOPLEFT", 8, 0); text:SetPoint("BOTTOMRIGHT", -8, 0)
-    text:SetJustifyH("CENTER"); text:SetJustifyV("MIDDLE"); text:SetWordWrap(false)
-    text:SetTextColor(.88, .80, .62, 1); text:SetText("Duel Rating")
+
+    plaque.text = plaque:CreateFontString(nil, "OVERLAY")
+    plaque.text:SetPoint("CENTER", plaque, "CENTER", 0, 0)
+    plaque.text:SetFont("Fonts\\FRIZQT__.TTF", 10, "")
+    plaque.text:SetTextColor(0.72, 0.66, 0.50, 1)
+    plaque.text:SetText(label or "")
+
+    local filigreeHeight = 20
+    local filigreeWidth = filigreeHeight * filigreeAspect
+    local trimInset = math.max(0, plaque.filigreeOverlap - 1)
+
+    plaque.leftTrim:ClearAllPoints()
+    plaque.leftTrim:SetPoint("RIGHT", plaque.border, "LEFT", plaque.filigreeOverlap, 0)
+    plaque.leftTrim:SetSize(filigreeWidth, filigreeHeight)
+
+    plaque.rightTrim:ClearAllPoints()
+    plaque.rightTrim:SetPoint("LEFT", plaque.border, "RIGHT", -plaque.filigreeOverlap, 0)
+    plaque.rightTrim:SetSize(filigreeWidth, filigreeHeight)
+
+    plaque.bg:ClearAllPoints()
+    plaque.bg:SetPoint("TOPLEFT", plaque.border, "TOPLEFT", 0, -1)
+    plaque.bg:SetPoint("BOTTOMRIGHT", plaque.border, "BOTTOMRIGHT", 0, 1)
+
+    plaque.topTrim:ClearAllPoints()
+    plaque.topTrim:SetPoint("TOPLEFT", plaque.border, "TOPLEFT", trimInset, 2)
+    plaque.topTrim:SetPoint("TOPRIGHT", plaque.border, "TOPRIGHT", -trimInset, 2)
+    plaque.topTrim:SetHeight(plaque.trimHeight)
+
+    plaque.bottomTrim:ClearAllPoints()
+    plaque.bottomTrim:SetPoint("BOTTOMLEFT", plaque.border, "BOTTOMLEFT", trimInset, -2)
+    plaque.bottomTrim:SetPoint("BOTTOMRIGHT", plaque.border, "BOTTOMRIGHT", -trimInset, -2)
+    plaque.bottomTrim:SetHeight(plaque.trimHeight)
+
+    return plaque
+end
+
+function T.RatingHeader(parent, card)
+    local header = T.PlaqueHeader(parent, card:GetWidth() * .5, "Duel Rating")
+    header:SetPoint("BOTTOM", card, "TOP", 0, -4)
     return header
 end
 

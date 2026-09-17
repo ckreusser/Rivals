@@ -74,6 +74,12 @@ function DP.InstallCharacterTab(getRating, getRecords)
     panel:SetScript("OnHide", function()
         RestorePortrait()
         RestoreCloseButton()
+        if DP.ResetDuelViewToOverview then
+            DP.ResetDuelViewToOverview()
+        elseif DP.SelectDuelView then
+            DP.SelectDuelView("Overview")
+        end
+        panel.playOverviewSweepOnShow = true
         panel.logoFrame:Hide()
         for _, texture in ipairs(panel.chrome) do texture:Hide() end
     end)
@@ -83,30 +89,36 @@ function DP.InstallCharacterTab(getRating, getRecords)
     local overview = CreateFrame("Frame", nil, content)
     overview:SetPoint("TOPLEFT", content, "TOPLEFT", 0, 5)
     overview:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", 0, 5)
+    if overview.SetClipsChildren then overview:SetClipsChildren(true) end
+    local duelPage = CreateFrame("Frame", nil, overview)
+    duelPage:SetAllPoints(overview)
+    panel.duelOverviewPage = duelPage
+    overview.duelPage = duelPage
     -- Fill the Rivals pane all the way to the inner bottom edge of the Character frame.
     DP.Theme.Fill(panel, 18, -74, 324, 354, .035, .045, .06, .96)
     -- A symmetrical gold frame and graduated midnight-blue field make rating
     -- the focal point without a faction stripe cutting through its border.
     for i = 0, 45 do
         local glow = math.sin((i / 45) * math.pi)
-        DP.Theme.Fill(overview, 32, -132 - i * 2, 288, 2,
+        DP.Theme.Fill(duelPage, 28, -132 - i * 2, 296, 2,
             .035 + glow * .035, .055 + glow * .055, .09 + glow * .08)
     end
-    local ratingCard = DP.Theme.Border(overview, 30, -130, 292, 96)
-    DP.Theme.Border(overview, 33, -133, 286, 90)
-    panel.ratingHeader = DP.Theme.RatingHeader(overview, ratingCard)
-    local leftSlab = DP.Theme.StatSlab(overview, 30, -240, 142, 54, false)
-    local rightSlab = DP.Theme.StatSlab(overview, 180, -240, 142, 54, true)
-    DP.Theme.Border(overview, 30, -304, 292, 38)
-    local duelProgress = DP.Theme.ProgressRow(overview, 10, 101, -208, {.18, .59, 1})
-    local rivalProgress = DP.Theme.ProgressRow(overview, 5, 251, -208, {.68, .38, 1})
+    local ratingCard = DP.Theme.Border(duelPage, 26, -130, 300, 96)
+    DP.Theme.Border(duelPage, 29, -133, 294, 90)
+    panel.ratingHeader = DP.Theme.RatingHeader(duelPage, ratingCard)
+    local leftSlab = DP.Theme.StatSlab(duelPage, 26, -240, 140, 58, false)
+    local rightSlab = DP.Theme.StatSlab(duelPage, 186, -240, 140, 58, true)
+    DP.Theme.Border(duelPage, 26, -304, 300, 38)
+    local duelProgress = DP.Theme.ProgressRow(duelPage, 10, 101, -208, {.18, .59, 1})
+    local rivalProgress = DP.Theme.ProgressRow(duelPage, 5, 251, -208, {.68, .38, 1})
     local reveal
     local fallbackCheckpoint = {duels = 0, opponents = 0}
     panel.progressRows = {duelProgress, rivalProgress}
     local duelSweep, opponentSweep
-    local overviewSweep = DP.Theme.LightSweep(overview, ratingCard, {1, .82, .42}, true)
+    local overviewSweep = DP.Theme.LightSweep(duelPage, ratingCard, {1, .82, .42}, true)
     local promotion
     function DP.PlayOverviewSweep()
+        if not duelPage:IsShown() then return end
         overviewSweep:Play(0, .40)
         local state = getRating()
         local checkpoint = DP.ProgressCheckpoint and DP.ProgressCheckpoint() or fallbackCheckpoint
@@ -120,31 +132,31 @@ function DP.InstallCharacterTab(getRating, getRecords)
         local steps = math.max(10 - checkpoint.duels, 5 - checkpoint.opponents)
         promotion:Play(.35 + math.max(0, steps - 1) * .24 + .44 + .9, checkpoint)
     end
-    overview:SetScript("OnShow", DP.PlayOverviewSweep)
+    -- Overview sweeps are explicitly triggered after carousel/navigation settles;
+    -- do not fire merely because this child frame is shown during a swipe.
     local function Celebrate(duelsDone, opponentsDone)
         if duelsDone then duelSweep:Play(0, .8) end
         if opponentsDone then opponentSweep:Play(0, .8) end
     end
-    -- A simple recessed line in the open channel.
-    DP.Theme.Fill(overview, 175, -246, 1, 42, .38, .30, .18)
-    DP.Theme.Fill(overview, 176, -246, 1, 42, .10, .085, .06)
+    -- Match the World PvP page with Blizzard's native paired-slab divider.
+    DP.Theme.StatDivider(duelPage, 176, -269, 46)
     local function Text(y, font)
-        local label = overview:CreateFontString(nil, "OVERLAY", font or "GameFontHighlight")
-        label:SetPoint("TOPLEFT", 30, y)
-        label:SetWidth(292)
+        local label = duelPage:CreateFontString(nil, "OVERLAY", font or "GameFontHighlight")
+        label:SetPoint("TOPLEFT", 26, y)
+        label:SetWidth(300)
         label:SetJustifyH("CENTER")
         return label
     end
     local number = Text(-146, "GameFontNormalHuge")
     local placement = Text(-179, "GameFontHighlightSmall")
-    promotion = DP.Theme.EstablishedPromotion(overview, ratingCard, placement)
+    promotion = DP.Theme.EstablishedPromotion(duelPage, ratingCard, placement)
     panel.establishedPromotion = promotion
     local progressText = Text(-193, "GameFontHighlightSmall")
-    progressText:ClearAllPoints(); progressText:SetPoint("TOPLEFT", 42, -193); progressText:SetWidth(118)
+    progressText:ClearAllPoints(); progressText:SetPoint("TOPLEFT", 38, -193); progressText:SetWidth(124)
     local opponentProgress = Text(-193, "GameFontHighlightSmall")
-    opponentProgress:ClearAllPoints(); opponentProgress:SetPoint("TOPLEFT", 192, -193); opponentProgress:SetWidth(118)
-    duelSweep = DP.Theme.CompletionSweep(overview, duelProgress, progressText, {121/255, 189/255, 1})
-    opponentSweep = DP.Theme.CompletionSweep(overview, rivalProgress, opponentProgress, {229/255, 185/255, 1})
+    opponentProgress:ClearAllPoints(); opponentProgress:SetPoint("TOPLEFT", 190, -193); opponentProgress:SetWidth(124)
+    duelSweep = DP.Theme.CompletionSweep(duelPage, duelProgress, progressText, {121/255, 189/255, 1})
+    opponentSweep = DP.Theme.CompletionSweep(duelPage, rivalProgress, opponentProgress, {229/255, 185/255, 1})
     panel.milestoneSweeps = {duelSweep, opponentSweep, overviewSweep}
     local stats = leftSlab:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     stats:SetAllPoints(leftSlab); stats:SetJustifyH("CENTER"); stats:SetJustifyV("MIDDLE")
@@ -154,7 +166,7 @@ function DP.InstallCharacterTab(getRating, getRecords)
     last:SetHeight(38); last:SetJustifyV("MIDDLE")
     local note = Text(-378, "GameFontDisableSmall")
     note:SetText("Local estimates from your recorded duels.\nEarlier diagnostic captures do not affect rating.")
-    local button = DP.Theme.Button(overview, "Record details", 30, -395, 94)
+    local button = DP.Theme.Button(duelPage, "Record details", 30, -395, 94)
     button:SetSize(94, 23)
     button:SetPoint("TOPLEFT", 30, -395)
     button:SetText("Record details")
@@ -168,10 +180,10 @@ function DP.InstallCharacterTab(getRating, getRecords)
     end
     button:SetScript("OnEnter", Details); button:SetScript("OnClick", function() GameTooltip:Hide(); DP.SelectDuelView("Details") end)
     button:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    local graphButton = DP.Theme.Button(overview, "Rating graph", 129, -395, 94)
+    local graphButton = DP.Theme.Button(duelPage, "Rating graph", 129, -395, 94)
     graphButton:SetSize(94, 23); graphButton:SetPoint("TOPLEFT", 129, -395); graphButton:SetText("Rating graph")
     graphButton:SetScript("OnClick", function() DP.SelectDuelView("Graph") end)
-    local boardButton = DP.Theme.Button(overview, "Manage", 228, -395, 94)
+    local boardButton = DP.Theme.Button(duelPage, "Manage", 228, -395, 94)
     boardButton:SetSize(94, 23); boardButton:SetPoint("TOPLEFT", 228, -395); boardButton:SetText("Manage")
     boardButton:SetScript("OnClick", function() DP.SelectDuelView("Manage") end)
     local function DrawProgress(duels, opponents, glow)
@@ -193,16 +205,21 @@ function DP.InstallCharacterTab(getRating, getRecords)
         end
     end
     local function StopReveal()
-        overview:SetScript("OnUpdate", nil)
+        duelPage:SetScript("OnUpdate", nil)
         reveal = nil
     end
-    overview:SetScript("OnHide", function()
+    duelPage:SetScript("OnHide", function()
+        StopReveal()
+        promotion:Stop()
+        for _, sweep in ipairs(panel.milestoneSweeps) do sweep:Stop() end
+    end)
+    overview:HookScript("OnHide", function()
         StopReveal()
         promotion:Stop()
         for _, sweep in ipairs(panel.milestoneSweeps) do sweep:Stop() end
     end)
     function DP.RefreshProgress()
-        if not panel:IsShown() or not overview:IsShown() then StopReveal(); return end
+        if not panel:IsShown() or not overview:IsShown() or not duelPage:IsShown() then StopReveal(); return end
         local state = getRating()
         if not state then return end
         local checkpoint = DP.ProgressCheckpoint and DP.ProgressCheckpoint() or fallbackCheckpoint
@@ -223,7 +240,7 @@ function DP.InstallCharacterTab(getRating, getRecords)
         local elapsed = 0
         local steps = math.max(duels - fromDuels, opponents - fromOpponents)
         local duration = .35 + math.max(0, steps - 1) * .24 + .44
-        overview:SetScript("OnUpdate", function(_, dt)
+        duelPage:SetScript("OnUpdate", function(_, dt)
             elapsed = elapsed + dt
             local completed = elapsed < .35 and 0 or math.floor((elapsed - .35) / .24) + 1
             DrawProgress(math.min(duels, fromDuels + completed),
@@ -235,7 +252,7 @@ function DP.InstallCharacterTab(getRating, getRecords)
             end
         end)
     end
-    panel.progressOverview = overview
+    panel.progressOverview = duelPage
     function DP.RefreshCharacterTab()
         local r = getRating()
         if not r then return end
@@ -257,8 +274,10 @@ function DP.InstallCharacterTab(getRating, getRecords)
             last:SetText(string.format("Last: %s vs %s\n%+.2f rating | %s", r.last.won and "Win" or "Loss",
                 r.last.opponent, d.delta, r.last.modeFailure or (DP.Views.Mode(r.last) .. " | " .. DP.Views.Reason(d))))
         else last:SetText(DP.DuelAgreementStatus and DP.DuelAgreementStatus() or "Your next eligible duel starts your record.") end
+        if DP.WorldPvP and DP.WorldPvP.RefreshOverview then DP.WorldPvP.RefreshOverview() end
         if DP.RefreshDuelViews then DP.RefreshDuelViews() end
     end
+    if DP.WorldPvP and DP.WorldPvP.InstallOverview then DP.WorldPvP.InstallOverview(overview, duelPage) end
     DP.InstallViews(content, getRating, getRecords, overview)
     panel:SetScript("OnShow", function()
         local close = CharacterFrameCloseButton
@@ -281,6 +300,16 @@ function DP.InstallCharacterTab(getRating, getRecords)
         for _, texture in ipairs(panel.chrome) do texture:Show() end
         panel.logoFrame:Show()
         DP.RefreshCharacterTab()
+        if panel.playOverviewSweepOnShow then
+            panel.playOverviewSweepOnShow = nil
+            local function PlayResetSweep()
+                if not panel:IsShown() or not overview:IsShown() then return end
+                local worldSelected = DP.WorldPvP and DP.WorldPvP.GetOverviewMode and DP.WorldPvP.GetOverviewMode() == "world"
+                if worldSelected and DP.WorldPvP.PlayOverviewSweep then DP.WorldPvP.PlayOverviewSweep()
+                elseif DP.PlayOverviewSweep then DP.PlayOverviewSweep() end
+            end
+            if C_Timer and C_Timer.After then C_Timer.After(.04, PlayResetSweep) else PlayResetSweep() end
+        end
     end)
     CHARACTERFRAME_SUBFRAMES[#CHARACTERFRAME_SUBFRAMES + 1] = "RivalsCharacterPanel"
     local tab = CreateFrame("Button", "CharacterFrameTab" .. id, CharacterFrame, "CharacterFrameTabButtonTemplate")
@@ -289,7 +318,7 @@ function DP.InstallCharacterTab(getRating, getRecords)
     tab:SetScript("OnClick", function() ToggleCharacter("RivalsCharacterPanel", true) end)
     tab:SetScript("OnEnter", function()
         GameTooltip:SetOwner(tab, "ANCHOR_RIGHT")
-        GameTooltip:SetText("Duel rating and record")
+        GameTooltip:SetText("Duel rating, World PvP, and rivalry record")
     end)
     tab:SetScript("OnLeave", function() GameTooltip:Hide() end)
     PanelTemplates_SetNumTabs(CharacterFrame, id)
@@ -312,9 +341,16 @@ function DP.InstallCharacterTab(getRating, getRecords)
         end
         layingOut = false
     end
+    function DP.RefreshRivalsCharacterTabLabel()
+        local world = DP.WorldPvP and DP.WorldPvP.GetOverviewMode and DP.WorldPvP.GetOverviewMode() == "world"
+        local label = world and "WPvP" or "Duels"
+        if tab:GetText() ~= label then tab:SetText(label) end
+        PanelTemplates_TabResize(tab, 0)
+        Layout()
+    end
     hooksecurefunc("CharacterFrame_TabBoundsCheck", Layout)
     CharacterFrame:HookScript("OnShow", Layout)
     DP.characterPanel = panel
-    Layout()
+    DP.RefreshRivalsCharacterTabLabel()
     return true
 end
