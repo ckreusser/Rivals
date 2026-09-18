@@ -3,19 +3,21 @@ local P = {url = "https://www.curseforge.com/wow/addons/rivals"}
 DP.Promos = P
 
 P.messages = {
-    "Turn every duel into a record. Rivals adds an Elo-style duel rating, placements, personal bests, rating history, and protections against artificial boosting.",
+    "Rivals turns open-world PvP into a real record. Track kills, streaks, rivals, solo fights, ganks, outnumbered wins, and where every encounter happened.",
 
-    "See what actually happened in every duel. Rivals records items, engineering gadgets, long cooldowns, inferred specs, and a timestamped combat log.",
+    "Every World PvP encounter gets a map record with the fight location, opponents, result, items, abilities, and combat log.",
 
-    "Your duel history should be more than a vague memory. Rivals keeps detailed match records with rating changes, Rival estimates, used gear, cooldowns, specs, and combat events.",
+    "Pull off a real 1v2 or 1v3? Rivals tracks solo 1vN victories separately from sequential kills and passive ganks.",
 
-    "Find out who you can beat and who has your number. Rivals tracks opponent and class matchups, lifetime results, local seasons, and rating progression.",
+    "Know who has your number. Rivals builds open-world records against individual players and classes, including your most-killed rivals and nemeses.",
 
-    "Rated or just practicing? Rivals supports Rated and Casual duels. When both players run Rivals, Rated matches can be Rivals Verified before the fight.",
+    "Star the fights worth remembering. Favorite duels and World PvP encounters for quick access, and preserve starred World PvP records beyond the rolling history cap.",
 
-    "Inspect another Rivals player to see their shared duel profile, rating, record, and your matchup history against them—all inside the Character and Inspect panes.",
+    "Duels and World PvP both get detailed fight records with opponents, items, abilities, cooldowns, and combat events.",
 
-    "Classic Era dueling, with progression. Rivals turns your duels into a rating, detailed history, matchup profile, and a record you can actually build over time.",
+    "Turn duels into progression. Rivals adds Elo-style rating, placements, personal bests, rating history, and opponent and class matchup records.",
+
+    "Rated or just practicing? Rivals supports Rated and Casual duels, with Rivals Verified matches when both players are running the addon.",
 }
 
 function P.Click(_, button)

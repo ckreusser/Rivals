@@ -1,0 +1,5 @@
+Source: AddOns/Rivals.zip, version 0.21.45-beta.
+All Lua files pass Lua 5.1 syntax checks.
+Bundled tests/run.py stops at tests/verification.lua:42 (assertion failed), as in the previous release.
+Runtime files and tests preserved from the ZIP; documentation updated for release.
+No in-game testing performed.

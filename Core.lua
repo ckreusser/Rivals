@@ -1,5 +1,5 @@
 local addonName, DP = ...
-local VERSION, TRACE_LIMIT, ACTIVITY_LIMIT = "0.21.42-beta", 1000, 200
+local VERSION, TRACE_LIMIT, ACTIVITY_LIMIT = "0.21.45-beta", 1000, 200
 local frame = CreateFrame("Frame")
 local db, observer, tracker, parsers, ready, rating
 local seasons, selectedPeriod = {}, nil
