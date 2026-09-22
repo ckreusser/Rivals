@@ -108,4 +108,100 @@ local lowbie = observer4.worldPvP.encounters[1]
 assert(lowbie and lowbie.resultKey == "lowbie_gank" and lowbie.resultLabel == "LOWBIE GANK")
 assert(W.CountGanks(lowbie) == 1)
 
-print("PASS: World PvP contested 1v2 recognition rejects sequential passive ganks, records level-based ganks, and preserves notable-only toast policy")
+-- A full combat drop followed by a different opponent must split the record
+-- immediately, even though the old hard inactivity timeout is 60 seconds.
+local observer5, db5 = {}, {}
+W.Initialize(observer5, db5, {})
+fire{now, "SPELL_DAMAGE", false, "Player-1", "Alice", player + friendly, 0,
+    "Enemy-1", "Knife", player + hostile, 0, 123, "Mortal Strike", 1, 500}
+fire{now, "SWING_DAMAGE", false, "Enemy-1", "Knife", player + hostile, 0,
+    "Player-1", "Alice", player + friendly, 0, 220}
+W.Event("PLAYER_REGEN_ENABLED")
+fire{now, "SPELL_DAMAGE", false, "Player-1", "Alice", player + friendly, 0,
+    "Enemy-2", "Mage", player + hostile, 0, 123, "Mortal Strike", 1, 500}
+fire{now, "SWING_DAMAGE", false, "Enemy-2", "Mage", player + hostile, 0,
+    "Player-1", "Alice", player + friendly, 0, 220}
+W.Finish("split-test")
+assert(#observer5.worldPvP.encounters == 2)
+assert(observer5.worldPvP.encounters[1].enemyCount == 1 and observer5.worldPvP.encounters[2].enemyCount == 1)
+assert(observer5.worldPvP.encounters[1].enemies[1].guid == "Enemy-1")
+assert(observer5.worldPvP.encounters[2].enemies[1].guid == "Enemy-2")
+
+-- The same opponent may resume during the short combat-end grace. This keeps
+-- Vanish/Feign/CC combat flicker from fragmenting one real fight.
+local observer6, db6 = {}, {}
+W.Initialize(observer6, db6, {})
+fire{now, "SPELL_DAMAGE", false, "Player-1", "Alice", player + friendly, 0,
+    "Enemy-1", "Knife", player + hostile, 0, 123, "Mortal Strike", 1, 500}
+W.Event("PLAYER_REGEN_ENABLED")
+now = now + 5
+fire{now, "SWING_DAMAGE", false, "Enemy-1", "Knife", player + hostile, 0,
+    "Player-1", "Alice", player + friendly, 0, 220}
+W.Finish("same-opponent-grace")
+assert(#observer6.worldPvP.encounters == 1)
+assert(observer6.worldPvP.encounters[1].enemyCount == 1)
+
+-- Streaks are consecutive kills, not consecutive encounter records. A
+-- disengage with no death preserves the streak; a player death resets it.
+local observer7, db7 = {}, {}
+W.Initialize(observer7, db7, {})
+observer7.worldPvP.encounters = {
+    {enemyDeaths = 3, playerDied = false, enemies = {}, friendlies = {}, friendlyCount = 1, enemyCount = 1},
+    {enemyDeaths = 0, playerDied = false, enemies = {}, friendlies = {}, friendlyCount = 1, enemyCount = 1},
+    {enemyDeaths = 2, playerDied = false, enemies = {}, friendlies = {}, friendlyCount = 1, enemyCount = 1},
+}
+local streakSummary = W.Summary()
+assert(streakSummary.currentStreak == 5 and streakSummary.longestStreak == 5)
+observer7.worldPvP.encounters[#observer7.worldPvP.encounters + 1] =
+    {enemyDeaths = 1, playerDied = true, enemies = {}, friendlies = {}, friendlyCount = 1, enemyCount = 1}
+observer7.worldPvP.encounters[#observer7.worldPvP.encounters + 1] =
+    {enemyDeaths = 4, playerDied = false, enemies = {}, friendlies = {}, friendlyCount = 1, enemyCount = 1}
+streakSummary = W.Summary()
+assert(streakSummary.currentStreak == 4 and streakSummary.longestStreak == 6)
+
+-- Never present a continent as the Favorite Zone. Existing continent-labeled
+-- records can fall back to their retained subzone, while new captures prefer
+-- GetZoneText over a continent-level best-map name.
+observer7.worldPvP.encounters = {
+    {enemyDeaths = 4, playerDied = false, enemies = {}, friendlies = {}, friendlyCount = 1, enemyCount = 1,
+        location = {zone = "Kalimdor", subzone = "Feralas"}},
+}
+local zoneSummary = W.Summary()
+assert(zoneSummary.favoriteZone == "Feralas" and zoneSummary.favoriteZoneKills == 4)
+
+C_Map = {
+    GetBestMapForUnit = function() return 12 end,
+    GetPlayerMapPosition = function() return {GetXY = function() return .42, .58 end} end,
+    GetMapInfo = function() return {name = "Kalimdor", mapType = 2} end,
+}
+GetZoneText = function() return "Feralas" end
+GetSubZoneText = function() return "The High Wilderness" end
+local observer8, db8 = {}, {}
+W.Initialize(observer8, db8, {})
+fire{now, "SPELL_DAMAGE", false, "Player-1", "Alice", player + friendly, 0,
+    "Enemy-1", "Knife", player + hostile, 0, 123, "Mortal Strike", 1, 500}
+fire{now, "UNIT_DIED", false, nil, nil, 0, 0, "Enemy-1", "Knife", player + hostile, 0}
+W.Finish("zone-test")
+assert(observer8.worldPvP.encounters[1].location.zone == "Feralas")
+
+-- Enemy aura snapshots retain world buffs and long-duration consumables that
+-- were already active before the combat log could see their application.
+local observer9, db9 = {}, {}
+W.Initialize(observer9, db9, {})
+targetGUID, targetLevel = "Enemy-1", 60
+UnitBuff = function(unit, index)
+    if unit ~= "target" then return nil end
+    if index == 1 then return "Rallying Cry of the Dragonslayer", nil, nil, nil, 7200, now + 7200, nil, nil, nil, 22888 end
+    if index == 2 then return "Elixir of the Mongoose", nil, nil, nil, 3600, now + 3600, nil, nil, nil, 17538 end
+    return nil
+end
+fire{now, "SPELL_DAMAGE", false, "Player-1", "Alice", player + friendly, 0,
+    "Enemy-1", "Knife", player + hostile, 0, 123, "Mortal Strike", 1, 500}
+W.Finish("buff-snapshot-test")
+local buffed = observer9.worldPvP.encounters[1] and observer9.worldPvP.encounters[1].enemies[1]
+assert(buffed and buffed.detectedBuffs and buffed.detectedBuffs.scanned)
+assert(buffed.detectedBuffs.world["22888"] and buffed.detectedBuffs.world["22888"].activeAtEngagement)
+assert(buffed.detectedBuffs.consumables["17538"] and buffed.detectedBuffs.consumables["17538"].activeAtEngagement)
+UnitBuff = nil
+
+print("PASS: World PvP pressure, combat-boundary splitting, kill streaks, zone labels, ganks, notable-only toast policy, and enemy buff snapshots")

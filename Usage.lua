@@ -369,7 +369,7 @@ function U.WorldObserve(session, playerGUID, info)
     events[#events + 1] = {
         t = math.max(0, GetTime() - (session.startedElapsed or GetTime())),
         guid = sourceGUID,
-        name = sourceName,
+        actorName = sourceName,
         targetGUID = destGUID,
         targetName = destName,
         spellID = spellID,
@@ -922,6 +922,119 @@ local function CreateDetailRow(window)
     return row
 end
 
+local function EscapeCombatPattern(text)
+    return (tostring(text or ""):gsub("([%(%)%.%%%+%-%*%?%[%]%^%$])", "%%%1"))
+end
+
+local function WhiteCombat(text) return "|cffffffff" .. tostring(text or "") .. "|r" end
+local function GoldCombat(text) return "|cffffce70" .. tostring(text or "") .. "|r" end
+local function DamageCombat(text) return "|cffff8888" .. tostring(text or "") .. "|r" end
+local function HealCombat(text) return "|cff65e6ad" .. tostring(text or "") .. "|r" end
+local function MutedCombat(text) return "|cffadb5c2" .. tostring(text or "") .. "|r" end
+
+local function DuelOpponentClassFromLog(record)
+    local _, class = ResolvedOpponent(record)
+    if class then return class end
+    local log = record and record.session and record.session.combatLog
+    if not (log and DP.Specs and DP.Specs.InferClassFromAbility) then return nil end
+    for _, entry in ipairs(log.toMe or {}) do
+        local text = type(entry) == "table" and entry.text or tostring(entry or "")
+        local spell = text:match("^[^']+'s (.-) hit you") or
+            text:match("^[^']+'s (.-) healed you") or
+            text:match("^[^']+'s (.-) missed you") or
+            text:match("^.- applied (.-) to you$") or
+            text:match("^.- refreshed (.-) on you$") or
+            text:match("^[^']+'s (.-) interrupted your ") or
+            text:match("^[^']+'s (.-) removed your ") or
+            text:match("^(.-) faded from you$")
+        if spell then
+            class = DP.Specs.InferClassFromAbility(nil, spell)
+            if class then
+                if record.session and record.session.identity and not record.session.identity.class then
+                    record.session.identity.class = class
+                end
+                return class
+            end
+        end
+    end
+end
+
+local function ColorDuelCombatText(record, key, rawText)
+    local text = tostring(rawText or "")
+    local opponent = OpponentNamePlain(record, true)
+    local opponentClass = DuelOpponentClassFromLog(record)
+    local opponentColored = opponentClass and DP.Theme.ClassName(opponent, opponentClass) or ("|cffffad66" .. opponent .. "|r")
+    local playerClass = record and record.playerClass
+    if not playerClass and UnitClass then local _, detected = UnitClass("player"); playerClass = detected end
+    local youColored = playerClass and DP.Theme.ClassName("you", playerClass) or "you"
+
+    -- Color spell/ability names from the fixed duel-log sentence grammar before
+    -- actor names inject WoW color escape sequences into those same strings.
+    if key == "myActions" then
+        text = text:gsub("^Cast (.-)( on .+)$", function(spell, rest) return GoldCombat("Cast") .. " " .. WhiteCombat(spell) .. rest end)
+        text = text:gsub("^([^|].-) hit (.+) for (%d+)$", function(spell, target, amount)
+            if spell == "Melee" then return WhiteCombat(spell) .. " " .. DamageCombat("hit") .. " " .. target .. " for " .. DamageCombat(amount) end
+            return WhiteCombat(spell) .. " " .. DamageCombat("hit") .. " " .. target .. " for " .. DamageCombat(amount)
+        end)
+        text = text:gsub("^([^|].-) healed (.+) for (%d+)$", function(spell, target, amount)
+            return WhiteCombat(spell) .. " " .. HealCombat("healed") .. " " .. target .. " for " .. HealCombat(amount)
+        end)
+        text = text:gsub("^([^|].-) missed (.+) %((.-)%)$", function(spell, target, miss)
+            return WhiteCombat(spell) .. " missed " .. target .. " " .. MutedCombat("(" .. miss .. ")")
+        end)
+        text = text:gsub("^Applied (.-) to (.+)$", function(spell, target) return "Applied " .. WhiteCombat(spell) .. " to " .. target end)
+        text = text:gsub("^Refreshed (.-) on (.+)$", function(spell, target) return "Refreshed " .. WhiteCombat(spell) .. " on " .. target end)
+        text = text:gsub("^([^|].-) faded from (.+)$", function(spell, target) return WhiteCombat(spell) .. " faded from " .. target end)
+        text = text:gsub("^([^|].-) interrupted (.+)'s (.+)$", function(spell, target, interrupted)
+            return WhiteCombat(spell) .. " " .. GoldCombat("interrupted") .. " " .. target .. "'s " .. WhiteCombat(interrupted)
+        end)
+        text = text:gsub("^([^|].-) removed (.-) from (.+)$", function(spell, removed, target)
+            return WhiteCombat(spell) .. " removed " .. WhiteCombat(removed) .. " from " .. target
+        end)
+        text = text:gsub("^([^|].-) restored (%d+) resource$", function(spell, amount)
+            return WhiteCombat(spell) .. " restored " .. HealCombat(amount) .. " resource"
+        end)
+        text = text:gsub(EscapeCombatPattern(opponent), function() return opponentColored end)
+    else
+        local opp = EscapeCombatPattern(opponent)
+        text = text:gsub("^" .. opp .. "'s (.-) hit you for (%d+)$", function(spell, amount)
+            return opponentColored .. "'s " .. WhiteCombat(spell) .. " " .. DamageCombat("hit") .. " " .. youColored .. " for " .. DamageCombat(amount)
+        end)
+        text = text:gsub("^" .. opp .. " hit you for (%d+)$", function(amount)
+            return opponentColored .. " " .. DamageCombat("hit") .. " " .. youColored .. " for " .. DamageCombat(amount)
+        end)
+        text = text:gsub("^" .. opp .. "'s (.-) healed you for (%d+)$", function(spell, amount)
+            return opponentColored .. "'s " .. WhiteCombat(spell) .. " " .. HealCombat("healed") .. " " .. youColored .. " for " .. HealCombat(amount)
+        end)
+        text = text:gsub("^" .. opp .. "'s (.-) missed you %((.-)%)$", function(spell, miss)
+            return opponentColored .. "'s " .. WhiteCombat(spell) .. " missed " .. youColored .. " " .. MutedCombat("(" .. miss .. ")")
+        end)
+        text = text:gsub("^" .. opp .. " missed you %((.-)%)$", function(miss)
+            return opponentColored .. " missed " .. youColored .. " " .. MutedCombat("(" .. miss .. ")")
+        end)
+        text = text:gsub("^" .. opp .. " applied (.-) to you$", function(spell)
+            return opponentColored .. " applied " .. WhiteCombat(spell) .. " to " .. youColored
+        end)
+        text = text:gsub("^" .. opp .. " refreshed (.-) on you$", function(spell)
+            return opponentColored .. " refreshed " .. WhiteCombat(spell) .. " on " .. youColored
+        end)
+        text = text:gsub("^(.-) faded from you$", function(spell) return WhiteCombat(spell) .. " faded from " .. youColored end)
+        text = text:gsub("^" .. opp .. "'s (.-) interrupted your (.+)$", function(spell, interrupted)
+            return opponentColored .. "'s " .. WhiteCombat(spell) .. " " .. GoldCombat("interrupted") .. " your " .. WhiteCombat(interrupted)
+        end)
+        text = text:gsub("^" .. opp .. "'s (.-) removed your (.+)$", function(spell, removed)
+            return opponentColored .. "'s " .. WhiteCombat(spell) .. " removed your " .. WhiteCombat(removed)
+        end)
+        text = text:gsub("^" .. opp .. "'s (.-) restored (%d+) resource$", function(spell, amount)
+            return opponentColored .. "'s " .. WhiteCombat(spell) .. " restored " .. HealCombat(amount) .. " resource"
+        end)
+        -- All sentence shapes emitted by IncomingCombatText are handled above.
+        -- Avoid a second generic replacement pass here; it can re-color names
+        -- already wrapped in WoW color escapes.
+    end
+    return text
+end
+
 local function CombatLogText(record, key)
     local log = record and record.session and record.session.combatLog
     if not log then return "|cff8f98a6Combat log capture was not available for this duel.|r" end
@@ -934,6 +1047,7 @@ local function CombatLogText(record, key)
     for _, entry in ipairs(entries) do
         local elapsed = type(entry) == "table" and tonumber(entry.t) or nil
         local text = type(entry) == "table" and entry.text or tostring(entry)
+        text = ColorDuelCombatText(record, key, text)
         if elapsed then
             lines[#lines + 1] = string.format("|cff8f98a6+%05.1fs|r  %s", elapsed, text or "")
         else
@@ -1100,6 +1214,9 @@ end
 -- Scrollable duel details with a fixed dataframe-style header. Item/spell tooltip
 -- hitboxes are sized to the text itself rather than the entire horizontal cell.
 function U.OpenDetails(record)
+    if DP.WorldPvP and DP.WorldPvP.details and DP.WorldPvP.details:IsShown() then
+        DP.WorldPvP.details:Hide()
+    end
     local window = EnsureDetailWindow()
     SetDetailSummaryTitle(window, record)
     window.summaryDate:SetText("|cffadb5c2" .. date("%Y-%m-%d %H:%M:%S", record.timestamp) .. "|r")

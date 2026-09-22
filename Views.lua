@@ -338,23 +338,23 @@ function DP.InstallViews(panel, getRating, getRecords, overview)
     manage:SetAllPoints(panel); manage:Hide()
     local manageTitle = Label(manage, -111, "GameFontNormalLarge")
     manageTitle:SetJustifyH("CENTER"); manageTitle:SetText("Manage Rivals")
-    local sharingTitle = Label(manage, -157, "GameFontNormal")
+    local sharingTitle = Label(manage, -128, "GameFontNormal")
     sharingTitle:SetJustifyH("CENTER"); sharingTitle:SetText("PROFILE SHARING")
-    local sharingHelp = Label(manage, -178, "GameFontDisableSmall")
+    local sharingHelp = Label(manage, -149, "GameFontDisableSmall")
     sharingHelp:SetJustifyH("CENTER")
     sharingHelp:SetText("Shares your rating summary only when another Rival inspects you.\nEnabled by default; no duel history is transmitted.")
-    local shareOn = Button(manage, "On", 30, -218, 146, function() if DP.SetProfileSharing then DP.SetProfileSharing(true) end end)
-    local shareOff = Button(manage, "Off", 176, -218, 146, function() if DP.SetProfileSharing then DP.SetProfileSharing(false) end end)
-    local worldTrackingTitle = Label(manage, -255, "GameFontNormal")
+    local shareOn = Button(manage, "On", 30, -189, 146, function() if DP.SetProfileSharing then DP.SetProfileSharing(true) end end)
+    local shareOff = Button(manage, "Off", 176, -189, 146, function() if DP.SetProfileSharing then DP.SetProfileSharing(false) end end)
+    local worldTrackingTitle = Label(manage, -226, "GameFontNormal")
     worldTrackingTitle:SetJustifyH("CENTER"); worldTrackingTitle:SetText("WORLD PVP TRACKING")
-    local worldTrackingHelp = Label(manage, -276, "GameFontDisableSmall")
+    local worldTrackingHelp = Label(manage, -247, "GameFontDisableSmall")
     worldTrackingHelp:SetJustifyH("CENTER"); worldTrackingHelp:SetText("Automatically records open-world player fights. No duel rating impact.")
-    local worldOn = Button(manage, "On", 30, -299, 146, function() if DP.WorldPvP then DP.WorldPvP.SetEnabled(true) end end)
-    local worldOff = Button(manage, "Off", 176, -299, 146, function() if DP.WorldPvP then DP.WorldPvP.SetEnabled(false) end end)
-    local recoveryTitle = Label(manage, -343, "GameFontNormal")
+    local worldOn = Button(manage, "On", 30, -270, 146, function() if DP.WorldPvP then DP.WorldPvP.SetEnabled(true) end end)
+    local worldOff = Button(manage, "Off", 176, -270, 146, function() if DP.WorldPvP then DP.WorldPvP.SetEnabled(false) end end)
+    local recoveryTitle = Label(manage, -314, "GameFontNormal")
     recoveryTitle:SetJustifyH("CENTER"); recoveryTitle:SetText("RECOVERY")
-    local recoveryHelp = Label(manage, -343, "GameFontDisableSmall"); recoveryHelp:Hide()
-    local recoveryOpen = Button(manage, "Interrupted duels  >", 30, -363, 292, function() Select("Interrupted") end)
+    local recoveryHelp = Label(manage, -314, "GameFontDisableSmall"); recoveryHelp:Hide()
+    local recoveryOpen = Button(manage, "Interrupted duels  >", 30, -334, 292, function() Select("Interrupted") end)
     local manageOverviewBack = Button(manage, "< Overview", 30, -395, 142, function() Select("Overview") end)
     local clearProfiles = Button(manage, "Clear Rivals cache", 180, -395, 142, function()
         if StaticPopup_Show then
@@ -522,9 +522,10 @@ function DP.InstallViews(panel, getRating, getRecords, overview)
             end
         end)
         row:SetScript("OnEnter", function(self)
-            if self.worldRecord and DP.WorldPvP and DP.WorldPvP.ShowHistoryTooltip then
+            if self.worldRecord then
                 if DP.Usage and DP.Usage.HideHistoryTooltip then DP.Usage.HideHistoryTooltip() end
-                GameTooltip:Hide(); DP.WorldPvP.ShowHistoryTooltip(self, self.worldRecord); return
+                GameTooltip:Hide()
+                return
             end
             if self.duelRecord and DP.Usage and DP.Usage.ShowHistoryTooltip then
                 GameTooltip:Hide()
@@ -541,7 +542,7 @@ function DP.InstallViews(panel, getRating, getRecords, overview)
             GameTooltip:Hide()
         end)
         row:SetScript("OnClick", function(self)
-            if self.worldRecord and DP.WorldPvP and DP.WorldPvP.OpenDetails then DP.WorldPvP.OpenDetails(self.worldRecord); return end
+            if self.worldRecord and DP.WorldPvP and DP.WorldPvP.OpenDetails then GameTooltip:Hide(); DP.WorldPvP.OpenDetails(self.worldRecord); return end
             if self.duelRecord then DP.Usage.OpenDetails(self.duelRecord); return end
             if self.recoveryItem and DP.ReviewRecovery then DP.ReviewRecovery(self.recoveryItem, self.undoRecovery); return end
             if self.destination then Select("MatchupDetail", self.destination, self.tipTitle, current) end
@@ -807,7 +808,7 @@ function DP.InstallViews(panel, getRating, getRecords, overview)
         local styledEmpty = #items == 0 and (current == "History" or current == "Opponents" or current == "Classes" or current == "MatchupDetail")
         refreshUI.emptyCard:SetShown(#items == 0)
         refreshUI.emptyHint:SetShown(styledEmpty)
-        refreshUI.emptyHint:SetText(current == "History" and historySource ~= "duels" and "Open-world fights involving you appear here.\nWorld encounters close after 60 seconds without PvP activity." or
+        refreshUI.emptyHint:SetText(current == "History" and historySource ~= "duels" and "Open-world fights involving you appear here.\nEncounters close shortly after combat ends; 60 seconds is only a safety timeout." or
             (current == "History" or current == "MatchupDetail") and "Completed duels appear here.\nUse the available filters to browse this record." or
             matchupSource == "world" and "World PvP opponents and classes appear here after an encounter." or "Compare your record by opponent or class.\nComplete a duel to begin building your matchups.")
         refreshUI.empty:SetJustifyH("CENTER")
@@ -988,7 +989,7 @@ function DP.InstallViews(panel, getRating, getRecords, overview)
                     row.amount:SetText(string.format("|cff65e6ad%d|r-|cffff8888%d|r", item.kills or 0, item.deaths or 0))
                     local worldIdentity = (item.level and ("Lv " .. item.level .. "  ·  ") or "") .. (item.spec and (item.spec .. "  ·  ") or "")
                     row.second:SetText(string.format("%sSolo %d-%d  ·  %d encounters", worldIdentity, item.soloKills or 0, item.soloDeaths or 0, item.encounters or 0))
-                    row.mode:ClearAllPoints(); row.mode:SetPoint("TOPRIGHT", -8, -25); row.mode:SetWidth(118); row.mode:SetJustifyH("RIGHT"); row.mode:SetText("World PvP")
+                    row.mode:SetText("")
                     row.tipTitle = DP.Theme.ClassName(item.name, item.class)
                     row.tipLines = {string.format("World record  |cff65e6ad%d kills|r  |cffff8888%d deaths|r", item.kills or 0, item.deaths or 0),
                         item.level and ("Last observed level  " .. item.level) or "Level not observed",
@@ -1002,7 +1003,7 @@ function DP.InstallViews(panel, getRating, getRecords, overview)
                     row.first:SetText(DP.Theme.ClassName(name, item.key)); row.first:SetWidth(198)
                     row.amount:SetText(string.format("|cff65e6ad%d|r-|cffff8888%d|r", item.kills or 0, item.deaths or 0))
                     row.second:SetText(string.format("%d encounters  ·  %d rivals", item.encounters or 0, item.distinct or 0))
-                    row.mode:ClearAllPoints(); row.mode:SetPoint("TOPRIGHT", -8, -25); row.mode:SetWidth(118); row.mode:SetJustifyH("RIGHT"); row.mode:SetText("World PvP")
+                    row.mode:SetText("")
                     row.tipTitle = name
                     row.tipLines = {string.format("World record  |cff65e6ad%d kills|r  |cffff8888%d deaths|r", item.kills or 0, item.deaths or 0),
                         string.format("%d observed rivals", item.distinct or 0)}
@@ -1105,7 +1106,7 @@ function DP.InstallViews(panel, getRating, getRecords, overview)
     DP.duelViewControls = {rows = rows, nav = nav, previous = previous, nextPage = nextPage, clear = clear, page = pageLabel,
         historyMode = historyMode, historySource = historySourceButton, matchupSource = matchupSourceButton, boardFilter = boardFilter, boardSort = boardSort, clearProfiles = clearProfiles, scrollbar = scrollbar, body = body,
         details = details, detailsBack = detailsBack, graphBack = graphBack, period = periodButton, overviewPeriod = overviewPeriodButton, mode = modeButton, manageBack = manageBack, empty = empty, classes = classes, matchups = matchups,
-        manage = manage, manageOverviewBack = manageOverviewBack, shareOn = shareOn, shareOff = shareOff,
+        manage = manage, manageOverviewBack = manageOverviewBack, shareOn = shareOn, shareOff = shareOff, dev1vNToast = dev1vNToast,
         worldOn = worldOn, worldOff = worldOff, recoveryOpen = recoveryOpen}
     refresh()
 end

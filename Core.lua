@@ -1,5 +1,5 @@
 local addonName, DP = ...
-local VERSION, TRACE_LIMIT, ACTIVITY_LIMIT = "0.21.45-beta", 1000, 200
+local VERSION, TRACE_LIMIT, ACTIVITY_LIMIT = "0.21.46-beta", 1000, 200
 local frame = CreateFrame("Frame")
 local db, observer, tracker, parsers, ready, rating
 local seasons, selectedPeriod = {}, nil
@@ -434,8 +434,10 @@ local function Initialize()
             end,
             saved = function(record)
                 local color = DP.WorldPvP.ResultColor and DP.WorldPvP.ResultColor(record.resultKey) or "|cffffce70"
+                local headcount = DP.WorldPvP.EncounterHeadcount and DP.WorldPvP.EncounterHeadcount(record) or
+                    string.format("%dv%d", record.friendlyCount or 1, record.enemyCount or 0)
                 Say(color .. (record.resultLabel or "World PvP") .. "|r: " ..
-                    string.format("%dv%d, %d %s, %s", record.friendlyCount or 1, record.enemyCount or 0, record.enemyDeaths or 0,
+                    string.format("%s, %d %s, %s", headcount, record.enemyDeaths or 0,
                         (record.enemyDeaths or 0) == 1 and "kill" or "kills", record.playerDied and "death" or "survived"))
             end,
         })
@@ -572,7 +574,7 @@ local function Initialize()
     DP.InstallCharacterTab(DisplayRating, DisplayRecords)
     for _, event in ipairs({"DUEL_REQUESTED", "DUEL_FINISHED", "DUEL_INBOUNDS", "DUEL_OUTOFBOUNDS",
         "DUEL_TO_THE_DEATH_REQUESTED", "CHAT_MSG_SYSTEM", "UI_INFO_MESSAGE", "UI_ERROR_MESSAGE",
-        "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED", "PLAYER_TARGET_CHANGED", "UPDATE_MOUSEOVER_UNIT", "NAME_PLATE_UNIT_ADDED", "PLAYER_ENTERING_WORLD",
+        "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED", "PLAYER_TARGET_CHANGED", "UPDATE_MOUSEOVER_UNIT", "NAME_PLATE_UNIT_ADDED", "UNIT_AURA", "PLAYER_ENTERING_WORLD",
         "PLAYER_DEAD", "PLAYER_LOGOUT", "START_TIMER", "MIRROR_TIMER_START", "ADDON_LOADED", "CHAT_MSG_ADDON",
         "ADDON_ACTION_BLOCKED", "ADDON_ACTION_FORBIDDEN", "COMBAT_LOG_EVENT_UNFILTERED",
         "BAG_UPDATE_DELAYED", "PLAYER_EQUIPMENT_CHANGED", "GET_ITEM_INFO_RECEIVED", "INSPECT_READY",

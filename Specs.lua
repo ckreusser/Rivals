@@ -65,7 +65,7 @@ local SIGNATURE_CLASS_BY_NAME = {
     -- Priest
     ["shadowform"]="PRIEST", ["power infusion"]="PRIEST", ["inner focus"]="PRIEST", ["vampiric embrace"]="PRIEST", ["lightwell"]="PRIEST",
     -- Shaman
-    ["elemental mastery"]="SHAMAN", ["stormstrike"]="SHAMAN", ["mana tide totem"]="SHAMAN", ["nature's swiftness"]="SHAMAN",
+    ["elemental mastery"]="SHAMAN", ["stormstrike"]="SHAMAN", ["mana tide totem"]="SHAMAN",
     -- Mage
     ["ice barrier"]="MAGE", ["cold snap"]="MAGE", ["blast wave"]="MAGE", ["combustion"]="MAGE",
     ["arcane power"]="MAGE", ["presence of mind"]="MAGE", ["pyroblast"]="MAGE",
@@ -76,6 +76,67 @@ local SIGNATURE_CLASS_BY_NAME = {
     ["moonkin form"]="DRUID", ["feral charge"]="DRUID", ["leader of the pack"]="DRUID", ["swiftmend"]="DRUID",
 }
 
+-- Class inference can use common, class-exclusive abilities in addition to
+-- talent signatures. Keep this deliberately conservative: racials, items and
+-- spells shared by multiple classes are omitted so a color is only assigned
+-- when the combat log gives us strong class evidence.
+local CLASS_ABILITY_BY_NAME = {
+    -- Warrior
+    ["heroic strike"]="WARRIOR", ["hamstring"]="WARRIOR", ["rend"]="WARRIOR",
+    ["overpower"]="WARRIOR", ["execute"]="WARRIOR", ["thunder clap"]="WARRIOR", ["demoralizing shout"]="WARRIOR",
+    ["battle shout"]="WARRIOR", ["intimidating shout"]="WARRIOR", ["bloodrage"]="WARRIOR", ["retaliation"]="WARRIOR",
+    ["recklessness"]="WARRIOR", ["shield bash"]="WARRIOR", ["pummel"]="WARRIOR", ["intercept"]="WARRIOR",
+    ["disarm"]="WARRIOR", ["berserker rage"]="WARRIOR", ["berserker stance"]="WARRIOR", ["defensive stance"]="WARRIOR",
+    ["battle stance"]="WARRIOR", ["sunder armor"]="WARRIOR", ["revenge"]="WARRIOR", ["shield block"]="WARRIOR",
+    -- Paladin
+    ["blessing of freedom"]="PALADIN", ["blessing of protection"]="PALADIN", ["hammer of justice"]="PALADIN",
+    ["divine shield"]="PALADIN", ["divine protection"]="PALADIN", ["consecration"]="PALADIN",
+    ["seal of command"]="PALADIN", ["seal of righteousness"]="PALADIN", ["judgement"]="PALADIN",
+    ["holy light"]="PALADIN", ["flash of light"]="PALADIN", ["lay on hands"]="PALADIN", ["cleanse"]="PALADIN",
+    ["purify"]="PALADIN", ["redemption"]="PALADIN", ["righteous fury"]="PALADIN",
+    -- Hunter
+    ["aimed shot"]="HUNTER", ["multi-shot"]="HUNTER", ["arcane shot"]="HUNTER", ["concussive shot"]="HUNTER",
+    ["wing clip"]="HUNTER", ["feign death"]="HUNTER", ["flare"]="HUNTER", ["viper sting"]="HUNTER",
+    ["serpent sting"]="HUNTER", ["scorpid sting"]="HUNTER", ["freezing trap"]="HUNTER", ["frost trap"]="HUNTER",
+    ["hunter's mark"]="HUNTER", ["volley"]="HUNTER",
+    -- Rogue
+    ["sinister strike"]="ROGUE", ["backstab"]="ROGUE", ["eviscerate"]="ROGUE", ["rupture"]="ROGUE",
+    ["kidney shot"]="ROGUE", ["cheap shot"]="ROGUE", ["gouge"]="ROGUE", ["blind"]="ROGUE", ["vanish"]="ROGUE",
+    ["sprint"]="ROGUE", ["evasion"]="ROGUE", ["slice and dice"]="ROGUE", ["expose armor"]="ROGUE", ["kick"]="ROGUE",
+    ["sap"]="ROGUE", ["garrote"]="ROGUE", ["ambush"]="ROGUE", ["crippling poison"]="ROGUE",
+    ["wound poison"]="ROGUE", ["mind-numbing poison"]="ROGUE", ["deadly poison"]="ROGUE", ["instant poison"]="ROGUE",
+    -- Priest
+    ["psychic scream"]="PRIEST", ["shadow word: pain"]="PRIEST", ["mind blast"]="PRIEST", ["mind flay"]="PRIEST",
+    ["power word: shield"]="PRIEST", ["renew"]="PRIEST", ["prayer of healing"]="PRIEST", ["mana burn"]="PRIEST",
+    ["devouring plague"]="PRIEST", ["silence"]="PRIEST", ["holy nova"]="PRIEST",
+    -- Shaman
+    ["earth shock"]="SHAMAN", ["frost shock"]="SHAMAN", ["flame shock"]="SHAMAN", ["lightning bolt"]="SHAMAN",
+    ["chain lightning"]="SHAMAN", ["grounding totem"]="SHAMAN", ["earthbind totem"]="SHAMAN", ["tremor totem"]="SHAMAN",
+    ["windfury totem"]="SHAMAN", ["purge"]="SHAMAN", ["ghost wolf"]="SHAMAN", ["lesser healing wave"]="SHAMAN",
+    ["chain heal"]="SHAMAN", ["reincarnation"]="SHAMAN",
+    -- Mage
+    ["frostbolt"]="MAGE", ["fireball"]="MAGE", ["fire blast"]="MAGE", ["frost nova"]="MAGE", ["polymorph"]="MAGE",
+    ["counterspell"]="MAGE", ["blink"]="MAGE", ["ice block"]="MAGE", ["arcane explosion"]="MAGE",
+    ["arcane missiles"]="MAGE", ["scorch"]="MAGE", ["cone of cold"]="MAGE", ["blizzard"]="MAGE", ["evocation"]="MAGE",
+    ["mana shield"]="MAGE", ["dampen magic"]="MAGE", ["amplify magic"]="MAGE", ["mage armor"]="MAGE",
+    ["frost armor"]="MAGE", ["ice armor"]="MAGE",
+    -- Warlock
+    ["shadow bolt"]="WARLOCK", ["corruption"]="WARLOCK", ["fear"]="WARLOCK", ["death coil"]="WARLOCK",
+    ["drain life"]="WARLOCK", ["drain mana"]="WARLOCK", ["drain soul"]="WARLOCK", ["curse of agony"]="WARLOCK",
+    ["curse of tongues"]="WARLOCK", ["curse of weakness"]="WARLOCK", ["curse of recklessness"]="WARLOCK",
+    ["curse of elements"]="WARLOCK", ["curse of shadow"]="WARLOCK", ["immolate"]="WARLOCK", ["searing pain"]="WARLOCK",
+    ["hellfire"]="WARLOCK", ["rain of fire"]="WARLOCK", ["health funnel"]="WARLOCK", ["banish"]="WARLOCK",
+    ["enslave demon"]="WARLOCK", ["life tap"]="WARLOCK",
+    -- Druid
+    ["rejuvenation"]="DRUID", ["regrowth"]="DRUID", ["healing touch"]="DRUID", ["moonfire"]="DRUID", ["wrath"]="DRUID",
+    ["starfire"]="DRUID", ["entangling roots"]="DRUID", ["faerie fire"]="DRUID", ["insect swarm"]="DRUID",
+    ["barkskin"]="DRUID", ["travel form"]="DRUID", ["cat form"]="DRUID", ["bear form"]="DRUID",
+    ["dire bear form"]="DRUID", ["aquatic form"]="DRUID", ["abolish poison"]="DRUID", ["innervate"]="DRUID",
+    ["pounce"]="DRUID", ["rake"]="DRUID", ["rip"]="DRUID", ["shred"]="DRUID", ["maul"]="DRUID",
+    ["swipe"]="DRUID", ["bash"]="DRUID", ["frenzied regeneration"]="DRUID",
+}
+for name, class in pairs(SIGNATURE_CLASS_BY_NAME) do CLASS_ABILITY_BY_NAME[name] = class end
+
 local function Lower(value)
     return type(value) == "string" and value:lower() or ""
 end
@@ -85,8 +146,21 @@ local function SignatureName(spellID, spellName)
 end
 
 local function SignatureClass(spellID, spellName)
+    spellID = tonumber(spellID)
+    if spellID == 16188 then return "SHAMAN" end -- Nature's Swiftness
+    if spellID == 17116 then return "DRUID" end  -- Nature's Swiftness
     local name = SignatureName(spellID, spellName)
     return name and SIGNATURE_CLASS_BY_NAME[Lower(name)] or nil
+end
+
+local function AbilityClass(spellID, spellName)
+    local signature = SignatureClass(spellID, spellName)
+    if signature then return signature end
+    return CLASS_ABILITY_BY_NAME[Lower(spellName)] or nil
+end
+
+function S.InferClassFromAbility(spellID, spellName)
+    return AbilityClass(spellID, spellName)
 end
 
 local function UsageEvidence(session)
@@ -482,7 +556,7 @@ function S.ObserveCombat(session, info)
     -- Talent-defining spells are themselves reliable class evidence. This matters
     -- when the duel handshake knew the opponent GUID but no target/mouseover class
     -- was available at the exact combat-log event.
-    if not class then class = SignatureClass(spellID, spellName) end
+    if not class then class = AbilityClass(spellID, spellName) end
     if not class then return end
     if session.identity and not session.identity.class then session.identity.class = class end
     session.specEvidence = session.specEvidence or {}
@@ -506,7 +580,7 @@ function S.ObserveWorldCombat(session, info)
     if not enemy then return end
     local spellID, spellName = tonumber(info[12]), info[13]
     local signature = spellID and SIGNATURE_BY_ID[spellID] or nil
-    local class = enemy.class or SignatureClass(spellID, spellName)
+    local class = enemy.class or AbilityClass(spellID, spellName)
     if not class then return end
     enemy.class = enemy.class or class
     local name = signature or spellName

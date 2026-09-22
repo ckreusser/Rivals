@@ -1,36 +1,203 @@
+## 0.21.88-beta
+
+- Distinguished Encounter header opponent tooltips from Opponent Records: header rows now focus on the current fight, while Opponent Records focus on lifetime World PvP history.
+- Removed the redundant Encounter header tooltip and the development 1vN toast button.
+- Changed map-coordinate tooltip formatting to standard `x, y` coordinates without percent signs.
+- Removed redundant per-row `World PvP` labels from World PvP Matchups to prevent subtitle clipping.
+
+
+- Duel Details and World PvP Encounter Details are now mutually exclusive: opening one closes the other so the windows cannot overlap.
+- Applied the World PvP-style combat-log readability treatment to Duel Details: class-colored actors, white abilities, red damage, green healing, gold cast/interrupt emphasis, muted miss text, and class inference from opponent abilities when needed.
+- Expanded Encounter Details tooltips with fight-specific and lifetime opponent stats, damage exchanged, observed casts/interrupts/dispels, detected buffs, zone history, encounter-end context, and clearer solo/outnumbered explanations.
+- Reworked all four Summary metric tooltips to show useful supporting detail such as opponent lists, kill/Killing Blow attribution, pressure counts, KB share, and Honorable Kill vs tracked-death context.
+
+## 0.21.59-beta
+
+- Added a Manage-screen development button that previews the Solo 1vN result toast without creating an encounter or changing World PvP statistics.
+
+## 0.21.58-beta
+
+- Reworked the encounter card footer so survival state and duration are separated cleanly instead of crowding kill text together.
+- Reformatted Location to use the available header area more deliberately, with larger adaptive zone text, separate subzone styling, wrapping for long names, and a full-location tooltip.
+- Added subtle up/down scroll hints to Opponents and Opponent Records while keeping both lists free of visible scrollbars.
+- Replaced row-sized wheel jumps with smooth interpolated scrolling for both opponent lists; hovering an opponent row/card also preserves wheel scrolling.
+- Removed the redundant World PvP History row tooltip and explicitly dismisses any tooltip when opening encounter details.
+- Added contextual tooltips to the encounter card, map, location, summary metrics, encounter context, header opponent rows, and Opponent Records cards.
+- Improved Summary context duration formatting to use readable minute/second values.
+
+## 0.21.55-beta
+
+- Moved enemy world-buff/consumable presentation entirely into Items & Abilities; Opponent Records no longer show WB/C counts or buff hover details.
+- Reworked the encounter header into map/result/intel cards so Location and Opponents use the header space more deliberately.
+- Items & Abilities now reads more like a dataframe with neutral alternating row shading beneath the gold section separators and a header aligned to the data width.
+- Fixed detected World Buffs / Consumable Buffs ordering so those sections sort predictably with the rest of the usage dataframe.
+- Increased internal spacing in Opponent Records cards so the record line no longer crowds the bottom border.
+
+## 0.21.54-beta
+
+- Added enemy buff intelligence for World PvP encounters. Rivals snapshots observable enemy helpful auras from target, mouseover, focus, and nameplates and continues watching aura changes during the fight.
+- Tracks Classic world buffs separately from consumable buffs, including Dragonslayer, Warchief's Blessing, Spirit of Zandalar, Songflower, Dire Maul tribute buffs, Sayge fortunes, and Traces of Silithyst.
+- Long-duration consumable auras are matched against the existing Usage Catalog, so flasks, elixirs, Free Action/LIP-style buffs, Juju/Zanza effects, Blasted Lands buffs, Firewater, and other detected consumables can be retained even when their original cast happened before the encounter.
+- Opponent Records now show compact `WB` / `C` detection counts and expose the full detected buff list on mouseover.
+- Items & Abilities now includes World Buffs Detected and Consumable Buffs Detected sections for pre-existing/observed enemy buffs.
+- Added `UNIT_AURA` observation and combat-log aura apply/refresh/remove support without claiming unseen buffs were absent.
+
+## 0.21.47-beta
+
+- Replaced the centered dot on Most Killed with a compact `×N` kill-count treatment (for example, `Victors ×4`).
+- Nemesis now shows only the rival name at a glance; the number of times they killed you is available on mouseover instead.
+- Clarified Most Killed and Nemesis tooltips with separate kill/death lines.
+
+## 0.21.46-beta
+
+- World PvP encounters now use actual combat-state boundaries: leaving combat starts a 10-second continuity grace, a different opponent starts a new encounter immediately, and the same opponent can still resume within the grace for Classic combat-drop quirks.
+- Kept the old 60-second inactivity timer only as a safety fallback, preventing sequential bot/player streams from accumulating into impossible long-running headcounts such as 22v38.
+- World PvP chat headcounts now use the same contested/overlap model as History and Solo 1vN instead of raw unique participants.
+- Fixed World PvP streaks to count consecutive player kills and reset only on player death; harmless disengages no longer reset the streak.
+- Zone labels now prefer the player's actual zone text over continent-level map names. Existing continent-labeled records use a retained subzone as a non-destructive Favorite Zone fallback when possible.
+
 ## 0.21.45-beta
 
-- Updated addon-sharing messages to focus on WPvP tracking: encounter maps, solo 1vX results, rival records, and starred fights. Duel rating and Rated/Casual messaging remain included.
-- Removed the experimental Spy integration introduced in 0.21.44. Most Killed and Nemesis use Rivals' own WPvP encounter history, with no Spy dependency.
+- Removed the optional Spy integration.
+- Most Killed and Nemesis once again use Rivals World PvP encounter history only.
+- Removed Spy as an optional dependency and restored the original rivalry-stat tooltips.
 
-WPvP tracking and rivalry-stat behavior are unchanged from the previously published 0.21.42-beta build.
+## 0.21.44-beta
 
-## 0.21.42-beta
+- Added optional Spy integration for World PvP Most Killed and Nemesis statistics.
+- Spy history is preferred when available; Rivals remains the fallback.
+- Stat tooltips show the active data source and Rivals' locally recorded count for comparison.
+- Added Spy as an optional dependency so its per-character PvP ledger is available when installed.
+
+## 0.21.43-beta
+
+- Align Duel and World PvP paired stat slabs to the main plaque edges.
+- Restore the Overview Lifetime dropdown to the Prefer Rated baseline.
+- Rebuild the World PvP 2x2 rundown as a raised plaque with balanced quadrants.
+- Re-space the World PvP footer and Manage button.
+
+## 0.21.43-beta
+
+- Rebalanced the World PvP Overview lower stats into a centered four-quadrant plaque.
+- Matched Duel Rating paired-stat slabs to World PvP geometry.
+- Tinted paired-slab dividers to the bronze header-plaque trim.
+- Improved World PvP matchup-detail record-count and footer spacing.
+
+## 0.21.43-beta
+
+- Reworked the World PvP Overview card around kills, streaks, solo/outnumbered accomplishments, honorable kills, and gank stats; deaths move to the card tooltip.
+- Removed the Recent Encounters blip strip and redundant World History Overview button.
+- Added max-level GANK and 5+ level-disparity LOWBIE GANK classification, with opponent level capture from target/mouseover/nameplates when available.
+- World PvP History rows now lead with opponent name, class, and observed level.
+- Character pane tab now follows the saved Overview mode: Duels or WPvP.
+- Reduced the encounter-map raid X size.
+- Added a framed Combat Log region and filled unused Summary space with persistent rivalry/context panels.
+- Tightened the Overview carousel clip to the Character pane interior border and removed mid-swipe crossfading for a cleaner push animation.
+
+## 0.21.43-beta
+
+- Refactored the Character/History/Matchups refresh renderer to keep Classic Era below Lua's upvalue limit.
+- No intended UI or World PvP behavior changes.
+
+## 0.21.43-beta
+
+- World PvP maps: rebuilt the encounter marker as a fixed viewport child, explicitly binds Blizzard's raid-target icon sheet before selecting Cross (7), raises it above the ScrollFrame, and clamps it inside the crop so the red X remains visible even near zone edges.
+- World PvP Overview: expanded the main card to spell out Kills/Deaths, added encounter and unique-rival counts, and reorganized the lower statistics around streaks, honorable kills, and rivals.
+- World PvP Matchups: rebuilt nested matchup-detail layout so the rivalry header, back control, and encounter rows have dedicated vertical space instead of overlapping.
+- Overview carousel: changed the swipe to a 0.26s smoothstep transition with a light crossfade, tighter paginator dots, and a short post-settle delay before the selected card's lightsweep.
+
+## 0.21.43-beta
+
+- World PvP: passive ganks are now labeled neutrally as `1 KILL` / `N KILLS` instead of `VICTORY` or `SURVIVED`; a 1v1 Victory now requires observed hostile pressure from the opponent.
+- World PvP maps: changed History and Details to a consistent 3.25x local crop around the recorded terminal kill/death position.
+- World PvP maps: moved the encounter marker to a dedicated overlay and now use Blizzard's raid-target Cross helper for a reliable red X above all map layers.
+- World PvP History: prevented the timestamp/location line from wrapping outside its encounter card.
+- World PvP details: headcount copy now distinguishes simultaneous contested fights from multiple enemy players encountered sequentially.
+
+## 0.21.43-beta
+
+- Tightened Outnumbered Victory recognition: unique enemy names no longer imply a 1v2+. Rivals now requires two or more enemy players to apply overlapping hostile pressure to the player, and full Outnumbered Victory requires every contesting enemy to die while the player survives. Saved 0.21.x encounters are reclassified on load when their stored combat log contains enough pressure evidence.
+- Passive/sequential ganks no longer add Solo 1v1 or Outnumbered accomplishments; the long 60-second CC/disengage timeout remains, while already-dead enemy chains settle after a shorter 6-second grace period.
+- Encounter locations now prefer the terminal kill/death position so the map marker represents the decisive fight location instead of an averaged travel path.
+- Moved the red X raid marker onto the visible map viewport, above the explored-map layers, with a dark offset shadow so it cannot disappear behind the scrolled map canvas.
+- Added the same gold diagonal light sweep used by Duel Rating to the World PvP card.
+- Added a ten-encounter Recent strip to the World PvP card so the main card has useful visual history instead of an empty lower band.
+- Fixed the Overview paginator so selected/unselected dots keep identical font size and baseline, and tightened their spacing.
+
+## 0.21.43-beta
+
+- Changed World PvP map thumbnails to aspect-preserving cover crops centered on the recorded encounter location, eliminating letterboxing while keeping the fight marker meaningful.
+- Replaced the gold plus encounter marker with Blizzard's red X raid-target marker.
+- Inset Encounter Details scroll regions so Blizzard scroll controls stay fully inside the fixed details frame.
+- Reworked the Summary tab into a denser encounter/rivalry readout with metric cards and per-enemy lifetime World PvP records.
+- History now defaults to `All encounters` when the Rivals pane is opened.
+- Matchups now defaults to Duel or World PvP based on the currently selected Overview carousel page whenever the top-level Matchups tab is opened.
+
+## 0.21.43-beta
+
+- Fixed World PvP encounter maps so they composite Blizzard's explored-area textures over the fogged base map, matching the character's actual World Map exploration state.
+- Encounter Details now keeps a fixed outer window size across Summary, Items & Abilities, and Combat Log. The usage dataframe still sizes to its actual contents inside that fixed pane.
+
+## 0.21.43-beta
+
+- Centered the Overview paginator on the actual Duel Rating / World PvP card rather than the wider Overview frame.
+- Made both page dots true cycle controls: clicking the illuminated dot advances to the other page, while clicking the unlit dot selects its page; repeatedly clicking either physical dot cycles the carousel.
+- Changed post-encounter notifications to notable-only. Routine 1v1s, deaths, trades, group fights and disengages are recorded without a center-screen plaque.
+- Reserved the World PvP result plaque for solo 1v2+ successes: Outnumbered Victories and kill-and-escape Outnumbered Escapes.
+
+## 0.21.43-beta
+
+- Rebuilt the Duel/World Overview swipe inside a clipped ScrollFrame viewport so moving page content cannot bleed outside the Rivals pane.
+- Made Prefer Rated and the Overview Lifetime/Season dropdown true children of the Duel page, so they travel with Duel Rating instead of popping off/on after a swipe.
+- Split the Overview period dropdown from the shared History/Matchups period control to avoid reparenting native Blizzard dropdowns between views.
+- Removed page-dot tooltips, tightened the two-dot paginator styling, and kept it stationary between the rating card and stat slabs.
+- Added a swipe interaction shield and shortened/eased the transition so outgoing controls cannot be clicked mid-animation.
+- Preserved the selected Duel/World Overview page across closing the Character pane and reloads.
+
+## 0.21.43-beta
+
+- Cleaned up the World PvP Overview: Duel-only `Prefer Rated` and `Lifetime` controls are hidden while the World PvP page is selected.
+- Moved the Duel/World page dots into the gutter directly below the main rating card so they no longer crowd the placement progress bars.
+- Restored the Duel placement bars to their original vertical position.
+- Switching between Duel Rating and World PvP now refreshes the shared Overview controls immediately.
+
+## 0.21.43-beta
+
+### Overview navigation
+
+- Replaced the large Duels / World PvP Overview tabs with a two-dot page indicator centered at the bottom of the rating card; the illuminated dot marks the active page.
+- World PvP now occupies the same Overview geometry as Duel Rating instead of opening as an opaque pane over it.
+- Switching between Duel Rating and World PvP uses a short left/right horizontal swipe.
+- The rating-card plaque changes from `Duel Rating` to `World PvP` with the selected page.
+- The selected Overview page is saved in RivalsDB and survives closing/reopening the Character pane and UI reloads.
+
+## 0.21.43-beta
 
 ### World PvP
 
-- Added automatic open-world PvP encounter tracking, with kills, deaths, honorable kills, streaks, opponent records, and class matchups. Tracking is enabled by default and can be toggled in Manage.
-- Added Outnumbered Victory and Outnumbered Escape recognition for solo 1v2+ fights. Recognition requires overlapping enemy pressure; passive or sequential kills do not count as outnumbered victories.
-- Added Gank and Lowbie Gank classification using observed opponent levels. Routine encounters are recorded quietly; result popups are reserved for notable outnumbered successes.
-- Added encounter maps centered on the decisive kill/death location, with explored zone art and a visible red X marker.
-- Added World PvP rivalry summaries to player tooltips and the `/rivals world` command.
-
-### History and encounter details
-
-- Browse Duels, World PvP, or All encounters in History, with opponent names, classes, and observed levels on World PvP rows.
-- Added World PvP encounter details with Summary, Items & Abilities, and Combat Log tabs, including participant filters and lifetime rivalry context.
-- Added persistent duel combat logs with My actions and What happened to me views.
-- Improved item identification, including opponent activations and equipped-item resolution for shared activation spells. Usage now separates Potions/Consumables, Engineering Gadgets, Equipment, and racial abilities.
-- Expanded long-cooldown tracking to abilities with cooldowns of three minutes or longer.
-- Added spec detection from inspected talents and combat evidence, including Classic hybrid builds. Spec evidence stays tied to the encounter instead of carrying over across later fights.
-- Clarified record labels as Rivals Verified, Local Record, and Rival Report.
+- Added automatic open-world PvP encounter tracking without changing Duel Rating or Rated/Casual duel rules.
+- Encounters remain active through long Classic Era resets and crowd control, closing after 60 seconds without PvP activity; terminal kill/death states settle after a shorter grace period for follow-up actions.
+- Added explicit player-participation headcounts and special recognition for successful solo 1v2+ fights, including Outnumbered Victory, Outnumbered Escape, partial outnumbered fights, trades, deaths and disengages.
+- Added location capture with Blizzard zone-map art and an encounter marker in World PvP History cards and encounter details.
+- Added World PvP summaries for kills/deaths, solo 1v1 record, honorable kills, streaks, outnumbered victories and largest outnumbered win.
+- Added persistent World PvP opponent/class matchup records and target-tooltip rivalry summaries.
+- Reused Rivals combat evidence to infer specs independently for each enemy in an encounter without carrying combat-inferred specs across later fights.
+- Added a short post-fight result plaque, with longer emphasis for Outnumbered Victories.
 
 ### Interface
 
-- Switch between Duel Rating and World PvP through a two-page Overview carousel. Your selected page is remembered, and the Character tab follows the selected mode.
-- Matchups opens in the selected Duel or World PvP context, with dedicated opponent and class views.
-- Refined rating cards, paired stat panels, World PvP statistics, dropdown alignment, and encounter-detail spacing.
-- Improved map crops, marker visibility, scroll bounds, and the clipped Overview swipe animation.
+- Kept the existing Overview / History / Matchups / Rivals top navigation; World PvP is folded into those views rather than added as a fifth top-level tab.
+- Added Duels / World PvP context tabs inside Overview.
+- Added All encounters / Duels / World PvP filtering to History; mixed History interleaves duel and World PvP records chronologically.
+- Added Duel matchups / World PvP source selection to Matchups while preserving the existing Opponents / Classes tabs.
+- Added World PvP tracking On/Off controls to Manage; tracking is enabled by default.
+- Added a dedicated World PvP encounter-details presentation with Summary, Items & Abilities and Combat Log tabs.
+- Reworked multi-participant item/ability usage into a vertical Time / Player / Used / Target dataframe grouped by meaningful categories. Empty categories are omitted, participants can be filtered, and the frame grows only to the content limit before scrolling.
+
+### Validation
+
+- Parsed every Lua file successfully after integration.
+- Added a combat-log smoke test confirming a simulated solo 1v2 with two enemy deaths is stored as an Outnumbered Victory with correct headcount, kill totals, summary statistics and opponent aggregates.
 
 ## 0.20.0-beta
 
@@ -43,6 +210,10 @@ WPvP tracking and rivalry-stat behavior are unchanged from the previously publis
 - The promotion text grows and settles into its normal position, with five evenly spaced Zurk Maps-style glows that remain for one second after settling.
 - Used a rendered text texture during resizing, then blended back to the native status label to keep the promotion aligned and smooth.
 - Preserved interrupted promotion playback for the next opening and removed the development preview button.
+- Reworked History duel usage into a three-column Category / You / Rival table; the mouseover now sizes itself to the longest displayed item or ability while Duel Details remains fixed-width.
+- Replaced the Duel Details title rectangle with the exact Zurk Maps / Duel Rating plaque construction and inset the rock background so it stays inside the outer frame corners.
+- Renamed Potions to Potions/Consumables and Engineering Gizmos to Engineering Gadgets, and lowered tracked long cooldowns from 10 minutes to 3 minutes.
+- Added persistent per-duel combat-log tabs to Duel Details for My actions and What happened to me.
 
 ### Fixes
 
@@ -51,7 +222,7 @@ WPvP tracking and rivalry-stat behavior are unchanged from the previously publis
 
 ### Validation
 
-- Expanded regression checks for completion highlights, promotion timing and alignment, replay handling, and faction-aware messaging.
+- Expanded regression checks for completion highlights, promotion timing and alignment, replay handling, faction-aware messaging, three-minute cooldown capture, and duel combat-log persistence.
 - Passed the full Lua 5.1 and mocked-client regression suite.
 
 ## 0.19.0-beta

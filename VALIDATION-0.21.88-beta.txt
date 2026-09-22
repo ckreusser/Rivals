@@ -1,0 +1,8 @@
+Source: supplied AddOns/Rivals.zip, Rivals.toc version 0.21.88-beta.
+Compared against origin/main 6da7eb45eebead1cc3d09ad4f390382c74d5b422 (0.21.45-beta).
+All 31 Lua files pass Lua 5.1 compilation with lupa.lua51.
+Bundled tests/run.py passes parser, usage, rating and protection checks, then fails at tests/verification.lua:42, as documented for the previous release.
+Isolated tests/world_pvp.lua passes on the baseline but stops at line 82 in this ZIP: the assertion expects "no death", while SurvivalText now intentionally returns "survived". Later scenarios are not reached by the unmodified test.
+Runtime and test files preserved from the supplied ZIP. README release version corrected and cumulative CurseForge changelog updated.
+The ZIP's Core.lua still contains internal VERSION "0.21.46-beta" although Rivals.toc declares 0.21.88-beta; preserved as supplied.
+No in-game testing performed.

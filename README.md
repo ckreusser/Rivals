@@ -2,7 +2,7 @@
 
 **Make every fight part of your story.** Rivals is a World of Warcraft Classic Era addon that adds a personal duel rating, duel history, open-world PvP encounters, and opponent insights to the Character and Inspect windows.
 
-**Current version:** 0.21.45-beta · **Client:** Classic Era (Interface 11509)
+**Current version:** 0.21.88-beta · **Client:** Classic Era (Interface 11509)
 
 ## Features
 
@@ -74,7 +74,7 @@ These are conservative reward rules, not accusations of cheating: a legitimate f
 
 Rivals is a **local record**, not a Blizzard rating service or a realm-wide leaderboard. Opponent ratings are estimates learned from your recorded duels. Shared profiles are self-reported, and client agreement is not proof against tampering.
 
-World PvP is a **history and rivalry system, not an Elo rating**. Encounters close after 60 seconds without PvP activity so long Classic Era crowd-control/reset sequences remain one fight. Map markers use the player position Rivals observed during the encounter; participant headcounts are reconstructed from combat-log involvement and are not a claim about every nearby player.
+World PvP is a **history and rivalry system, not an Elo rating**. Leaving combat starts a short continuity grace so Classic Era crowd-control/reset quirks can remain one fight; a different opponent after a full combat drop starts a new encounter immediately. The 60-second inactivity timeout is retained only as a safety fallback. Map markers use the player position Rivals observed during the encounter; participant headcounts are reconstructed from combat-log involvement and are not a claim about every nearby player.
 
 Item and cooldown tracking records observed successful casts during duels and tracked World PvP encounters. It recognizes item-use spells learned from carried/equipped items and abilities with an available base cooldown of **3 minutes or more**. Coverage is partial, especially for unfamiliar opponent items. **N/A means no qualifying usage was recorded**, not proof that nothing was used. Older results cannot be backfilled.
 

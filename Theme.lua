@@ -35,7 +35,7 @@ function T.LightSweep(parent, target, color, diagonal)
         duration = duration or .8
         local width = math.max(1, target:GetWidth())
         local height = math.max(1, target:GetHeight())
-        local bandWidth = math.max(76, width * .28)
+        local bandWidth = math.max(self.minBandWidth or 76, width * (self.bandWidthFactor or .28))
         band:SetSize(bandWidth, height * (diagonal and 1.8 or 1.05))
         band:SetAlpha(0)
         self:SetScript("OnUpdate", function(self, dt)
