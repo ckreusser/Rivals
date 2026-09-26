@@ -1,5 +1,5 @@
 local addonName, DP = ...
-local VERSION, TRACE_LIMIT, ACTIVITY_LIMIT = "0.21.127-beta", 1000, 200
+local VERSION, TRACE_LIMIT, ACTIVITY_LIMIT = "1.0.0", 1000, 200
 local frame = CreateFrame("Frame")
 local db, observer, tracker, parsers, ready, rating
 local seasons, selectedPeriod = {}, nil
@@ -270,13 +270,94 @@ local function Trace(event, ...)
         args = args}, TRACE_LIMIT)
 end
 
+local SCREENSHOT_STATUS_EVENTS = {"SCREENSHOT_STARTED", "SCREENSHOT_SUCCEEDED", "SCREENSHOT_FAILED"}
+local silentScreenshot = {pending = 0, generation = 0}
+
+local function RestoreRivalsScreenshotStatus()
+    local saved = silentScreenshot.saved
+    silentScreenshot.saved = nil
+    silentScreenshot.pending = 0
+    if not saved then return end
+    for _, entry in ipairs(saved) do
+        local statusFrame = entry.frame
+        if statusFrame and statusFrame.RegisterEvent and statusFrame.UnregisterEvent then
+            for event, wasRegistered in pairs(entry.events) do
+                if wasRegistered then
+                    pcall(statusFrame.RegisterEvent, statusFrame, event)
+                else
+                    pcall(statusFrame.UnregisterEvent, statusFrame, event)
+                end
+            end
+        end
+    end
+end
+
+local function FinishRivalsScreenshotStatus()
+    if silentScreenshot.pending <= 0 then return end
+    silentScreenshot.pending = silentScreenshot.pending - 1
+    if silentScreenshot.pending > 0 then return end
+    -- Do not re-register Blizzard's status frames during the same event dispatch;
+    -- on Classic that can allow the just-fired screenshot event to reach them.
+    if C_Timer and C_Timer.After then
+        C_Timer.After(0, RestoreRivalsScreenshotStatus)
+    else
+        RestoreRivalsScreenshotStatus()
+    end
+end
+
+local function SilenceRivalsScreenshotStatus()
+    if silentScreenshot.pending == 0 then
+        silentScreenshot.saved = {}
+        -- Classic currently has two independent center-screen screenshot notices:
+        -- Blizzard_ActionStatus's ActionStatus and UIParent/WorldFrame's
+        -- ScreenshotStatus. Silence only Rivals' capture window, then restore the
+        -- exact event-registration state so normal PrintScreen behavior is untouched.
+        local statusFrames = {}
+        if _G.ActionStatus then statusFrames[#statusFrames + 1] = _G.ActionStatus end
+        if _G.ScreenshotStatus and _G.ScreenshotStatus ~= _G.ActionStatus then
+            statusFrames[#statusFrames + 1] = _G.ScreenshotStatus
+        end
+        for _, statusFrame in ipairs(statusFrames) do
+            if statusFrame.UnregisterEvent and statusFrame.IsEventRegistered then
+                local entry = {frame = statusFrame, events = {}}
+                for _, event in ipairs(SCREENSHOT_STATUS_EVENTS) do
+                    local ok, registered = pcall(statusFrame.IsEventRegistered, statusFrame, event)
+                    if ok then
+                        entry.events[event] = registered and true or false
+                        if registered then pcall(statusFrame.UnregisterEvent, statusFrame, event) end
+                    end
+                end
+                silentScreenshot.saved[#silentScreenshot.saved + 1] = entry
+                -- Also remove any fading status left over from an earlier manual
+                -- screenshot so Rivals never captures that stale notification.
+                if statusFrame.Hide then pcall(statusFrame.Hide, statusFrame) end
+            end
+        end
+    end
+    silentScreenshot.pending = silentScreenshot.pending + 1
+    silentScreenshot.generation = silentScreenshot.generation + 1
+    local generation = silentScreenshot.generation
+    -- Defensive watchdog: if the client never returns SUCCEEDED/FAILED, do not
+    -- leave Blizzard's screenshot-status frames muted for the rest of the session.
+    if C_Timer and C_Timer.After then
+        C_Timer.After(5, function()
+            if silentScreenshot.pending > 0 and silentScreenshot.generation == generation then
+                Trace("SCREENSHOT_STATUS_TIMEOUT", silentScreenshot.pending)
+                RestoreRivalsScreenshotStatus()
+            end
+        end)
+    end
+end
+
 function DP.TakeRivalsScreenshot(kind, subject)
     if not db then return false end
     local enabled = kind == "duel" and db.duelScreenshots == true or
         kind == "world" and db.worldPvPScreenshots == true
     if not enabled or type(Screenshot) ~= "function" then return false end
+    SilenceRivalsScreenshotStatus()
     local ok, err = pcall(Screenshot)
     if not ok then
+        FinishRivalsScreenshotStatus()
         Trace("SCREENSHOT_FAILED", kind, subject or "", tostring(err))
         return false
     end
@@ -300,8 +381,15 @@ local function UnitIdentity(unit)
     if not name then return nil end
     if not realm or realm == "" then realm = GetNormalizedRealmName() end
     local _, class = UnitClass(unit)
+    local localizedRace, raceFile
+    if UnitRace then localizedRace, raceFile = UnitRace(unit) end
+    local faction = UnitFactionGroup and UnitFactionGroup(unit)
+    local sex = UnitSex and UnitSex(unit)
+    local displayID = UnitCreatureDisplayID and UnitCreatureDisplayID(unit)
     return {name = name .. "-" .. realm, guid = UnitGUID(unit), class = class,
-        level = UnitLevel(unit), whisperBlocked = not DP.CanWhisperUnit(unit)}
+        level = UnitLevel(unit), race = raceFile or localizedRace, localizedRace = localizedRace,
+        raceFile = raceFile, faction = faction, sex = sex, portraitSex = sex,
+        portraitDisplayID = displayID, whisperBlocked = not DP.CanWhisperUnit(unit)}
 end
 
 local function FindIdentity(name)
@@ -326,6 +414,12 @@ local function Request(name, direction, excluded, identity)
     if tracker.session and tracker.session.periodId == nil then tracker.session.periodId = observer.activeSeason or false end
     DP.Usage.Scan()
     DP.Usage.Begin(tracker.session)
+    if tracker.session then
+        tracker.session.playerGUID = tracker.session.playerGUID or UnitGUID("player")
+        tracker.session.playerName = tracker.session.playerName or (UnitName("player") or player.name)
+        tracker.session.playerClass = tracker.session.playerClass or player.class
+        if DP.Usage.CaptureDuelBuffs then DP.Usage.CaptureDuelBuffs(tracker.session) end
+    end
     if verifier then verifier:Begin(tracker.session) end
     PersistSession()
     Trace("CAPTURE_REQUEST", name, direction, excluded or false)
@@ -571,6 +665,9 @@ local function Initialize()
             end
             record.ratingEligible = decision.eligible
             record.ratingDecision = decision
+            if DP.Usage and DP.Usage.CaptureDuelConsumableCost then
+                record.duelConsumableCost = DP.Usage.CaptureDuelConsumableCost(record)
+            end
             if verifier then verifier:Finish(record) end
             if DP.RefreshCharacterTab then DP.RefreshCharacterTab() end
             Say((record.won and "Win" or "Loss") .. " vs " .. record.opponent ..
@@ -648,7 +745,7 @@ local function Initialize()
         "PLAYER_DEAD", "PLAYER_LOGOUT", "START_TIMER", "MIRROR_TIMER_START", "ADDON_LOADED", "CHAT_MSG_ADDON",
         "ADDON_ACTION_BLOCKED", "ADDON_ACTION_FORBIDDEN", "COMBAT_LOG_EVENT_UNFILTERED",
         "BAG_UPDATE_DELAYED", "PLAYER_EQUIPMENT_CHANGED", "GET_ITEM_INFO_RECEIVED", "INSPECT_READY",
-        "CHAT_MSG_COMBAT_HONOR_GAIN"}) do
+        "CHAT_MSG_COMBAT_HONOR_GAIN", "SCREENSHOT_SUCCEEDED", "SCREENSHOT_FAILED"}) do
         local ok = pcall(frame.RegisterEvent, frame, event)
         if not ok then Trace("UNSUPPORTED_EVENT", event) end
     end
@@ -669,6 +766,10 @@ frame:RegisterEvent("PLAYER_LOGIN")
 frame:SetScript("OnEvent", function(_, event, ...)
     if event == "PLAYER_LOGIN" then Initialize(); return end
     if not ready then return end
+    if event == "SCREENSHOT_SUCCEEDED" or event == "SCREENSHOT_FAILED" then
+        FinishRivalsScreenshotStatus()
+        return
+    end
     if event == "COMBAT_LOG_EVENT_UNFILTERED" then
         if tracker.session then DP.Usage.Combat(tracker.session, UnitGUID("player")) end
         if DP.WorldPvP and DP.WorldPvP.Combat then DP.WorldPvP.Combat(UnitGUID("player")) end
@@ -733,6 +834,7 @@ frame:SetScript("OnEvent", function(_, event, ...)
         local seconds = DP.Parser.Countdown(_G.DUEL_COUNTDOWN, first)
         if seconds then
             if tracker.session and not tracker.session.identity then tracker.session.identity = FindIdentity(tracker.session.opponent) end
+            if tracker.session and DP.Usage and DP.Usage.CaptureDuelBuffs then DP.Usage.CaptureDuelBuffs(tracker.session) end
             if verifier then verifier:Begin(tracker.session) end
             local accepted = tracker:Countdown(seconds, GetTime())
             if accepted then
@@ -761,7 +863,10 @@ frame:SetScript("OnEvent", function(_, event, ...)
                     end
                 end
                 C_Timer.After(seconds, function()
-                    if tracker.session == session and GetTime() >= session.estimatedStartAt then verifier:LockMode(session) end
+                    if tracker.session == session and GetTime() >= session.estimatedStartAt then
+                        if DP.Usage and DP.Usage.CaptureDuelBuffs then DP.Usage.CaptureDuelBuffs(session) end
+                        verifier:LockMode(session)
+                    end
                 end)
             end
             Trace("COUNTDOWN_CLASSIFICATION", accepted, seconds)

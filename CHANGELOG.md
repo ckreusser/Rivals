@@ -1,3 +1,75 @@
+## Rivals 1.0.0
+
+Rivals is out of beta! Changes since 0.21.181-beta:
+
+### Duel Details
+- Rebuilt Duel Details with Summary, Items & Abilities, and Combat Log tabs matching the World PvP detail window.
+- Added rating before/after and change, class-matchup rating, lifetime/rated/class records, verification status, and duel date/duration to Summary.
+- Added a consumable-spend comparison and itemized ledger using frozen encounter pricing.
+- Added an Enemy Buffs card for newly recorded duels and improved opponent identity capture and portrait fallbacks.
+- Combined duel actions into one chronological combat log and added a participant filter to Items & Abilities. New captures retain first-use timing and target identity when available.
+- Fixed the unsupported rating-change arrow. Duels can still be starred from History.
+
+### Enemy Buffs and Layout
+- Expanded eligible long-duration class buffs, with a five-minute minimum duration to reduce short-effect clutter. Lightning Shield is excluded.
+- Prioritized World Buffs, Flasks, Zanzas, Elixirs, Protection Potions, Class Buffs, then miscellaneous effects.
+- Kept all World PvP detail tabs at a consistent window height and removed phantom scrolling from short combat logs.
+
+### Screenshot and Kill-Tracking Fixes
+- World PvP kill screenshots now wait for confirmed death, preventing premature captures during Druid shapeshifts and similar health transitions.
+- Hunter Feign Death no longer counts as a real death, advances kill statistics, or triggers a kill screenshot.
+- Automatic Rivals screenshots now suppress Blizzard's screenshot-status messages and clear lingering notices before capture. Normal manual screenshot notifications are restored afterward, with a safety timeout.
+
+### Release
+- Graduated Rivals from beta to version 1.0.0 and synchronized addon, capture-report, and README version information.
+
+# 0.21.189-beta
+
+- Remove the star control from Duel Details. Duels can still be starred from History; the expanded detail window no longer carries a favorite control.
+- Replace the unsupported Unicode rating arrow in Duel Details with an ASCII `>` separator so Classic fonts no longer render a missing-glyph square between before/after ratings.
+
+# 0.21.188-beta
+
+- Rebuild Duel Details around the World PvP Encounter Details layout: the same 650px window, three-tab Summary / Items & Abilities / Combat Log navigation, 20px content guides, rock background, plaque framing, and Rivals scrollbar treatment.
+- Replace the old stacked duel usage + separate “My actions / What happened to me” combat-log layout with a single chronological Items & Abilities dataframe and one merged chronological combat log. Duel usage now records first-use time and target identity for new captures when CLEU provides them.
+- Add a Duel Summary page with rating before/after/delta, class-matchup rating, lifetime/rated/opponent-class records, Rivals verification state, duration/date, and a consumable-spend comparison/ledger using the same frozen price engine as World PvP.
+- Add an ENEMY BUFFS card to Duel Details. New duels retain opponent buffs observed from target/mouseover at request/countdown/start and during combat, with the same five-minute spam floor; Lightning Shield stays excluded. Buffs are prioritized World Buffs > Flasks > Zanzas > Elixirs > Protection Potions > Class Buffs > miscellaneous/Noggenfogger-style effects.
+- Expand duel opponent identity capture with race, sex, faction and creature display ID. Duel Details reuses the World PvP portrait resolver, so newly captured duels can show the real Blizzard display and older records fall back safely to the existing race/class portrait system when enough identity was retained.
+- Add a compact class-colored participant filter to Duel Items & Abilities; the currently selected filter is omitted from the open menu, matching the World PvP selector behavior.
+- Add a star control directly to Duel Details so memorable duels can be added to/removed from the existing starred History archive without returning to the Character pane.
+
+# 0.21.187-beta
+
+- Make Rivals-generated duel and World PvP screenshots silent on Classic by temporarily unregistering both Blizzard screenshot-notification frames (`ActionStatus` and `ScreenshotStatus`) from the screenshot status events. Their exact prior registration state is restored immediately after `SCREENSHOT_SUCCEEDED`/`SCREENSHOT_FAILED`, so normal manual screenshots remain unchanged.
+- Hide any fading screenshot status before an automatic capture so an earlier manual `Screen Captured` message cannot leak into a Rivals screenshot.
+- Add a five-second safety restore if the client fails to return a screenshot completion event. The engine-level screenshot/file-write hitch is unchanged because addons cannot make `Screenshot()` asynchronous.
+
+# 0.21.186-beta
+
+- Move Zanza buffs ahead of normal elixirs in ENEMY BUFFS. The priority is now World Buffs > Flasks > Zanzas > Elixirs > Protection Potions > Class Buffs > Noggenfogger/miscellaneous effects.
+
+# 0.21.185-beta
+
+- Remove Lightning Shield from the curated long-duration class buffs shown in World PvP ENEMY BUFFS.
+- Reorder ENEMY BUFFS by PvP significance: World Buffs > Flasks > Elixirs > Protection Potions > Class Buffs > Noggenfogger/miscellaneous long-duration consumable effects. Noggenfogger is explicitly kept out of the normal Elixir tier.
+
+# 0.21.184-beta
+
+- Expand the World PvP ENEMY BUFFS card with curated long-duration class buffs. Fortitude/Spirit/Shadow Protection, Mark/Gift of the Wild, long Paladin blessings, mage armors/intellect, warlock armors, Lightning Shield, and similar tracked class buffs now appear when the captured aura duration is at least five minutes. Short in-fight effects, forms, stances, HoTs, shields, and short emergency blessings remain excluded.
+- Keep the five-minute rule data-driven from the aura snapshot, so existing encounters that retained aura metadata can render these class buffs without a migration.
+- Make Summary, Items & Abilities, and Combat Log use the same 480px World PvP detail-window height. Items & Abilities and Combat Log now scroll inside the same 20px side guides/footprint as Summary instead of growing the detail window to 600px.
+- Remove the Combat Log's artificial 200px scroll-child minimum so short logs do not create phantom scroll range inside the Summary-sized pane.
+
+# 0.21.183-beta
+
+- Ignore CLEU death events flagged `unconsciousOnDeath`. Hunter Feign Death can intentionally masquerade as `UNIT_DIED`; it no longer marks the Hunter dead, advances kill stats, or arms a kill screenshot.
+- Treat unconscious death events as encounter continuity in the retained combat log instead of recording a real death.
+
+# 0.21.182-beta
+
+- Fix premature World PvP kill screenshots against shapeshifting Druids (and similar health-form transitions). A lethal-looking damage payload now records killing-blow detail only; Rivals waits for PARTY_KILL or UNIT_DIED to confirm the opponent is actually dead before scheduling the screenshot.
+- Keep the 0.20-second post-death delay so the corpse and Killing Blow/HK UI have time to settle into the captured frame.
+
 # 0.21.181-beta
 
 - Replace the Rivals promo rotation with the current World PvP- and duel-focused set selected for the addon.

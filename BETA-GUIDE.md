@@ -1,3 +1,5 @@
+<!-- Historical beta testing guide; retained for reference. Current release: Rivals 1.0.0. -->
+
 # Rivals 0.12.1-beta
 
 ## Install or update

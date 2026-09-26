@@ -1,0 +1,8 @@
+Rivals 1.0.0
+Source: installed 0.21.189-beta, promoted to 1.0.0 at user request.
+Baseline: a22774dc4b668b0751ae60cd622aeb2d6c08a499 (0.21.181-beta).
+All 55 Lua files compile under Lua 5.1; all TOC runtime files exist.
+Full tests/run.py: parser, tracker, usage/pricing, rating and protection checks pass; stops at the previously documented tests/verification.lua:42 assertion.
+Standalone tests/world_pvp.lua: passes preceding assertions including confirmed-death screenshot delay and deduplication; stops at line 330 because the test calls nonexistent W.Active(). The Feign Death assertions after that call are not reached.
+No in-game testing performed. These results do not constitute a clean full-suite pass.
+Updated installed and repository Rivals.toc, Core.lua capture version, README, and release changelog to 1.0.0. Historical beta notes remain as history; BETA-GUIDE.md marked historical.

@@ -220,6 +220,38 @@ for _, aura in ipairs(visibleBuffs) do visibleNames[aura.name] = true; visibleBy
 assert(visibleNames["Rallying Cry of the Dragonslayer"] and visibleNames["Elixir of the Mongoose"] and visibleNames["Blessing of Kings"])
 assert(visibleByName["Elixir of the Mongoose"].itemID == 13452)
 assert(not visibleNames["Free Action Potion"])
+
+-- ENEMY BUFFS ordering is significance-first, not observation-time-first:
+-- World Buffs > Flasks > Zanzas > Elixirs > Protection Potions > Class Buffs > misc/novelty.
+local orderedBuffEnemy = {detectedBuffs = {world = {}, consumables = {}, all = {}}}
+local ordered = orderedBuffEnemy.detectedBuffs
+local function addOrdered(bucket, id, name, duration, itemID, firstSeenAt)
+    local e = {spellID=id, name=name, duration=duration, itemID=itemID, firstSeenAt=firstSeenAt or 1, activeAtEngagement=true}
+    ordered.all[tostring(id)] = e
+    if bucket then ordered[bucket][tostring(id)] = e end
+end
+addOrdered("consumables", 16591, "Noggenfogger Elixir", 600, 8529, 1)
+addOrdered(nil, 20217, "Blessing of Kings", 300, nil, 2)
+addOrdered("consumables", 17543, "Greater Fire Protection Potion", 3600, 13457, 3)
+addOrdered("consumables", 17538, "Elixir of the Mongoose", 3600, 13452, 4)
+addOrdered("consumables", 24383, "Swiftness of Zanza", 7200, 20081, 5)
+addOrdered("consumables", 17628, "Flask of Supreme Power", 7200, 13512, 6)
+addOrdered("world", 22888, "Rallying Cry of the Dragonslayer", 7200, nil, 7)
+addOrdered(nil, 10432, "Lightning Shield", 600, nil, 0)
+local orderedVisible = W.GetOpponentBuffsForDetail(orderedBuffEnemy)
+local expectedOrder = {
+    "Rallying Cry of the Dragonslayer",
+    "Flask of Supreme Power",
+    "Swiftness of Zanza",
+    "Elixir of the Mongoose",
+    "Greater Fire Protection Potion",
+    "Blessing of Kings",
+    "Noggenfogger Elixir",
+}
+assert(#orderedVisible == #expectedOrder, "unexpected enemy buff count after priority filtering")
+for i, name in ipairs(expectedOrder) do
+    assert(orderedVisible[i] and orderedVisible[i].name == name, "enemy buff priority mismatch at "..tostring(i)..": "..tostring(orderedVisible[i] and orderedVisible[i].name))
+end
 UnitBuff = nil
 
 -- A Paladin who successfully uses Divine Shield and then Hearthstone inside
@@ -247,9 +279,9 @@ bubbled.resultKey, bubbled.resultLabel, bubbled.outcomeModelVersion = "disengage
 W.Initialize(observerBH, dbBH, {})
 assert(bubbled.resultKey == "bubble_hearth" and bubbled.bubbleHearthEnemyGUID == "Enemy-Paladin")
 
--- Automatic screenshots should use the lethal damage event as the timing
--- anchor, but wait briefly for the Killing Blow / HK combat text to animate in.
--- PARTY_KILL / UNIT_DIED remain fallback-only and must not race the pending timer.
+-- Automatic screenshots must wait for an actual death confirmation. A damage
+-- event whose overkill payload looks lethal is retained for killing-blow detail,
+-- but cannot itself trigger a screenshot (important for Druid health-form shifts).
 local screenshotCalls, screenshotTimers = {}, {}
 DP.TakeRivalsScreenshot = function(kind, subject)
     screenshotCalls[#screenshotCalls + 1] = {kind = kind, subject = subject, event = current and current[2]}
@@ -269,22 +301,38 @@ fire{now, "SPELL_DAMAGE", false, "Player-1", "Alice", player + friendly, 0,
 assert(#screenshotCalls == 0 and #screenshotTimers == 0)
 fire{now, "SPELL_DAMAGE", false, "Player-1", "Alice", player + friendly, 0,
     "Enemy-1", "Knife", player + hostile, 0, 123, "Mortal Strike", 1, 500, 42}
-assert(#screenshotCalls == 0 and #screenshotTimers == 1)
-assert(screenshotTimers[1].delay == 0.20 and screenshotTimers[1].event == "SPELL_DAMAGE")
+assert(#screenshotCalls == 0 and #screenshotTimers == 0)
 fire{now, "PARTY_KILL", false, "Player-1", "Alice", player + friendly, 0,
     "Enemy-1", "Knife", player + hostile, 0}
+assert(#screenshotCalls == 0 and #screenshotTimers == 1)
+assert(screenshotTimers[1].delay == 0.20 and screenshotTimers[1].event == "PARTY_KILL")
 fire{now, "UNIT_DIED", false, nil, nil, 0, 0, "Enemy-1", "Knife", player + hostile, 0}
-assert(#screenshotCalls == 0)
+assert(#screenshotTimers == 1)
 screenshotTimers[1].callback()
 assert(#screenshotCalls == 1 and screenshotCalls[1].subject == "Knife")
 
--- If no lethal overkill signal is available, the later death event still
--- captures immediately instead of waiting for a timer that was never armed.
+-- UNIT_DIED alone is sufficient confirmation and gets the same short post-death
+-- delay so the corpse/Killing Blow UI has time to settle before Screenshot().
 targetGUID = "Enemy-2"
 fire{now, "SPELL_DAMAGE", false, "Player-1", "Alice", player + friendly, 0,
     "Enemy-2", "Mage", player + hostile, 0, 123, "Mortal Strike", 1, 200, -1}
 fire{now, "UNIT_DIED", false, nil, nil, 0, 0, "Enemy-2", "Mage", player + hostile, 0}
-assert(#screenshotCalls == 2 and screenshotCalls[2].event == "UNIT_DIED")
+assert(#screenshotCalls == 1 and #screenshotTimers == 2)
+assert(screenshotTimers[2].delay == 0.20 and screenshotTimers[2].event == "UNIT_DIED")
+screenshotTimers[2].callback()
+assert(#screenshotCalls == 2 and screenshotCalls[2].subject == "Mage")
+
+-- Hunter Feign Death is emitted as an unconscious UNIT_DIED. It must keep the
+-- encounter alive without marking a kill or scheduling a screenshot.
+targetGUID = "Enemy-Hunter"
+fire{now, "SPELL_DAMAGE", false, "Player-1", "Alice", player + friendly, 0,
+    "Enemy-Hunter", "Feigny", player + hostile, 0, 123, "Mortal Strike", 1, 200, -1}
+local feignSession = W.Active()
+assert(feignSession and feignSession.enemies["Enemy-Hunter"])
+fire{now, "UNIT_DIED", false, nil, nil, 0, 0, "Enemy-Hunter", "Feigny", player + hostile, 0, 0, 1}
+assert(not feignSession.enemies["Enemy-Hunter"].died)
+assert(#screenshotTimers == 2 and #screenshotCalls == 2)
+
 C_Timer = oldCTimer
 DP.TakeRivalsScreenshot = nil
 

@@ -49,6 +49,53 @@ local WORLD_BUFFS = {
 local WORLD_BUFF_NAMES = {}
 for _, name in pairs(WORLD_BUFFS) do WORLD_BUFF_NAMES[name] = true end
 
+-- Long-lived class buffs belong in ENEMY BUFFS too, but this stays deliberately
+-- curated instead of dumping every helpful aura. A tracked class buff is only
+-- shown when an aura snapshot reports a real duration of at least five minutes;
+-- that excludes forms/stances/aspects with indefinite client durations and short
+-- in-fight effects such as Power Word: Shield, Blessing of Freedom/Protection,
+-- Regrowth, etc. The exact-name list is rank-agnostic because UnitAura returns
+-- the base spell name rather than the rank text.
+local LONG_CLASS_BUFF_NAMES = {
+    -- Priest
+    ["Power Word: Fortitude"] = true, ["Prayer of Fortitude"] = true,
+    ["Divine Spirit"] = true, ["Prayer of Spirit"] = true,
+    ["Shadow Protection"] = true, ["Prayer of Shadow Protection"] = true,
+    ["Inner Fire"] = true, ["Fear Ward"] = true,
+    ["Touch of Weakness"] = true, ["Shadowguard"] = true,
+
+    -- Druid
+    ["Mark of the Wild"] = true, ["Gift of the Wild"] = true,
+    ["Thorns"] = true, ["Omen of Clarity"] = true,
+
+    -- Paladin. Short emergency blessings are intentionally absent.
+    ["Blessing of Might"] = true, ["Greater Blessing of Might"] = true,
+    ["Blessing of Wisdom"] = true, ["Greater Blessing of Wisdom"] = true,
+    ["Blessing of Kings"] = true, ["Greater Blessing of Kings"] = true,
+    ["Blessing of Salvation"] = true, ["Greater Blessing of Salvation"] = true,
+    ["Blessing of Light"] = true, ["Greater Blessing of Light"] = true,
+    ["Blessing of Sanctuary"] = true, ["Greater Blessing of Sanctuary"] = true,
+
+    -- Mage
+    ["Arcane Intellect"] = true, ["Arcane Brilliance"] = true,
+    ["Frost Armor"] = true, ["Ice Armor"] = true, ["Mage Armor"] = true,
+    ["Dampen Magic"] = true, ["Amplify Magic"] = true,
+
+    -- Warlock
+    ["Demon Skin"] = true, ["Demon Armor"] = true,
+    ["Unending Breath"] = true, ["Detect Lesser Invisibility"] = true,
+    ["Detect Invisibility"] = true, ["Detect Greater Invisibility"] = true,
+
+    -- Shaman
+    ["Water Breathing"] = true, ["Water Walking"] = true,
+}
+
+local function IsLongClassBuff(entry)
+    if not entry or not LONG_CLASS_BUFF_NAMES[entry.name] then return false end
+    local duration = tonumber(entry.duration) or 0
+    return duration >= 300
+end
+
 local function LooksLikeConsumableBuff(name)
     if type(name) ~= "string" or name == "" then return false end
     return name:find("Flask", 1, true) ~= nil or
@@ -270,6 +317,38 @@ local function SortedOpponentBuffs(enemy)
     local detected = enemy and enemy.detectedBuffs or nil
     local all = detected and detected.all or nil
 
+    -- ENEMY BUFFS is intentionally ordered by PvP significance rather than by
+    -- capture time.  This keeps the most meaningful pre-fight advantages at the
+    -- front of the icon grid: world buffs, flasks, Zanzas, elixirs,
+    -- protection potions, long class buffs, then novelty/miscellaneous effects.
+    local function BuffPriority(entry)
+        if not entry then return 99 end
+        local spellID = tonumber(entry.spellID)
+        local name = tostring(entry.name or "")
+        local known = spellID and DP.UsageCatalog and DP.UsageCatalog[spellID] or nil
+        local canonical = known and known.name or name
+        local itemID = tonumber(entry.itemID or (known and known.itemID))
+
+        if (spellID and WORLD_BUFFS[spellID]) or WORLD_BUFF_NAMES[name] or
+                WORLD_BUFF_NAMES[canonical] or name:find("Rallying Cry of the Dragonslayer", 1, true) then
+            return 1
+        end
+
+        -- Noggenfogger is technically named an Elixir, but it belongs with the
+        -- low-priority novelty/miscellaneous effects rather than stat elixirs.
+        if itemID == 8529 or canonical == "Noggenfogger Elixir" or
+                spellID == 16589 or spellID == 16591 or spellID == 16593 or spellID == 16595 then
+            return 7
+        end
+
+        if canonical:find("Flask", 1, true) then return 2 end
+        if canonical:find("Zanza", 1, true) or name:find("Zanza", 1, true) then return 3 end
+        if canonical:find("Elixir", 1, true) then return 4 end
+        if canonical:find("Protection Potion", 1, true) then return 5 end
+        if IsLongClassBuff(entry) then return 6 end
+        return 7
+    end
+
     local function Enriched(entry)
         if not entry then return nil end
         local key = tostring(entry.spellID or entry.name or "unknown")
@@ -319,13 +398,20 @@ local function SortedOpponentBuffs(enemy)
         result[#result + 1] = entry
     end
 
-    -- The header is a curated enemy-buff view, not a generic aura dump. Forms,
-    -- HoTs, temporary class cooldowns (e.g. Regrowth/Unstable Power), etc. stay
-    -- out unless they were explicitly classified as a world/consumable buff.
+    -- The header is a curated enemy-buff view, not a generic aura dump. Keep
+    -- world/consumable intelligence, then add only known class buffs whose aura
+    -- snapshot proves a duration of at least five minutes. This preserves useful
+    -- pre-fight/self-buff context without filling the card with forms, HoTs,
+    -- shields, short blessings, or temporary combat cooldowns.
     for _, entry in pairs(detected and detected.world or {}) do Add(entry) end
     for _, entry in pairs(detected and detected.consumables or {}) do Add(entry) end
+    for _, entry in pairs(all or {}) do
+        if IsLongClassBuff(entry) then Add(entry) end
+    end
 
     table.sort(result, function(a, b)
+        local ap, bp = BuffPriority(a), BuffPriority(b)
+        if ap ~= bp then return ap < bp end
         if (a.activeAtEngagement and true or false) ~= (b.activeAtEngagement and true or false) then
             return a.activeAtEngagement and true or false
         end
@@ -781,6 +867,23 @@ local function UpdatePeaks(session)
     UpdateEnemyPressure(session)
 end
 
+local function IsUnconsciousDeathEvent(info)
+    if not info then return false end
+    local event = info[2]
+    local flag
+    if event == "UNIT_DIED" or event == "UNIT_DESTROYED" or event == "UNIT_DISSIPATES" then
+        -- UNIT_DIED payload: recapID, unconsciousOnDeath.  Hunter Feign Death
+        -- intentionally uses the unconscious form of the death event.
+        flag = info[13]
+    elseif event == "PARTY_KILL" then
+        -- Blizzard's combat-log processor also exposes unconsciousOnDeath for
+        -- PARTY_KILL as its fifth event-specific value. Classic normally does
+        -- not emit PARTY_KILL for Feign Death, but honor the flag if present.
+        flag = info[16]
+    end
+    return flag == true or tonumber(flag) == 1
+end
+
 local function CombatSpellInfo(info)
     local event = info and info[2]
     if type(event) ~= "string" then return nil, nil end
@@ -824,9 +927,13 @@ local function AppendWorldLog(session, info)
     elseif event == "SPELL_INTERRUPT" then
         text = string.format("%s's %s interrupted %s", sourceName, spellName or ("Spell " .. tostring(spellID)), destName)
     elseif event == "PARTY_KILL" then
-        text = string.format("%s killed %s", sourceName, destName)
+        if IsUnconsciousDeathEvent(info) then
+            text = destName .. " became unconscious"
+        else
+            text = string.format("%s killed %s", sourceName, destName)
+        end
     elseif event == "UNIT_DIED" then
-        text = destName .. " died"
+        text = IsUnconsciousDeathEvent(info) and (destName .. " became unconscious") or (destName .. " died")
     end
     if text then
         local amount
@@ -1637,10 +1744,10 @@ local function ScreenshotEnemyDeath(session, enemy, delay)
         end
     end
 
-    -- The killing-blow/HK floating text is rendered just after the CLEU lethal
-    -- damage event. A tiny delay lets that UI animate in before Screenshot() is
-    -- serviced. Mark the death pending immediately so PARTY_KILL / UNIT_DIED
-    -- cannot race the timer and create a duplicate capture.
+    -- Call this only after PARTY_KILL / UNIT_DIED has confirmed death. The short
+    -- delay lets the corpse plus Killing Blow/HK combat text settle before
+    -- Screenshot() is serviced. Mark it pending immediately so duplicate death
+    -- signals cannot schedule a second capture.
     if delay and delay > 0 and C_Timer and C_Timer.After then
         session.rivalsScreenshotDeaths[guid] = "pending"
         C_Timer.After(delay, Capture)
@@ -1652,10 +1759,9 @@ local function ScreenshotEnemyDeath(session, enemy, delay)
     end
 end
 
--- PARTY_KILL / UNIT_DIED arrive after the lethal hit has already been resolved.
--- Use the lethal damage event as the timing anchor, then wait a fraction of a
--- second so the game's killing-blow/HK combat text has time to render. Death
--- events remain as fallback below when no lethal damage signal is available.
+-- Damage events are still useful for retaining killing-blow detail, but Classic
+-- can occasionally make an overkill payload look lethal across health-form
+-- transitions. Only PARTY_KILL / UNIT_DIED is trusted as screenshot confirmation.
 local function IsLethalDamageEvent(info)
     if not info then return false end
     local event = info[2]
@@ -1711,30 +1817,30 @@ function W.Combat(playerGUID)
     MarkInteraction(session, info)
     TrackSpecialEscape(session, info)
 
-    -- Anchor the screenshot to the lethal hit, then give floating combat text
-    -- a brief moment to animate in. PARTY_KILL / UNIT_DIED are fallback-only.
+    -- Keep the lethal damage event for killing-blow detail, but do NOT use it as
+    -- screenshot proof. Classic can report an overkill-style damage payload while
+    -- a player is still alive during health-form transitions (notably Druids
+    -- shifting forms). The screenshot is armed only after PARTY_KILL / UNIT_DIED
+    -- confirms the opponent actually died below.
     if IsLethalDamageEvent(info) then
         local lethalEnemy = session.enemies[info[8]]
-        if lethalEnemy then
-            if info[4] == playerGUID then
-                local lethalSpellID, lethalSpellName = CombatSpellInfo(info)
-                local amount, overkill, critical
-                if event == "SWING_DAMAGE" then
-                    amount, overkill, critical = tonumber(info[12]), tonumber(info[13]), info[18] == true
-                elseif event == "SPELL_DAMAGE" or event == "RANGE_DAMAGE" or event == "SPELL_PERIODIC_DAMAGE" then
-                    amount, overkill, critical = tonumber(info[15]), tonumber(info[16]), info[21] == true
-                end
-                lethalEnemy.killingBlowDetail = {
-                    t = math.max(0, GetTime() - session.startedElapsed),
-                    event = event,
-                    spellID = lethalSpellID,
-                    spellName = lethalSpellName or (event == "SWING_DAMAGE" and "Melee" or nil),
-                    amount = amount,
-                    overkill = overkill and math.max(0, overkill) or nil,
-                    critical = critical,
-                }
+        if lethalEnemy and info[4] == playerGUID then
+            local lethalSpellID, lethalSpellName = CombatSpellInfo(info)
+            local amount, overkill, critical
+            if event == "SWING_DAMAGE" then
+                amount, overkill, critical = tonumber(info[12]), tonumber(info[13]), info[18] == true
+            elseif event == "SPELL_DAMAGE" or event == "RANGE_DAMAGE" or event == "SPELL_PERIODIC_DAMAGE" then
+                amount, overkill, critical = tonumber(info[15]), tonumber(info[16]), info[21] == true
             end
-            ScreenshotEnemyDeath(session, lethalEnemy, WPVP_SCREENSHOT_KILL_DELAY)
+            lethalEnemy.killingBlowDetail = {
+                t = math.max(0, GetTime() - session.startedElapsed),
+                event = event,
+                spellID = lethalSpellID,
+                spellName = lethalSpellName or (event == "SWING_DAMAGE" and "Melee" or nil),
+                amount = amount,
+                overkill = overkill and math.max(0, overkill) or nil,
+                critical = critical,
+            }
         end
     end
 
@@ -1756,25 +1862,30 @@ function W.Combat(playerGUID)
 
     if event == "PARTY_KILL" then
         local enemy = session.enemies[info[8]]
-        if enemy then
+        if enemy and not IsUnconsciousDeathEvent(info) then
             enemy.level = enemy.level or ResolvePlayerLevel(enemy.guid)
             enemy.died = true; enemy.killedAt = GetTime() - session.startedElapsed
             session.lastKillPosition = PlayerPosition() or session.lastKillPosition
             if info[4] == playerGUID then session.killingBlows = (session.killingBlows or 0) + 1; enemy.killingBlow = true end
-            ScreenshotEnemyDeath(session, enemy)
+            ScreenshotEnemyDeath(session, enemy, WPVP_SCREENSHOT_KILL_DELAY)
         end
     elseif event == "UNIT_DIED" or event == "UNIT_DESTROYED" then
-        if info[8] == playerGUID then
-            session.playerDied = true
-            session.playerDiedAt = GetTime() - session.startedElapsed
-            session.deathPosition = PlayerPosition() or session.deathPosition
-        elseif session.enemies[info[8]] then
-            local enemy = session.enemies[info[8]]
-            enemy.level = enemy.level or ResolvePlayerLevel(info[8])
-            enemy.died = true
-            enemy.killedAt = GetTime() - session.startedElapsed
-            session.lastKillPosition = PlayerPosition() or session.lastKillPosition
-            ScreenshotEnemyDeath(session, enemy)
+        -- Feign Death and other unconscious transitions deliberately masquerade
+        -- as death in CLEU. They are encounter activity, not a real death: do
+        -- not set died/playerDied, advance kill stats, or arm a screenshot.
+        if not IsUnconsciousDeathEvent(info) then
+            if info[8] == playerGUID then
+                session.playerDied = true
+                session.playerDiedAt = GetTime() - session.startedElapsed
+                session.deathPosition = PlayerPosition() or session.deathPosition
+            elseif session.enemies[info[8]] then
+                local enemy = session.enemies[info[8]]
+                enemy.level = enemy.level or ResolvePlayerLevel(info[8])
+                enemy.died = true
+                enemy.killedAt = GetTime() - session.startedElapsed
+                session.lastKillPosition = PlayerPosition() or session.lastKillPosition
+                ScreenshotEnemyDeath(session, enemy, WPVP_SCREENSHOT_KILL_DELAY)
+            end
         end
     end
     UpdateEnemyPressure(session)
@@ -4785,6 +4896,7 @@ local function SetSummaryCardHitArea(card, expanded)
 end
 
 local SUMMARY_RIVAL_ROW_STEP = 56
+local DETAIL_PAGE_HEIGHT = 480
 
 local function EnsureDetails()
     if W.details then return W.details end
@@ -6197,7 +6309,7 @@ function W.RefreshDetailContent()
     if tab ~= "log" and window.logScrollbar then window.logScrollbar:Hide() end
 
     if tab == "summary" then
-        window:SetHeight(480)
+        window:SetHeight(DETAIL_PAGE_HEIGHT)
         local cost = record.consumableCost
         local costText = cost and (cost.backfilled and cost.legacyReconstructedFrom == "no-retained-events" and "|cff888f99—|r" or
             ((cost.pricedCount or 0) == 0 and (cost.unpricedCount or 0) > 0 and "|cff888f99—|r" or FormatMoneyIcons(cost.totalCopper or 0, cost.partial))) or "|cff888f99—|r"
@@ -6365,16 +6477,12 @@ function W.RefreshDetailContent()
         end
         for index = rowIndex + 1, #window.usageRows do window.usageRows[index]:Hide() end
 
-        -- Body height must describe only visible rows. The old +12px phantom
-        -- content made an otherwise-empty/short table technically scrollable,
-        -- which left the header hanging over a tiny viewport with a stray
-        -- scrollbar. The scrollframe already provides its own bottom inset.
+        -- Body height describes only visible rows. The Items & Abilities page now
+        -- uses the exact same outer window height and 20px side guides as Summary;
+        -- long lists scroll inside that footprint instead of making the detail
+        -- window grow taller than the other tabs.
         window.usageBody:SetHeight(math.max(1, y))
-        -- usageScroll runs from window Y=253 to 26px above the bottom edge, so
-        -- 279 + visible row height is the exact no-scroll fit. Grow only when the
-        -- rows actually need it, and cap long lists at the normal 600px window.
-        local usageHeight = math.min(600, math.max(305, 279 + y))
-        window:SetHeight(usageHeight)
+        window:SetHeight(DETAIL_PAGE_HEIGHT)
         if window.usageScroll.UpdateScrollHints then window.usageScroll:UpdateScrollHints() end
     elseif tab == "log" then
         local participants = record.session and record.session.participants or {}
@@ -6500,7 +6608,9 @@ function W.RefreshDetailContent()
         end
         if record.session and record.session.worldCombatTruncated then lines[#lines + 1] = "|cff8f98a6… additional events were omitted.|r" end
         if #lines == 0 then lines[1] = "|cffadb5c2No combat events recorded.|r" end
-        window.logText:SetText(table.concat(lines, "\n")); window.logBody:SetHeight(math.max(200, (window.logText:GetStringHeight() or 180) + 12)); window:SetHeight(600)
+        window.logText:SetText(table.concat(lines, "\n"))
+        window.logBody:SetHeight(math.max(1, (window.logText:GetStringHeight() or 0) + 12))
+        window:SetHeight(DETAIL_PAGE_HEIGHT)
         if window.logScroll.UpdateScrollHints then window.logScroll:UpdateScrollHints() end
     end
 end

@@ -250,7 +250,7 @@ function U.Begin(session)
     end
 end
 
-function U.Observe(session, playerGUID, now, event, sourceGUID, spellID, spellName, baseCooldown)
+function U.Observe(session, playerGUID, now, event, sourceGUID, spellID, spellName, baseCooldown, destGUID, destName)
     local usageStart = session and (session.acceptedAt or session.estimatedStartAt)
     if not session or session.excluded or not usageStart or
         now < usageStart or session.finishedAt or event ~= "SPELL_CAST_SUCCESS" then return end
@@ -283,7 +283,8 @@ function U.Observe(session, playerGUID, now, event, sourceGUID, spellID, spellNa
             itemName = type(item) == "table" and item.name or nil,
             quality = type(item) == "table" and item.quality or nil,
             category = type(item) == "table" and item.category or nil, cooldown = long and baseCooldown / 1000 or nil,
-            observedAt = now, count = 0}
+            observedAt = now, t = math.max(0, now - usageStart), targetGUID = destGUID, targetName = destName,
+            count = 0}
     end
     entries[key].count = entries[key].count + 1
 end
@@ -378,13 +379,17 @@ function U.Combat(session, playerGUID)
     local info = {CombatLogGetCurrentEventInfo()}
     local event, sourceGUID, destGUID, spellID, spellName = info[2], info[4], info[8], info[12], info[13]
     local now = GetTime()
+    if session and (not session._lastDuelBuffScan or now - session._lastDuelBuffScan >= 2) then
+        session._lastDuelBuffScan = now
+        if U.CaptureDuelBuffs then U.CaptureDuelBuffs(session) end
+    end
 
     -- Usage detection remains SPELL_CAST_SUCCESS based, but the threshold is now
     -- three minutes. The combat-log panes capture the broader event stream.
     if event == "SPELL_CAST_SUCCESS" then
         local cooldown
         if GetSpellBaseCooldown and spellID then cooldown = GetSpellBaseCooldown(spellID) end
-        U.Observe(session, playerGUID, now, event, sourceGUID, spellID, spellName, cooldown)
+        U.Observe(session, playerGUID, now, event, sourceGUID, spellID, spellName, cooldown, destGUID, info[9])
     end
 
     if session.excluded or not session.estimatedStartAt or now < session.estimatedStartAt or session.finishedAt then return end
@@ -893,7 +898,7 @@ function U.CaptureWorldConsumableCost(session, options)
     -- Reconcile the same retained casts, item uses and aura evidence used by
     -- historical repair before freezing a new encounter's prices.
     local evidence = session
-    if not options.backfilled and U.ReconstructLegacyWorldUsage then
+    if not options.backfilled and not options.skipReconstruct and U.ReconstructLegacyWorldUsage then
         local enemies = {}
         for _, enemy in pairs(session.enemies or {}) do enemies[#enemies + 1] = enemy end
         local usage = U.ReconstructLegacyWorldUsage({enemies=enemies}, session)
@@ -1389,6 +1394,134 @@ function U.CaptureLegacyWorldConsumableCost(record, capturedAt, priceCache, forc
     return snapshot
 end
 
+
+-- Duel opponent aura snapshot -------------------------------------------------
+-- Duels have a single rival, so retain a compact snapshot of the opponent's
+-- long-duration buffs whenever Rivals has a usable target/mouseover token. The
+-- five-minute floor deliberately excludes reactive/in-fight effects such as
+-- Power Word: Shield, Blessing of Freedom/Protection, HoTs, forms and stances.
+local DUEL_BUFF_MIN_DURATION = 300
+local DUEL_BUFF_EXCLUDED = {
+    ["Lightning Shield"] = true,
+}
+
+local function DuelUnitMatches(session, unit)
+    if not (session and unit and UnitExists and UnitExists(unit) and UnitIsPlayer and UnitIsPlayer(unit)) then return false end
+    local identity = session.identity
+    local guid = UnitGUID and UnitGUID(unit)
+    if identity and identity.guid and guid then return identity.guid == guid end
+    local name, realm
+    if UnitName then name, realm = UnitName(unit) end
+    if not name then return false end
+    if realm and realm ~= "" then name = name .. "-" .. realm end
+    if DP.Parser and DP.Parser.SameName then return DP.Parser.SameName(name, session.opponent or (identity and identity.name)) end
+    return ShortName(name) == ShortName(session.opponent or (identity and identity.name))
+end
+
+function U.CaptureDuelBuffs(session)
+    if not session then return false end
+    local unit
+    for _, candidate in ipairs({"target", "mouseover"}) do
+        if DuelUnitMatches(session, candidate) then unit = candidate; break end
+    end
+    if not unit or not UnitBuff then return false end
+
+    -- The same live token is also our best chance to retain a durable portrait
+    -- identity for Duel Details. Older duel records only kept class/level.
+    session.identity = session.identity or {}
+    local identity = session.identity
+    identity.guid = identity.guid or (UnitGUID and UnitGUID(unit))
+    local name, realm
+    if UnitName then name, realm = UnitName(unit) end
+    if name and not identity.name then
+        if not realm or realm == "" then realm = GetNormalizedRealmName and GetNormalizedRealmName() or nil end
+        identity.name = realm and realm ~= "" and (name .. "-" .. realm) or name
+    end
+    local class
+    if UnitClass then local _; _, class = UnitClass(unit) end
+    local localizedRace, raceFile
+    if UnitRace then localizedRace, raceFile = UnitRace(unit) end
+    identity.class = identity.class or class
+    identity.level = identity.level or (UnitLevel and UnitLevel(unit))
+    identity.localizedRace = identity.localizedRace or localizedRace
+    identity.race = identity.race or raceFile or localizedRace
+    identity.raceFile = identity.raceFile or raceFile
+    identity.sex = identity.sex or (UnitSex and UnitSex(unit))
+    identity.portraitSex = identity.portraitSex or identity.sex
+    identity.faction = identity.faction or (UnitFactionGroup and UnitFactionGroup(unit))
+    identity.portraitDisplayID = identity.portraitDisplayID or (UnitCreatureDisplayID and UnitCreatureDisplayID(unit))
+
+    session.duelBuffs = session.duelBuffs or {version = 1, opponent = {}}
+    local bucket = session.duelBuffs.opponent
+    local captured = false
+    for index = 1, 64 do
+        local name, icon, count, dispelType, duration, expirationTime, source, isStealable, nameplateShowPersonal, spellID = UnitBuff(unit, index)
+        if not name then break end
+        duration = tonumber(duration) or 0
+        if duration >= DUEL_BUFF_MIN_DURATION and not DUEL_BUFF_EXCLUDED[name] then
+            local key = tostring(spellID or name)
+            local existing = bucket[key] or {}
+            existing.name = name
+            existing.icon = icon or existing.icon
+            existing.count = tonumber(count) or existing.count or 0
+            existing.duration = math.max(duration, tonumber(existing.duration) or 0)
+            existing.expirationTime = tonumber(expirationTime) or existing.expirationTime
+            existing.source = source or existing.source
+            existing.isStealable = isStealable and true or existing.isStealable
+            existing.spellID = tonumber(spellID) or existing.spellID
+            existing.firstSeenAt = existing.firstSeenAt or (GetTime and GetTime() or 0)
+            bucket[key] = existing
+            captured = true
+        end
+    end
+    return captured
+end
+
+-- Freeze duel consumable spend with the same price engine used by World PvP.
+-- Duel usage historically stored one collapsed row per ability, so old records
+-- can still be priced from retained item identity/count even when exact per-use
+-- timestamps were not available.
+function U.CaptureDuelConsumableCost(record)
+    if type(record) ~= "table" then return nil end
+    if type(record.duelConsumableCost) == "table" then return record.duelConsumableCost end
+    local session = record.session or {}
+    local usage = session.usage or {}
+    local playerGUID = session.playerGUID or record.playerGUID or "duel-player"
+    local opponentGUID = session.identity and session.identity.guid or ("duel-opponent:" .. tostring(record.opponent or "unknown"))
+    local opponentName = (session.identity and session.identity.name) or record.opponent or "Opponent"
+    local fake = {
+        worldPvP = true,
+        playerGUID = playerGUID,
+        playerName = session.playerName or "You",
+        playerClass = session.playerClass or record.playerClass,
+        participants = {
+            [playerGUID] = {name = session.playerName or "You", class = session.playerClass or record.playerClass},
+            [opponentGUID] = {name = opponentName, class = session.identity and session.identity.class},
+        },
+        worldUsage = {version = 2, events = {}},
+    }
+    local function AddSide(sideName, guid, actorName)
+        for _, entry in pairs(usage[sideName] or {}) do
+            local display = U.Describe and U.Describe(entry, record) or nil
+            local event = {
+                t = tonumber(entry.t) or math.max(0, (tonumber(entry.observedAt) or 0) - (tonumber(session.estimatedStartAt) or tonumber(session.acceptedAt) or 0)),
+                guid = guid, actorName = actorName,
+                spellID = tonumber(entry.spellID), itemID = tonumber(entry.itemID) or (display and tonumber(display.itemID)),
+                itemName = entry.itemName, name = entry.itemName or entry.name,
+                category = (display and display.category) or entry.category,
+                kind = entry.kind, count = math.max(1, tonumber(entry.count) or 1),
+                consumable = entry.consumable,
+            }
+            fake.worldUsage.events[#fake.worldUsage.events + 1] = event
+        end
+    end
+    AddSide("player", playerGUID, session.playerName or "You")
+    AddSide("opponent", opponentGUID, opponentName)
+    local snapshot = U.CaptureWorldConsumableCost(fake, {capturedAt = record.timestamp, skipReconstruct = true})
+    record.duelConsumableCost = snapshot
+    return snapshot
+end
+
 function U.Describe(entry, record)
     local known = ResolveInsignia(entry.spellID, record and record.session, entry.guid, entry.nameSpell or entry.name, record) or Catalog(entry.spellID)
     local id = entry.itemID or (known and known.itemID)
@@ -1814,9 +1947,7 @@ end
 
 function U.RefreshSpecDisplays()
     if U.window and U.window.record and U.window.IsShown and U.window:IsShown() then
-        local record = U.window.record
-        SetDetailSummaryTitle(U.window, record)
-        SetOpponentHeader(U.window.tableHeader, record)
+        if U.RefreshDetailContent then U.RefreshDetailContent() end
     end
     local tip = U.historyTip
     if tip and tip.record and tip.owner and tip.IsShown and tip:IsShown() then
@@ -2099,202 +2230,534 @@ local function BindRivalsScroll(scroll, body, bar, step)
     scroll:RefreshRivalsScrollbar(true)
 end
 
+-- Duel Details now uses the same three-tab visual language as World PvP:
+-- Summary / Items & Abilities / Combat Log, the same 650px window, the same
+-- 20px content guides, the same Rivals scrollbar, compact participant selector,
+-- rock-plaque category dividers, and a dedicated ENEMY BUFFS header card.
+local DUEL_DETAIL_HEIGHT = 480
+local DUEL_CATEGORY_ORDER = {potions=1, engineering=2, reagents=3, equipment=4, cooldowns=5, racials=6}
+local DUEL_CATEGORY_LABEL = {
+    potions="POTIONS/CONSUMABLES", engineering="ENGINEERING GADGETS", reagents="REAGENTS",
+    equipment="EQUIPMENT", cooldowns="COOLDOWNS (≥3 MIN)", racials="RACIALS",
+}
+
+local DUEL_WORLD_BUFF_NAMES = {
+    ["Rallying Cry of the Dragonslayer"] = true, ["Spirit of Zandalar"] = true,
+    ["Warchief's Blessing"] = true, ["Songflower Serenade"] = true,
+    ["Fengus' Ferocity"] = true, ["Mol'dar's Moxie"] = true, ["Slip'kik's Savvy"] = true,
+}
+local DUEL_CLASS_BUFF_TERMS = {
+    "fortitude", "divine spirit", "shadow protection", "mark of the wild", "gift of the wild", "thorns",
+    "blessing of kings", "blessing of might", "blessing of wisdom", "blessing of salvation", "blessing of light",
+    "blessing of sanctuary", "arcane intellect", "arcane brilliance", "mage armor", "ice armor", "frost armor",
+    "demon armor", "demon skin", "inner fire",
+}
+
+local function DuelBuffPriority(buff)
+    local name = tostring(buff and buff.name or "")
+    local lower = name:lower()
+    if DUEL_WORLD_BUFF_NAMES[name] then return 1 end
+    if lower:find("flask", 1, true) then return 2 end
+    if lower:find("zanza", 1, true) then return 3 end
+    if lower:find("noggenfogger", 1, true) then return 7 end
+    if lower:find("elixir", 1, true) or lower:find("juju", 1, true) or lower:find("firewater", 1, true) then return 4 end
+    if lower:find("protection", 1, true) and not lower:find("shadow protection", 1, true) then return 5 end
+    for _, term in ipairs(DUEL_CLASS_BUFF_TERMS) do
+        if lower:find(term, 1, true) then return 6 end
+    end
+    return 7
+end
+
+local function DuelSortedBuffs(record)
+    local bucket = record and record.session and record.session.duelBuffs and record.session.duelBuffs.opponent or {}
+    local buffs = {}
+    for _, buff in pairs(bucket or {}) do
+        if type(buff) == "table" and tostring(buff.name or "") ~= "Lightning Shield" and (tonumber(buff.duration) or 0) >= 300 then
+            buffs[#buffs + 1] = buff
+        end
+    end
+    table.sort(buffs, function(a, b)
+        local ap, bp = DuelBuffPriority(a), DuelBuffPriority(b)
+        if ap ~= bp then return ap < bp end
+        local an, bn = tostring(a.name or ""), tostring(b.name or "")
+        if an ~= bn then return an < bn end
+        return (tonumber(a.spellID) or 0) < (tonumber(b.spellID) or 0)
+    end)
+    return buffs
+end
+
+local function DuelIdentity(record)
+    local identity = record and record.session and record.session.identity or {}
+    if identity.guid and GetPlayerInfoByGUID and (not identity.class or not identity.race) then
+        local _, class, localizedRace, raceFile, sex = GetPlayerInfoByGUID(identity.guid)
+        identity.class = identity.class or class
+        identity.localizedRace = identity.localizedRace or localizedRace
+        identity.race = identity.race or raceFile or localizedRace
+        identity.raceFile = identity.raceFile or raceFile
+        identity.sex = identity.sex or sex
+        identity.portraitSex = identity.portraitSex or sex
+    end
+    identity.name = identity.name or (record and record.opponent) or "Opponent"
+    return identity
+end
+
+local function DuelMatchupStats(record)
+    local stats = {wins=0, losses=0, ratedWins=0, ratedLosses=0, classWins=0, classLosses=0, duels=0}
+    if not record then return stats end
+    local identity = DuelIdentity(record)
+    local guid = identity.guid
+    local name = ShortName(identity.name or record.opponent):lower()
+    local class = identity.class
+    for _, prior in ipairs((DP.AllDuelRecords and DP.AllDuelRecords()) or {}) do
+        if prior and prior.status == "matched-request-history-only" then
+            local pident = prior.session and prior.session.identity or {}
+            local same = guid and pident.guid and guid == pident.guid
+            if not same then same = ShortName(pident.name or prior.opponent):lower() == name end
+            if same then
+                stats.duels = stats.duels + 1
+                if prior.won then stats.wins = stats.wins + 1 else stats.losses = stats.losses + 1 end
+                if DP.Views and DP.Views.Mode and DP.Views.Mode(prior) == "Rated" then
+                    if prior.won then stats.ratedWins = stats.ratedWins + 1 else stats.ratedLosses = stats.ratedLosses + 1 end
+                end
+            end
+            if class and pident.class == class then
+                if prior.won then stats.classWins = stats.classWins + 1 else stats.classLosses = stats.classLosses + 1 end
+            end
+        end
+    end
+    return stats
+end
+
+local function CopperText(copper)
+    copper = math.max(0, math.floor(tonumber(copper) or 0))
+    local gold = math.floor(copper / 10000)
+    local silver = math.floor((copper % 10000) / 100)
+    local cop = copper % 100
+    if gold > 0 then return string.format("%dg %02ds %02dc", gold, silver, cop) end
+    if silver > 0 then return string.format("%ds %02dc", silver, cop) end
+    return string.format("%dc", cop)
+end
+
+local function DuelCostForActor(snapshot, guid, name)
+    for _, actor in ipairs(snapshot and snapshot.actors or {}) do
+        if (guid and actor.guid == guid) or (name and ShortName(actor.name):lower() == ShortName(name):lower()) then return actor end
+    end
+end
+
+local function ApplyCompactDropChrome(frame, alpha)
+    if frame.SetBackdrop then
+        frame:SetBackdrop({bgFile="Interface\\Buttons\\WHITE8X8", edgeFile="Interface\\Buttons\\UI-SliderBar-Border",
+            edgeSize=8, insets={left=2,right=2,top=2,bottom=2}})
+        frame:SetBackdropColor(.025,.03,.04,alpha or .98)
+        frame:SetBackdropBorderColor(1,.82,.42,.92)
+    else
+        local bg = frame:CreateTexture(nil,"BACKGROUND"); bg:SetAllPoints(); bg:SetColorTexture(.025,.03,.04,alpha or .98)
+    end
+end
+
+local function CreateCompactDuelDropDown(parent, menuParent, width, getOptions, onSelect)
+    local control = CreateFrame("Button", nil, parent, BackdropTemplateMixin and "BackdropTemplate" or nil)
+    control:SetSize(width,26); ApplyCompactDropChrome(control,.98)
+    control.textLabel = control:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
+    control.textLabel:SetPoint("LEFT",7,0); control.textLabel:SetPoint("RIGHT",-22,0); control.textLabel:SetJustifyH("CENTER"); control.textLabel:SetWordWrap(false)
+    control.arrow = CreateFrame("Button",nil,control); control.arrow:SetSize(18,18); control.arrow:SetPoint("RIGHT",1,0)
+    control.arrow:SetNormalTexture("Interface\\Buttons\\UI-ScrollBar-ScrollDownButton-Up")
+    control.arrow:SetPushedTexture("Interface\\Buttons\\UI-ScrollBar-ScrollDownButton-Down")
+    control.arrow:SetHighlightTexture("Interface\\Buttons\\UI-ScrollBar-ScrollDownButton-Highlight","ADD")
+    control.menu = CreateFrame("Frame",nil,menuParent or parent,BackdropTemplateMixin and "BackdropTemplate" or nil)
+    control.menu:SetWidth(width); control.menu:SetPoint("TOPLEFT",control,"BOTTOMLEFT",0,0); ApplyCompactDropChrome(control.menu,.99)
+    if control.menu.SetFrameLevel and menuParent and menuParent.GetFrameLevel then control.menu:SetFrameLevel(menuParent:GetFrameLevel()+40) end
+    control.menuRows={}; control.menu:Hide()
+    function control:SetSelectedValue(value,text)
+        self.selectedValue=value
+        if not text then for _,o in ipairs((getOptions and getOptions()) or {}) do if o.value==value then text=o.text; break end end end
+        self.textLabel:SetText(text or tostring(value or ""))
+    end
+    function control:SelectValue(value)
+        local text
+        for _,o in ipairs((getOptions and getOptions()) or {}) do if o.value==value then text=o.text; break end end
+        self:SetSelectedValue(value,text); self.menu:Hide(); if onSelect then onSelect(value) end
+    end
+    function control:RefreshMenu()
+        local options={}
+        for _,o in ipairs((getOptions and getOptions()) or {}) do if o.value~=self.selectedValue then options[#options+1]=o end end
+        local rowH,pad=20,2; self.menu:SetHeight(math.max(8,#options*rowH+pad*2))
+        for i,o in ipairs(options) do
+            local row=self.menuRows[i]
+            if not row then
+                row=CreateFrame("Button",nil,self.menu); row:SetHeight(rowH)
+                row.highlight=row:CreateTexture(nil,"HIGHLIGHT"); row.highlight:SetPoint("TOPLEFT",1,-1); row.highlight:SetPoint("BOTTOMRIGHT",-1,1); row.highlight:SetColorTexture(1,.72,.18,.14)
+                row.label=row:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); row.label:SetPoint("LEFT",6,0); row.label:SetPoint("RIGHT",-6,0); row.label:SetJustifyH("LEFT"); row.label:SetWordWrap(false)
+                self.menuRows[i]=row
+            end
+            row:ClearAllPoints(); row:SetPoint("TOPLEFT",pad,-(pad+(i-1)*rowH)); row:SetPoint("TOPRIGHT",-pad,-(pad+(i-1)*rowH))
+            row.value=o.value; row.label:SetText(o.text or tostring(o.value or "")); row:SetScript("OnClick",function(clicked) control:SelectValue(clicked.value) end); row:Show()
+        end
+        for i=#options+1,#self.menuRows do self.menuRows[i]:Hide() end
+    end
+    control:SetScript("OnClick",function(self) if self.menu:IsShown() then self.menu:Hide() else self:RefreshMenu(); self.menu:Show() end end)
+    control.arrow:SetScript("OnClick",function() control:Click() end)
+    control:SetScript("OnHide",function(self) if self.menu then self.menu:Hide() end end)
+    return control
+end
+
+local function DuelUsageEvents(record, filter)
+    local session = record and record.session or {}
+    local usage = session.usage or {}
+    local identity = DuelIdentity(record)
+    local playerGUID = session.playerGUID or record.playerGUID or "duel-player"
+    local opponentGUID = identity.guid or ("duel-opponent:" .. tostring(record.opponent or "unknown"))
+    local out = {}
+    local function Add(side, guid, actorName, class)
+        if filter ~= "all" and filter ~= guid then return end
+        for _, entry in pairs(usage[side] or {}) do
+            local display = U.Describe(entry, record)
+            out[#out+1] = {
+                t = tonumber(entry.t) or math.max(0,(tonumber(entry.observedAt) or 0)-(tonumber(session.estimatedStartAt) or tonumber(session.acceptedAt) or 0)),
+                guid=guid, actorName=actorName, class=class, targetName=entry.targetName,
+                entry=entry, display=display, category=display.category or entry.category or "cooldowns",
+            }
+        end
+    end
+    Add("player", playerGUID, "You", record.playerClass or session.playerClass)
+    Add("opponent", opponentGUID, ShortName(identity.name or record.opponent), identity.class)
+    table.sort(out,function(a,b)
+        local ao,bo=DUEL_CATEGORY_ORDER[a.category] or 99,DUEL_CATEGORY_ORDER[b.category] or 99
+        if ao~=bo then return ao<bo end
+        if a.t~=b.t then return a.t<b.t end
+        return tostring(a.actorName)<tostring(b.actorName)
+    end)
+    return out
+end
+
+local function EnsureDuelUsageRow(window,index,kind)
+    local width=window.usageTableWidth or 592
+    local row=window.usageRows[index]
+    if row and row.kind==kind then
+        row:SetWidth(width); if row.categoryBorder then row.categoryBorder:ClearAllPoints(); row.categoryBorder:SetAllPoints(row) end
+        if row.label then row.label:SetWidth(width-20) end
+        return row
+    end
+    if row then row:Hide() end
+    row=CreateFrame("Button",nil,window.usageBody); row.kind=kind; row:SetSize(width,kind=="category" and 26 or 22)
+    row.bg=row:CreateTexture(nil,"BACKGROUND"); row.bg:SetAllPoints()
+    if kind=="category" then
+        row.bg:SetColorTexture(.022,.018,.014,.98)
+        row.rock=row:CreateTexture(nil,"BACKGROUND"); row.rock:SetPoint("TOPLEFT",3,-3); row.rock:SetPoint("BOTTOMRIGHT",-3,3); row.rock:SetTexture("Interface\\FrameGeneral\\UI-Background-Rock"); row.rock:SetVertexColor(.22,.18,.12,.54)
+        row.categoryBorder=DP.Theme.PlaqueBorder(row,width,26,12); row.categoryBorder:ClearAllPoints(); row.categoryBorder:SetAllPoints(row); row.categoryBorder:EnableMouse(false)
+        row.label=row.categoryBorder:CreateFontString(nil,"OVERLAY","GameFontNormal"); row.label:SetPoint("CENTER"); row.label:SetWidth(width-20); row.label:SetJustifyH("CENTER")
+        local fp,fs=row.label:GetFont(); if fp and fs then row.label:SetFont(fp,fs,"OUTLINE") end; row.label:SetShadowColor(0,0,0,1); row.label:SetShadowOffset(1,-2)
+    else
+        row.time=row:CreateFontString(nil,"OVERLAY","GameFontDisableSmall"); row.time:SetPoint("TOPLEFT",6,-5); row.time:SetWidth(48); row.time:SetJustifyH("LEFT")
+        row.player=row:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); row.player:SetPoint("TOPLEFT",60,-5); row.player:SetWidth(106); row.player:SetJustifyH("LEFT"); row.player:SetWordWrap(false)
+        row.used=row:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); row.used:SetPoint("TOPLEFT",178,-5); row.used:SetWidth(281); row.used:SetJustifyH("LEFT"); row.used:SetWordWrap(false)
+        row.target=row:CreateFontString(nil,"OVERLAY","GameFontDisableSmall"); row.target:SetPoint("TOPLEFT",473,-5); row.target:SetWidth(113); row.target:SetJustifyH("LEFT"); row.target:SetWordWrap(false)
+        row:SetScript("OnEnter",function(self)
+            if not self.entry then return end
+            GameTooltip:SetOwner(self,"ANCHOR_RIGHT")
+            if self.entry.itemID then GameTooltip:SetHyperlink("item:"..tostring(self.entry.itemID))
+            elseif self.entry.spellID and GameTooltip.SetSpellByID then GameTooltip:SetSpellByID(self.entry.spellID)
+            else GameTooltip:SetText(self.used:GetText() or "Ability") end
+            GameTooltip:AddLine("Shift-click to link in chat",.55,.6,.68,true); GameTooltip:Show()
+        end)
+        row:SetScript("OnLeave",function() GameTooltip:Hide() end)
+        row:SetScript("OnClick",function(self)
+            if not (self.entry and IsShiftKeyDown and IsShiftKeyDown() and ChatEdit_InsertLink) then return end
+            local link=EntryChatLink(self.entry); if link then ChatEdit_InsertLink(link) end
+        end)
+    end
+    window.usageRows[index]=row
+    return row
+end
+
+local function DuelCombinedCombatLog(record)
+    local log=record and record.session and record.session.combatLog
+    if not log then return "|cff8f98a6Combat log capture was not available for this duel.|r" end
+    local entries={}
+    for _,key in ipairs({"myActions","toMe"}) do
+        for _,entry in ipairs(log[key] or {}) do
+            entries[#entries+1]={t=type(entry)=="table" and tonumber(entry.t) or 0,text=type(entry)=="table" and entry.text or tostring(entry),key=key}
+        end
+    end
+    table.sort(entries,function(a,b) if a.t~=b.t then return a.t<b.t end return a.key<b.key end)
+    if #entries==0 then return "|cff8f98a6No qualifying combat-log events were recorded.|r" end
+    local lines={}
+    for _,entry in ipairs(entries) do
+        lines[#lines+1]=string.format("|cff8f98a6+%05.1fs|r  %s",entry.t or 0,ColorDuelCombatText(record,entry.key,entry.text or ""))
+    end
+    if log.myTruncated or log.toMeTruncated then lines[#lines+1]="|cff8f98a6… additional events were omitted.|r" end
+    return table.concat(lines,"\n")
+end
+
+local function CreateDuelPortrait(frame)
+    frame.portraitFrame=CreateFrame("Frame",nil,frame); frame.portraitFrame:SetSize(64,64)
+    frame.portrait=frame.portraitFrame:CreateTexture(nil,"ARTWORK"); frame.portrait:SetSize(52,52); frame.portrait:SetPoint("CENTER")
+    if frame.portrait.AddMaskTexture and frame.portraitFrame.CreateMaskTexture then
+        frame.portraitMask=frame.portraitFrame:CreateMaskTexture(); frame.portraitMask:SetTexture("Interface\\CharacterFrame\\TempPortraitAlphaMask","CLAMPTOBLACKADDITIVE","CLAMPTOBLACKADDITIVE"); frame.portraitMask:SetSize(52,52); frame.portraitMask:SetPoint("CENTER"); frame.portrait:AddMaskTexture(frame.portraitMask)
+    end
+    frame.portraitModel=CreateFrame("DressUpModel",nil,frame.portraitFrame); frame.portraitModel:SetPoint("CENTER",0,-1); frame.portraitModel:SetSize(50,50); frame.portraitModel:Hide()
+    frame.portraitRing=frame.portraitFrame:CreateTexture(nil,"OVERLAY"); frame.portraitRing:SetPoint("CENTER"); frame.portraitRing:SetSize(64,64)
+    local ok=frame.portraitRing.SetAtlas and pcall(frame.portraitRing.SetAtlas,frame.portraitRing,"AdventureMap-combatally-ring",false)
+    if not ok then frame.portraitRing:SetTexture("Interface\\Buttons\\UI-Quickslot2") end
+    return frame
+end
+
+local function ApplyDuelPortrait(frame,record)
+    local identity=DuelIdentity(record)
+    if DP.WorldPvP and DP.WorldPvP.ApplyOpponentPortrait then
+        DP.WorldPvP.ApplyOpponentPortrait(frame,identity)
+    else
+        frame.portrait:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark"); frame.portrait:SetTexCoord(.08,.92,.08,.92); frame.portrait:Show()
+    end
+end
+
+local function RefreshDuelBuffBox(window,record)
+    local buffs=DuelSortedBuffs(record)
+    window.buffEmpty:SetShown(#buffs==0)
+    for i,buff in ipairs(buffs) do
+        local button=window.buffIcons[i]
+        if not button then
+            button=CreateFrame("Button",nil,window.buffBody); button:SetSize(30,30)
+            button.icon=button:CreateTexture(nil,"ARTWORK"); button.icon:SetAllPoints(); button.icon:SetTexCoord(.08,.92,.08,.92)
+            button.border=button:CreateTexture(nil,"OVERLAY"); button.border:SetTexture("Interface\\Buttons\\UI-Quickslot2"); button.border:SetPoint("TOPLEFT",-2,2); button.border:SetPoint("BOTTOMRIGHT",2,-2)
+            button:SetScript("OnEnter",function(self)
+                local b=self.buff; if not b then return end
+                GameTooltip:SetOwner(self,"ANCHOR_RIGHT")
+                if b.spellID and GameTooltip.SetSpellByID then GameTooltip:SetSpellByID(b.spellID) else GameTooltip:SetText(b.name or "Buff") end
+                if b.duration then GameTooltip:AddLine(string.format("Observed duration: %.0f min",b.duration/60),.65,.7,.76) end
+                GameTooltip:Show()
+            end)
+            button:SetScript("OnLeave",function() GameTooltip:Hide() end)
+            window.buffIcons[i]=button
+        end
+        local col=(i-1)%5; local row=math.floor((i-1)/5)
+        button:ClearAllPoints(); button:SetPoint("TOPLEFT",2+col*33,-2-row*33); button.buff=buff
+        local texture=buff.icon or (buff.spellID and GetSpellTexture and GetSpellTexture(buff.spellID)) or "Interface\\Icons\\INV_Misc_QuestionMark"
+        button.icon:SetTexture(texture); button:Show()
+    end
+    for i=#buffs+1,#window.buffIcons do window.buffIcons[i]:Hide(); window.buffIcons[i].buff=nil end
+    local rows=math.max(1,math.ceil(#buffs/5)); window.buffBody:SetHeight(math.max(72,rows*33+2))
+    if window.buffScroll.RefreshRivalsScrollbar then window.buffScroll:RefreshRivalsScrollbar(true) end
+end
+
+local function RefreshDuelSummary(window,record)
+    local identity=DuelIdentity(record)
+    local stats=DuelMatchupStats(record)
+    local className=identity.class and ((LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[identity.class]) or identity.class) or "Unknown class"
+    local race=tostring(identity.localizedRace or identity.race or "Unknown race")
+    local level=identity.level and ("Lv "..tostring(identity.level)) or "Lv ?"
+    local spec=OpponentSpecLabel(record)
+    window.rivalName:SetText(OpponentNameColored(record,false))
+    window.rivalMeta:SetText(string.format("%s %s %s%s",level,race,className,spec and (" • "..spec) or ""))
+    window.rivalRecord:SetText(string.format("Your record  |cff65e6ad%d|r-|cffff8888%d|r  •  %d duels",stats.wins,stats.losses,stats.duels))
+    ApplyDuelPortrait(window,record)
+
+    local won=record.won and true or false
+    window.duelResult:SetText(won and "|cff65e6adWIN|r" or "|cffff8888LOSS|r")
+    window.duelMode:SetText((DP.Views and DP.Views.Mode and DP.Views.Mode(record) or "Duel") .. "  •  " .. (DP.Views and DP.Views.EvidenceLabel and DP.Views.EvidenceLabel(record) or "Local Record"))
+    window.duelDuration:SetText(record.duration and string.format("%.2fs",record.duration) or "Duration unknown")
+    window.duelDate:SetText(record.timestamp and date("%m/%d/%y %H:%M",record.timestamp) or "")
+
+    local d=record.ratingDecision
+    if d and d.before~=nil and d.after~=nil then
+        local delta=(d.after or 0)-(d.before or 0); local color=delta>0 and "|cff65e6ad" or delta<0 and "|cffff8888" or "|cffadb5c2"
+        window.summaryRatingValue:SetText(string.format("%.1f > %.1f  %s%+.2f|r",d.before,d.after,color,delta))
+        if d.matchup and d.matchup.before~=nil then
+            window.summaryMatchupRating:SetText(string.format("%s matchup  %.1f > %.1f",className,d.matchup.before or 0,d.matchup.after or d.matchup.before or 0))
+        else window.summaryMatchupRating:SetText("No class-matchup rating change") end
+    else
+        window.summaryRatingValue:SetText("No rating impact")
+        window.summaryMatchupRating:SetText(record.modeFailure or (d and DP.Views and DP.Views.Reason and DP.Views.Reason(d)) or "History only")
+    end
+
+    local snapshot=record.duelConsumableCost
+    if not snapshot and U.CaptureDuelConsumableCost then snapshot=U.CaptureDuelConsumableCost(record) end
+    local playerGUID=record.session and record.session.playerGUID
+    local opponentGUID=identity.guid
+    local you=DuelCostForActor(snapshot,playerGUID,record.session and record.session.playerName)
+    local rival=DuelCostForActor(snapshot,opponentGUID,identity.name)
+    window.summaryConsumedValue:SetText(string.format("You %s  •  Rival %s",CopperText(you and you.totalCopper),CopperText(rival and rival.totalCopper)))
+    window.summaryConsumedHit.snapshot=snapshot
+
+    window.matchupOpponent:SetText(DP.Theme.ClassName(ShortName(identity.name),identity.class))
+    window.matchupLifetime:SetText(string.format("Lifetime                     |cff65e6ad%d|r-|cffff8888%d|r",stats.wins,stats.losses))
+    window.matchupRated:SetText(string.format("Rated                         |cff65e6ad%d|r-|cffff8888%d|r",stats.ratedWins,stats.ratedLosses))
+    window.matchupClass:SetText(string.format("vs %s                 |cff65e6ad%d|r-|cffff8888%d|r",className,stats.classWins,stats.classLosses))
+    window.matchupEvidence:SetText((DP.Views and DP.Views.EvidenceLabel and DP.Views.EvidenceLabel(record) or "Local Record") .. (record.verification and record.verification.matchId and ("  •  "..tostring(record.verification.matchId)) or ""))
+end
+
+local function RefreshDuelUsage(window,record)
+    local filter=window.participantFilter or "all"; window.filter:SetSelectedValue(filter)
+    local events=DuelUsageEvents(record,filter)
+    local y,rowIndex,dataIndex,lastCategory=0,0,0,nil
+    for _,rendered in ipairs(events) do
+        if rendered.category~=lastCategory then
+            rowIndex=rowIndex+1; local header=EnsureDuelUsageRow(window,rowIndex,"category")
+            header:ClearAllPoints(); header:SetPoint("TOPLEFT",0,-y); header.label:SetText("|cffffd86a"..(DUEL_CATEGORY_LABEL[rendered.category] or tostring(rendered.category):upper()).."|r"); header:Show(); y=y+26; lastCategory=rendered.category
+        end
+        rowIndex=rowIndex+1; dataIndex=dataIndex+1; local row=EnsureDuelUsageRow(window,rowIndex,"entry")
+        row:ClearAllPoints(); row:SetPoint("TOPLEFT",0,-y); row.bg:SetColorTexture(dataIndex%2==0 and .085 or .035,dataIndex%2==0 and .085 or .035,dataIndex%2==0 and .085 or .035,dataIndex%2==0 and .72 or .82)
+        row.time:SetText(string.format("%05.1f",rendered.t or 0)); row.player:SetText(DP.Theme.ClassName(rendered.actorName,rendered.class)); row.used:SetText(rendered.display.text or rendered.entry.name or "Unknown")
+        row.target:SetText(rendered.targetName and ShortName(rendered.targetName) or "—")
+        row.entry={itemID=rendered.display.itemID or rendered.entry.itemID,spellID=rendered.display.spellID or rendered.entry.spellID}; row:Show(); y=y+22
+    end
+    if #events==0 then
+        rowIndex=1; local row=EnsureDuelUsageRow(window,rowIndex,"category"); row:ClearAllPoints(); row:SetPoint("TOPLEFT",0,0); row.label:SetText("|cffadb5c2No tracked item, engineering, racial, or ≥3 minute cooldown use for this filter.|r"); row:Show(); y=26
+    end
+    for i=rowIndex+1,#window.usageRows do window.usageRows[i]:Hide() end
+    window.usageBody:SetHeight(math.max(1,y)); if window.usageScroll.RefreshRivalsScrollbar then window.usageScroll:RefreshRivalsScrollbar(true) end
+end
+
+local function RefreshDuelCombatLog(window,record)
+    window.logText:SetText(DuelCombinedCombatLog(record))
+    local height=window.logText.GetStringHeight and window.logText:GetStringHeight() or 100
+    window.logBody:SetHeight(math.max(1,(height or 100)+10)); if window.logScroll.RefreshRivalsScrollbar then window.logScroll:RefreshRivalsScrollbar(true) end
+end
+
+local function SelectDuelDetailTab(window,key)
+    window.activeTab=key
+    DP.Theme.SelectDataTab(window.summaryTab,key=="summary","Summary")
+    DP.Theme.SelectDataTab(window.usageTab,key=="usage","Items & Abilities")
+    DP.Theme.SelectDataTab(window.logTab,key=="log","Combat Log")
+    window.summaryStatsTitle:SetShown(key=="summary"); window.summaryStatsBox:SetShown(key=="summary"); window.matchupTitle:SetShown(key=="summary"); window.matchupBox:SetShown(key=="summary")
+    window.usageHeader:SetShown(key=="usage"); window.usageScroll:SetShown(key=="usage"); window.usageScrollbar:SetShown(key=="usage" and window.usageScrollbar._needed==true); window.filter:SetShown(key=="usage")
+    window.logBox:SetShown(key=="log")
+    if window.record then
+        if key=="summary" then RefreshDuelSummary(window,window.record)
+        elseif key=="usage" then RefreshDuelUsage(window,window.record)
+        else RefreshDuelCombatLog(window,window.record) end
+    end
+end
+
 local function EnsureDetailWindow()
     if U.window then return U.window end
-    local window = CreateFrame("Frame", "RivalsDuelUsageDetails", UIParent, BackdropTemplateMixin and "BackdropTemplate" or nil)
-    window.baseHeight = 620
-    window:SetSize(600, window.baseHeight)
-    window.maxUsageHeight = 210
-    window.minUsageHeight = 44; window:SetPoint("CENTER"); window:SetFrameStrata("DIALOG")
+    local window=CreateFrame("Frame","RivalsDuelUsageDetails",UIParent,BackdropTemplateMixin and "BackdropTemplate" or nil)
+    window:SetSize(650,DUEL_DETAIL_HEIGHT); window:SetPoint("CENTER"); window:SetFrameStrata("DIALOG"); window:SetMovable(true); window:EnableMouse(true)
     if window.SetClampedToScreen then window:SetClampedToScreen(true) end
-    window:SetMovable(true); window:EnableMouse(true)
+    window.bg=window:CreateTexture(nil,"BACKGROUND"); window.bg:SetPoint("TOPLEFT",1,-1); window.bg:SetPoint("BOTTOMRIGHT",-1,1); window.bg:SetTexture("Interface\\FrameGeneral\\UI-Background-Rock"); window.bg:SetVertexColor(.28,.30,.33,.97)
+    local border=DP.Theme.Border(window,0,0,650,DUEL_DETAIL_HEIGHT); border:ClearAllPoints(); border:SetAllPoints(window); border:EnableMouse(false)
+    local header=DP.Theme.PlaqueHeader(window,360,"Duel Details","GameFontNormal"); header:SetPoint("BOTTOM",window,"TOP",0,-4); header:EnableMouse(true); header:RegisterForDrag("LeftButton")
+    header:SetScript("OnDragStart",function() window:StartMoving() end); header:SetScript("OnDragStop",function() window:StopMovingOrSizing() end); window.header=header
+    local close=CreateFrame("Button",nil,window,"UIPanelCloseButton"); close:SetPoint("TOPRIGHT",-2,-2); close:SetScript("OnClick",function() window:Hide() end); window.close=close
+    window:SetScript("OnHide",function(self) self.activeTab="summary"; GameTooltip:Hide(); U.HideHistoryTooltip() end)
 
-    -- Keep the rock fill inside the metal border. SetAllPoints let the square
-    -- texture protrude through the decorative corners on Classic Era.
-    window.bg = window:CreateTexture(nil, "BACKGROUND")
-    window.bg:SetPoint("TOPLEFT", 1, -1); window.bg:SetPoint("BOTTOMRIGHT", -1, 1)
-    window.bg:SetTexture("Interface\\FrameGeneral\\UI-Background-Rock")
-    window.bg:SetVertexColor(.28, .30, .33, .97)
-    window.border = DP.Theme.Border(window, 0, 0, 600, 620); window.border:ClearAllPoints(); window.border:SetAllPoints(window); window.border:EnableMouse(false)
+    -- Rival header card (same footprint as World PvP's map card).
+    window.rivalBox=CreateFrame("Frame",nil,window); window.rivalBox:SetPoint("TOPLEFT",20,-34); window.rivalBox:SetSize(230,142)
+    window.rivalBox.bg=window.rivalBox:CreateTexture(nil,"BACKGROUND"); window.rivalBox.bg:SetAllPoints(); window.rivalBox.bg:SetColorTexture(.03,.036,.045,.58); DP.Theme.Border(window.rivalBox,0,0,230,142)
+    window.rivalLabel=window.rivalBox:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); window.rivalLabel:SetPoint("TOPLEFT",10,-8); window.rivalLabel:SetText("RIVAL")
+    CreateDuelPortrait(window); window.portraitFrame:SetParent(window.rivalBox); window.portraitFrame:ClearAllPoints(); window.portraitFrame:SetPoint("TOPLEFT",10,-30)
+    window.rivalName=window.rivalBox:CreateFontString(nil,"OVERLAY","GameFontNormal"); window.rivalName:SetPoint("TOPLEFT",82,-32); window.rivalName:SetWidth(136); window.rivalName:SetJustifyH("LEFT")
+    window.rivalMeta=window.rivalBox:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); window.rivalMeta:SetPoint("TOPLEFT",82,-51); window.rivalMeta:SetWidth(136); window.rivalMeta:SetHeight(45); window.rivalMeta:SetJustifyH("LEFT"); window.rivalMeta:SetJustifyV("TOP"); window.rivalMeta:SetWordWrap(true)
+    window.rivalRecord=window.rivalBox:CreateFontString(nil,"OVERLAY","GameFontDisableSmall"); window.rivalRecord:SetPoint("BOTTOMLEFT",10,10); window.rivalRecord:SetWidth(210); window.rivalRecord:SetJustifyH("LEFT")
 
-    -- This is the exact Zurk Maps / Duel Rating plaque assembly from Theme.lua,
-    -- not another bordered rectangle layered on top of the outer frame.
-    local header = DP.Theme.PlaqueHeader(window, 360, "Duel Details", "GameFontNormal")
-    header:SetPoint("BOTTOM", window, "TOP", 0, -4)
-    header:EnableMouse(true); header:RegisterForDrag("LeftButton")
-    header:SetScript("OnDragStart", function() window:StartMoving() end)
-    header:SetScript("OnDragStop", function() window:StopMovingOrSizing() end)
-    window.header = header
+    window.duelBox=CreateFrame("Frame",nil,window); window.duelBox:SetPoint("TOPLEFT",260,-34); window.duelBox:SetSize(164,142)
+    window.duelBox.bg=window.duelBox:CreateTexture(nil,"BACKGROUND"); window.duelBox.bg:SetAllPoints(); window.duelBox.bg:SetColorTexture(.03,.036,.045,.58); DP.Theme.Border(window.duelBox,0,0,164,142)
+    local duelLabel=window.duelBox:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); duelLabel:SetPoint("TOPLEFT",10,-8); duelLabel:SetText("DUEL")
+    window.duelResult=window.duelBox:CreateFontString(nil,"OVERLAY","GameFontNormalLarge"); window.duelResult:SetPoint("TOPLEFT",10,-30); window.duelResult:SetWidth(144); window.duelResult:SetJustifyH("LEFT")
+    window.duelMode=window.duelBox:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); window.duelMode:SetPoint("TOPLEFT",10,-58); window.duelMode:SetWidth(144); window.duelMode:SetJustifyH("LEFT"); window.duelMode:SetWordWrap(true)
+    window.duelDuration=window.duelBox:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); window.duelDuration:SetPoint("TOPLEFT",10,-88); window.duelDuration:SetWidth(144); window.duelDuration:SetJustifyH("LEFT")
+    window.duelDate=window.duelBox:CreateFontString(nil,"OVERLAY","GameFontDisableSmall"); window.duelDate:SetPoint("BOTTOMLEFT",10,10); window.duelDate:SetWidth(144); window.duelDate:SetJustifyH("LEFT")
 
-    local close = CreateFrame("Button", nil, window, "UIPanelCloseButton")
-    close:SetPoint("TOPRIGHT", -2, -2); close:SetScript("OnClick", function() window:Hide() end)
-    window.close = close
+    window.buffBox=CreateFrame("Frame",nil,window); window.buffBox:SetPoint("TOPLEFT",434,-34); window.buffBox:SetSize(196,142)
+    window.buffBox.bg=window.buffBox:CreateTexture(nil,"BACKGROUND"); window.buffBox.bg:SetAllPoints(); window.buffBox.bg:SetColorTexture(.03,.036,.045,.58); DP.Theme.Border(window.buffBox,0,0,196,142)
+    window.buffTitle=window.buffBox:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); window.buffTitle:SetPoint("TOPLEFT",8,-8); window.buffTitle:SetText("ENEMY BUFFS")
+    window.buffEmpty=window.buffBox:CreateFontString(nil,"OVERLAY","GameFontDisableSmall"); window.buffEmpty:SetPoint("CENTER",0,-10); window.buffEmpty:SetWidth(180); window.buffEmpty:SetJustifyH("CENTER"); window.buffEmpty:SetText("No long buffs observed")
+    window.buffScroll=CreateFrame("ScrollFrame",nil,window.buffBox); window.buffScroll:SetPoint("TOPLEFT",8,-29); window.buffScroll:SetPoint("BOTTOMRIGHT",-17,8)
+    if window.buffScroll.SetClipsChildren then window.buffScroll:SetClipsChildren(true) end
+    window.buffBody=CreateFrame("Frame",nil,window.buffScroll); window.buffBody:SetSize(166,72); window.buffScroll:SetScrollChild(window.buffBody); window.buffIcons={}
+    window.buffScrollbar=DP.Theme.ScrollBar(window.buffBox,30); window.buffScrollbar:SetPoint("TOPRIGHT",-1,-35); window.buffScrollbar:SetPoint("BOTTOMRIGHT",-1,8)
+    BindRivalsScroll(window.buffScroll,window.buffBody,window.buffScrollbar,30)
 
-    window.summaryTitle = window:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    window.summaryTitle:SetPoint("TOPLEFT", 24, -34); window.summaryTitle:SetJustifyH("LEFT")
-    if window.summaryTitle.SetWordWrap then window.summaryTitle:SetWordWrap(false) end
-    window.summaryOpponent = window:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    if window.summaryOpponent.SetWordWrap then window.summaryOpponent:SetWordWrap(false) end
-    window.summarySpec = MakeSpecFont(window, false)
-    window.summaryDate = window:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    window.summaryDate:SetPoint("TOPLEFT", 24, -60); window.summaryDate:SetWidth(540); window.summaryDate:SetJustifyH("LEFT")
-    window.summaryMeta = window:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    window.summaryMeta:SetPoint("TOPLEFT", 24, -81); window.summaryMeta:SetWidth(540); window.summaryMeta:SetJustifyH("LEFT")
+    window.summaryTab=DP.Theme.DataTab(window,"Summary",20,-191,110,function() SelectDuelDetailTab(window,"summary") end)
+    window.usageTab=DP.Theme.DataTab(window,"Items & Abilities",131,-191,150,function() SelectDuelDetailTab(window,"usage") end)
+    window.logTab=DP.Theme.DataTab(window,"Combat Log",282,-191,120,function() SelectDuelDetailTab(window,"log") end)
+    window.content=CreateFrame("Frame",nil,window); window.content:SetPoint("TOPLEFT",20,-221); window.content:SetPoint("BOTTOMRIGHT",-20,18)
 
-    window.tableHeader = CreateTableHeader(window, 545, 160, 195, false)
-    window.tableHeader:SetPoint("TOPLEFT", 20, -107)
+    -- Summary uses the exact World PvP two-column footprint.
+    window.summaryStatsTitle=window.content:CreateFontString(nil,"OVERLAY","GameFontNormal"); window.summaryStatsTitle:SetPoint("TOPLEFT",0,-4); window.summaryStatsTitle:SetText("DUEL STATS")
+    window.summaryStatsBox=CreateFrame("Frame",nil,window.content); window.summaryStatsBox:SetPoint("TOPLEFT",0,-24); window.summaryStatsBox:SetSize(220,206)
+    window.summaryStatsBox.bg=window.summaryStatsBox:CreateTexture(nil,"BACKGROUND"); window.summaryStatsBox.bg:SetAllPoints(); window.summaryStatsBox.bg:SetColorTexture(.035,.045,.06,.78); DP.Theme.Border(window.summaryStatsBox,0,0,220,206)
+    local ratingLabel=window.summaryStatsBox:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); ratingLabel:SetPoint("TOPLEFT",10,-10); ratingLabel:SetText("RATING")
+    window.summaryRatingValue=window.summaryStatsBox:CreateFontString(nil,"OVERLAY","GameFontNormalLarge"); window.summaryRatingValue:SetPoint("TOPLEFT",10,-29); window.summaryRatingValue:SetWidth(200); window.summaryRatingValue:SetJustifyH("LEFT")
+    window.summaryMatchupRating=window.summaryStatsBox:CreateFontString(nil,"OVERLAY","GameFontDisableSmall"); window.summaryMatchupRating:SetPoint("TOPLEFT",10,-55); window.summaryMatchupRating:SetWidth(200); window.summaryMatchupRating:SetHeight(36); window.summaryMatchupRating:SetJustifyH("LEFT"); window.summaryMatchupRating:SetWordWrap(true)
+    local rule=window.summaryStatsBox:CreateTexture(nil,"ARTWORK"); rule:SetPoint("TOPLEFT",9,-96); rule:SetPoint("TOPRIGHT",-9,-96); rule:SetHeight(1); rule:SetColorTexture(.34,.26,.18,.65)
+    window.summaryConsumedHit=CreateFrame("Frame",nil,window.summaryStatsBox); window.summaryConsumedHit:SetPoint("TOPLEFT",4,-104); window.summaryConsumedHit:SetPoint("BOTTOMRIGHT",-4,4); window.summaryConsumedHit:EnableMouse(true)
+    window.summaryConsumedHit.bg=window.summaryConsumedHit:CreateTexture(nil,"BACKGROUND"); window.summaryConsumedHit.bg:SetAllPoints(); window.summaryConsumedHit.bg:SetColorTexture(.025,.03,.04,.72)
+    local consumedLabel=window.summaryConsumedHit:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); consumedLabel:SetPoint("TOPLEFT",6,-7); consumedLabel:SetText("CONSUMED")
+    window.summaryConsumedValue=window.summaryConsumedHit:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); window.summaryConsumedValue:SetPoint("TOPLEFT",6,-28); window.summaryConsumedValue:SetWidth(196); window.summaryConsumedValue:SetJustifyH("LEFT"); window.summaryConsumedValue:SetWordWrap(true)
+    window.summaryConsumedHit:SetScript("OnEnter",function(self)
+        GameTooltip:SetOwner(self,"ANCHOR_RIGHT"); GameTooltip:SetText("Estimated consumable spend")
+        local snapshot=self.snapshot
+        if not snapshot or #(snapshot.actors or {})==0 then GameTooltip:AddLine("No priced consumable use was retained for this duel.",.65,.7,.76,true)
+        else
+            for _,actor in ipairs(snapshot.actors or {}) do
+                GameTooltip:AddLine(" "); GameTooltip:AddDoubleLine(ShortName(actor.name),CopperText(actor.totalCopper),1,.82,.42,1,1,1)
+                for _,item in ipairs(actor.items or {}) do GameTooltip:AddDoubleLine((item.name or "Item")..((item.count or 1)>1 and (" x"..item.count) or ""),item.totalCopper and CopperText(item.totalCopper) or "unpriced",.82,.84,.88,.72,.76,.82) end
+            end
+        end
+        GameTooltip:Show()
+    end); window.summaryConsumedHit:SetScript("OnLeave",function() GameTooltip:Hide() end)
 
-    local scroll = CreateFrame("ScrollFrame", nil, window)
-    scroll:SetPoint("TOPLEFT", 20, -137); scroll:SetSize(545, window.maxUsageHeight)
-    local body = CreateFrame("Frame", nil, scroll); body:SetSize(545, 1); scroll:SetScrollChild(body)
-    window.usageScrollbar = DP.Theme.ScrollBar(window, 28)
-    window.usageScrollbar:SetPoint("TOPLEFT", 560, -137); window.usageScrollbar:SetSize(18, window.maxUsageHeight)
-    BindRivalsScroll(scroll, body, window.usageScrollbar, 28)
-    window.body, window.rows, window.entryButtons, window.scroll = body, {}, {}, scroll
+    window.matchupTitle=window.content:CreateFontString(nil,"OVERLAY","GameFontNormal"); window.matchupTitle:SetPoint("TOPLEFT",236,-4); window.matchupTitle:SetText("MATCHUP")
+    window.matchupBox=CreateFrame("Frame",nil,window.content); window.matchupBox:SetPoint("TOPLEFT",236,-24); window.matchupBox:SetSize(374,206)
+    window.matchupBox.bg=window.matchupBox:CreateTexture(nil,"BACKGROUND"); window.matchupBox.bg:SetAllPoints(); window.matchupBox.bg:SetColorTexture(.035,.045,.06,.72); DP.Theme.Border(window.matchupBox,0,0,374,206)
+    window.matchupOpponent=window.matchupBox:CreateFontString(nil,"OVERLAY","GameFontNormalLarge"); window.matchupOpponent:SetPoint("TOPLEFT",12,-12); window.matchupOpponent:SetWidth(350); window.matchupOpponent:SetJustifyH("LEFT")
+    window.matchupLifetime=window.matchupBox:CreateFontString(nil,"OVERLAY","GameFontHighlight"); window.matchupLifetime:SetPoint("TOPLEFT",12,-47); window.matchupLifetime:SetWidth(350); window.matchupLifetime:SetJustifyH("LEFT")
+    window.matchupRated=window.matchupBox:CreateFontString(nil,"OVERLAY","GameFontHighlight"); window.matchupRated:SetPoint("TOPLEFT",12,-76); window.matchupRated:SetWidth(350); window.matchupRated:SetJustifyH("LEFT")
+    window.matchupClass=window.matchupBox:CreateFontString(nil,"OVERLAY","GameFontHighlight"); window.matchupClass:SetPoint("TOPLEFT",12,-105); window.matchupClass:SetWidth(350); window.matchupClass:SetJustifyH("LEFT")
+    local mRule=window.matchupBox:CreateTexture(nil,"ARTWORK"); mRule:SetPoint("TOPLEFT",12,-139); mRule:SetPoint("TOPRIGHT",-12,-139); mRule:SetHeight(1); mRule:SetColorTexture(.34,.26,.18,.65)
+    window.matchupEvidence=window.matchupBox:CreateFontString(nil,"OVERLAY","GameFontDisableSmall"); window.matchupEvidence:SetPoint("TOPLEFT",12,-153); window.matchupEvidence:SetWidth(350); window.matchupEvidence:SetHeight(40); window.matchupEvidence:SetJustifyH("LEFT"); window.matchupEvidence:SetWordWrap(true)
 
-    -- Persistent duel combat log. Tabs sit on the upper lip of the inset box,
-    -- while each view gets its own independent scroll position/content.
-    local logBox = CreateFrame("Frame", nil, window, BackdropTemplateMixin and "BackdropTemplate" or nil)
-    logBox:SetPoint("TOPLEFT", scroll, "BOTTOMLEFT", 0, -38); logBox:SetPoint("RIGHT", window, "RIGHT", -20, 0); logBox:SetHeight(170)
-    logBox.bg = logBox:CreateTexture(nil, "BACKGROUND"); logBox.bg:SetPoint("TOPLEFT", 1, -1); logBox.bg:SetPoint("BOTTOMRIGHT", -1, 1)
-    logBox.bg:SetColorTexture(.018, .024, .032, .93)
-    logBox.border = DP.Theme.Border(logBox, 0, 0, 560, 190); logBox.border:ClearAllPoints(); logBox.border:SetAllPoints(logBox); logBox.border:EnableMouse(false)
-    window.logBox = logBox
+    window.filter=CreateCompactDuelDropDown(window,window,180,function()
+        local record=window.record; if not record then return {{text="All participants",value="all"}} end
+        local identity=DuelIdentity(record); local s=record.session or {}; local pg=s.playerGUID or record.playerGUID or "duel-player"; local og=identity.guid or ("duel-opponent:"..tostring(record.opponent or "unknown"))
+        return {{text="All participants",value="all"},{text=DP.Theme.ClassName("You",record.playerClass or s.playerClass),value=pg},{text=DP.Theme.ClassName(ShortName(identity.name),identity.class),value=og}}
+    end,function(value) window.participantFilter=value or "all"; if window.record then RefreshDuelUsage(window,window.record) end end)
+    window.filter:SetPoint("TOPRIGHT",window,"TOPRIGHT",-28,-191)
 
-    local logScroll = CreateFrame("ScrollFrame", nil, logBox)
-    logScroll:SetPoint("TOPLEFT", 8, -9); logScroll:SetPoint("BOTTOMRIGHT", -17, 9)
-    local logBody = CreateFrame("Frame", nil, logScroll); logBody:SetSize(535, 128); logScroll:SetScrollChild(logBody)
-    local logText = logBody:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    logText:SetPoint("TOPLEFT", 4, -4); logText:SetWidth(527); logText:SetJustifyH("LEFT")
-    window.logScrollbar = DP.Theme.ScrollBar(logBox, 28)
-    window.logScrollbar:SetPoint("TOPRIGHT", logBox, "TOPRIGHT", -4, -8); window.logScrollbar:SetPoint("BOTTOMRIGHT", logBox, "BOTTOMRIGHT", -4, 8)
-    BindRivalsScroll(logScroll, logBody, window.logScrollbar, 28)
-    if logText.SetJustifyV then logText:SetJustifyV("TOP") end
-    if logText.SetWordWrap then logText:SetWordWrap(true) end
-    window.logScroll, window.logBody, window.logText = logScroll, logBody, logText
+    window.usageTableWidth=592
+    window.usageHeader=CreateFrame("Frame",nil,window.content); window.usageHeader:SetPoint("TOPLEFT",0,-8); window.usageHeader:SetSize(592,24)
+    window.usageHeader.bg=window.usageHeader:CreateTexture(nil,"BACKGROUND"); window.usageHeader.bg:SetAllPoints(); window.usageHeader.bg:SetColorTexture(.08,.09,.11,.95)
+    window.tableHeader=window.usageHeader
+    window.entryButtons={}
+    window.usageHeaderLabels={}; local headers={{"Time",0,54},{"Player",54,118},{"Used",172,295},{"Target",467,125}}
+    for i,h in ipairs(headers) do local t=window.usageHeader:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); t:SetPoint("TOPLEFT",h[2]+6,-6); t:SetWidth(h[3]-10); t:SetJustifyH("LEFT"); t:SetText(h[1]); window.usageHeaderLabels[i]=t end
+    window.usageScroll=CreateFrame("ScrollFrame",nil,window.content); window.usageScroll:SetPoint("TOPLEFT",0,-32); window.usageScroll:SetPoint("BOTTOMRIGHT",-18,8)
+    if window.usageScroll.SetClipsChildren then window.usageScroll:SetClipsChildren(true) end
+    window.usageBody=CreateFrame("Frame",nil,window.usageScroll); window.usageBody:SetSize(592,1); window.usageScroll:SetScrollChild(window.usageBody); window.usageRows={}
+    window.usageScrollbar=DP.Theme.ScrollBar(window.content,30); window.usageScrollbar:SetPoint("TOPRIGHT",0,-32); window.usageScrollbar:SetPoint("BOTTOMRIGHT",0,8)
+    BindRivalsScroll(window.usageScroll,window.usageBody,window.usageScrollbar,30)
+    local oldUsageRefresh=window.usageScroll.RefreshRivalsScrollbar
+    function window.usageScroll:RefreshRivalsScrollbar(reset)
+        local range=math.max(0,(window.usageBody:GetHeight() or 0)-(self:GetHeight() or 0)); local needs=range>1; local width=needs and 592 or 610; window.usageTableWidth=width
+        self:ClearAllPoints(); self:SetPoint("TOPLEFT",window.content,"TOPLEFT",0,-32); self:SetPoint("BOTTOMRIGHT",window.content,"BOTTOMRIGHT",needs and -18 or 0,8)
+        window.usageHeader:SetWidth(width); window.usageBody:SetWidth(width); window.usageHeaderLabels[4]:SetWidth((width-467)-10)
+        for _,row in ipairs(window.usageRows) do row:SetWidth(width); if row.categoryBorder then row.categoryBorder:ClearAllPoints(); row.categoryBorder:SetAllPoints(row) end; if row.label then row.label:SetWidth(width-20) end; if row.target then row.target:SetWidth(math.max(40,width-479)) end end
+        window.usageScrollbar._needed=needs; window.usageScrollbar._syncing=true; window.usageScrollbar:SetMinMaxValues(0,range); window.usageScrollbar:SetValue(reset and 0 or math.min(range,self:GetVerticalScroll() or 0)); window.usageScrollbar._syncing=false; window.usageScrollbar:SetShown(needs and window.activeTab=="usage")
+        if reset then self:SetVerticalScroll(0) end
+    end
 
-    window.myActionsTab = DP.Theme.DataTab(window, "My actions", 0, 0, 110, function()
-        SelectCombatLogTab(window, "myActions")
-    end)
-    window.myActionsTab:ClearAllPoints(); window.myActionsTab:SetPoint("BOTTOMLEFT", logBox, "TOPLEFT", 0, -1)
-    window.toMeTab = DP.Theme.DataTab(window, "What happened to me", 0, 0, 160, function()
-        SelectCombatLogTab(window, "toMe")
-    end)
-    window.toMeTab:ClearAllPoints(); window.toMeTab:SetPoint("LEFT", window.myActionsTab, "RIGHT", 1, 0)
+    window.logBox=CreateFrame("Frame",nil,window.content); window.logBox:SetPoint("TOPLEFT",0,-8); window.logBox:SetPoint("BOTTOMRIGHT",0,8)
+    window.logBox.bg=window.logBox:CreateTexture(nil,"BACKGROUND"); window.logBox.bg:SetAllPoints(); window.logBox.bg:SetColorTexture(.025,.032,.043,.78); local lb=DP.Theme.Border(window.logBox,0,0,598,322); lb:ClearAllPoints(); lb:SetAllPoints(window.logBox); lb:EnableMouse(false)
+    window.logScroll=CreateFrame("ScrollFrame",nil,window.logBox); window.logScroll:SetPoint("TOPLEFT",10,-10); window.logScroll:SetPoint("BOTTOMRIGHT",-17,10)
+    window.logBody=CreateFrame("Frame",nil,window.logScroll); window.logBody:SetSize(583,1); window.logScroll:SetScrollChild(window.logBody)
+    window.logText=window.logBody:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); window.logText:SetPoint("TOPLEFT",4,-4); window.logText:SetWidth(575); window.logText:SetJustifyH("LEFT"); window.logText:SetJustifyV("TOP"); window.logText:SetWordWrap(true)
+    window.logScrollbar=DP.Theme.ScrollBar(window.logBox,30); window.logScrollbar:SetPoint("TOPRIGHT",-4,-8); window.logScrollbar:SetPoint("BOTTOMRIGHT",-4,8); BindRivalsScroll(window.logScroll,window.logBody,window.logScrollbar,30)
 
-    window:SetScript("OnHide", function()
-        GameTooltip:Hide(); U.HideHistoryTooltip()
-    end)
-    UISpecialFrames[#UISpecialFrames+1] = "RivalsDuelUsageDetails"
-    U.window = window
+    UISpecialFrames[#UISpecialFrames+1]="RivalsDuelUsageDetails"; U.window=window
     return window
 end
 
-local function LayoutDetailRows(window, groups)
-    local width, categoryWidth, playerWidth = 545, 160, 195
-    local opponentWidth = width - categoryWidth - playerWidth
-    local entryIndex, y = 0, 0
-    for index, group in ipairs(groups) do
-        local row = window.rows[index]
-        if not row then row = CreateDetailRow(window); window.rows[index] = row end
-        local count = math.max(1, #group.player, #group.opponent)
-        local height = count * 22 + 18
-        row:ClearAllPoints(); row:SetPoint("TOPLEFT", 0, -y); row:SetSize(width, height)
-        row.bg:SetColorTexture(.045, .055, .07, index % 2 == 0 and .78 or .54)
-        row.category:ClearAllPoints(); row.category:SetPoint("TOPLEFT", 10, -10); row.category:SetWidth(categoryWidth - 20)
-        row.category:SetText("|cffffce70" .. DisplayCategory(group.title) .. "|r")
-        row.leftRule:ClearAllPoints(); row.leftRule:SetPoint("TOPLEFT", categoryWidth, 0); row.leftRule:SetPoint("BOTTOMLEFT", categoryWidth, 0)
-        row.rightRule:ClearAllPoints(); row.rightRule:SetPoint("TOPLEFT", categoryWidth + playerWidth, 0); row.rightRule:SetPoint("BOTTOMLEFT", categoryWidth + playerWidth, 0)
-        row.bottomRule:ClearAllPoints(); row.bottomRule:SetPoint("BOTTOMLEFT", 0, 0); row.bottomRule:SetWidth(width)
-
-        row.playerEmpty:SetText("—"); row.opponentEmpty:SetText("—")
-        row.playerEmpty:Hide(); row.opponentEmpty:Hide()
-        if #group.player == 0 then
-            row.playerEmpty:ClearAllPoints(); row.playerEmpty:SetPoint("TOPLEFT", categoryWidth + 10, -10); row.playerEmpty:Show()
-        end
-        if #group.opponent == 0 then
-            row.opponentEmpty:ClearAllPoints(); row.opponentEmpty:SetPoint("TOPLEFT", categoryWidth + playerWidth + 10, -10); row.opponentEmpty:Show()
-        end
-
-        for _, side in ipairs({"player", "opponent"}) do
-            local x = side == "player" and categoryWidth + 10 or categoryWidth + playerWidth + 10
-            local cellWidth = side == "player" and playerWidth - 20 or opponentWidth - 20
-            for line, entry in ipairs(group[side]) do
-                entryIndex = entryIndex + 1
-                local button = window.entryButtons[entryIndex]
-                if not button then button = CreateEntryButton(window); window.entryButtons[entryIndex] = button end
-                button.entry = entry
-                local measured = FitEntryLabel(button.label, entry.text, cellWidth)
-                button:ClearAllPoints(); button:SetPoint("TOPLEFT", row, "TOPLEFT", x, -8 - (line - 1) * 22)
-                button:SetSize(cellWidth, 20); button.label:SetWidth(cellWidth); button:Show()
-            end
-        end
-        row:Show(); y = y + height
-    end
-    for index = #groups + 1, #window.rows do window.rows[index]:Hide() end
-    for index = entryIndex + 1, #window.entryButtons do window.entryButtons[index]:Hide(); window.entryButtons[index].entry = nil end
-
-    local displayHeight = math.min(window.maxUsageHeight or y, math.max(window.minUsageHeight or 44, y))
-    window.scroll:SetHeight(displayHeight)
-    window.body:SetHeight(math.max(1, y))
-    if window.usageScrollbar then
-        window.usageScrollbar:SetHeight(displayHeight)
-        window.scroll:RefreshRivalsScrollbar(false)
-    end
-    if window.logBox then
-        window.logBox:ClearAllPoints()
-        window.logBox:SetPoint("TOPLEFT", window.scroll, "BOTTOMLEFT", 0, -38)
-        window.logBox:SetPoint("RIGHT", window, "RIGHT", -20, 0)
-    end
-    return y, displayHeight
+function U.RefreshDetailContent()
+    local window=U.window
+    if not (window and window.record) then return end
+    RefreshDuelBuffBox(window,window.record)
+    RefreshDuelSummary(window,window.record)
+    SelectDuelDetailTab(window,window.activeTab or "summary")
 end
 
--- Scrollable duel details with a fixed dataframe-style header. Item/spell tooltip
--- hitboxes are sized to the text itself rather than the entire horizontal cell.
 function U.OpenDetails(record)
-    if DP.WorldPvP and DP.WorldPvP.details and DP.WorldPvP.details:IsShown() then
-        DP.WorldPvP.details:Hide()
-    end
-    local window = EnsureDetailWindow()
-    SetDetailSummaryTitle(window, record)
-    window.summaryDate:SetText("|cffadb5c2" .. date("%Y-%m-%d %H:%M:%S", record.timestamp) .. "|r")
-    local meta = {}
-    if DP.Views and DP.Views.Mode then meta[#meta + 1] = DP.Views.Mode(record) end
-    if record.duration then
-        local suffix = record.durationQuality and (" (" .. record.durationQuality .. ")") or ""
-        meta[#meta + 1] = string.format("%.2fs%s", record.duration, suffix)
-    end
-    window.summaryMeta:SetText("|cffadb5c2" .. table.concat(meta, "  •  ") .. "|r")
-    SetOpponentHeader(window.tableHeader, record)
-
-    local groups = U.Groups(record)
-    local height, displayHeight = LayoutDetailRows(window, groups)
-    if #groups == 0 then
-        local row = window.rows[1]
-        if not row then row = CreateDetailRow(window); window.rows[1] = row end
-        row:ClearAllPoints(); row:SetPoint("TOPLEFT", 0, 0); row:SetSize(545, 44); row.bg:SetColorTexture(.045, .055, .07, .54)
-        row.category:ClearAllPoints(); row.category:SetText("|cffffce70Usage|r"); row.category:SetPoint("TOPLEFT", 10, -12)
-        row.playerEmpty:SetText("No item, cooldown, racial, or engineering gadget use recorded.")
-        row.playerEmpty:ClearAllPoints(); row.playerEmpty:SetPoint("TOPLEFT", 170, -12); row.playerEmpty:SetWidth(355); row.playerEmpty:Show()
-        row.opponentEmpty:Hide(); row:Show(); height = 44
-        for index = 2, #window.rows do window.rows[index]:Hide() end
-        window.scroll:SetHeight(height)
-        window.body:SetHeight(height)
-        if window.usageScrollbar then window.scroll:RefreshRivalsScrollbar(true) end
-        if window.logBox then
-            window.logBox:ClearAllPoints()
-            window.logBox:SetPoint("TOPLEFT", window.scroll, "BOTTOMLEFT", 0, -38)
-            window.logBox:SetPoint("RIGHT", window, "RIGHT", -20, 0)
-        end
-    end
-    local targetHeight = window.baseHeight or 620
-    if (displayHeight or window.maxUsageHeight) < (window.maxUsageHeight or 210) then
-        targetHeight = math.max(420, math.min(targetHeight, 374 + (displayHeight or 0)))
-    end
-    window:SetHeight(targetHeight)
-
-    window.record = record
-    SelectCombatLogTab(window, window.activeLogTab or "myActions")
-    window:Show()
-    if window.scroll.SetVerticalScroll then window.scroll:SetVerticalScroll(0) end
+    if DP.WorldPvP and DP.WorldPvP.details and DP.WorldPvP.details:IsShown() then DP.WorldPvP.details:Hide() end
+    local window=EnsureDetailWindow(); window.record=record; window.participantFilter="all"
+    RefreshDuelBuffBox(window,record); RefreshDuelSummary(window,record); window:Show(); SelectDuelDetailTab(window,window.activeTab or "summary")
 end
