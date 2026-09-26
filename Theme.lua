@@ -365,6 +365,65 @@ function T.Fill(parent, x, y, width, height, r, g, b, a)
     texture:SetColorTexture(r, g, b, a or 1)
     return texture
 end
+-- Opponent plaques reuse Blizzard's rounded tooltip border. Portrait rows
+-- crop only the hidden left corner region while preserving the same right-hand
+-- corner treatment as the surrounding OPPONENTS box.
+function T.PlaqueBorder(parent, width, height, edgeSize)
+    -- Use the same native Blizzard tooltip edge treatment as the surrounding
+    -- border box. Portrait cards crop the *left side of this frame* in their own
+    -- clip region, so the right-hand corners stay rounded while the hidden left
+    -- corners can never peek out beside the portrait medallion.
+    local box = CreateFrame("Frame", nil, parent, BackdropTemplateMixin and "BackdropTemplate" or nil)
+    box:SetSize(width, height)
+    edgeSize = tonumber(edgeSize) or 8
+    box._rivalsBorderStyle = "tooltip-rounded"
+    box._rivalsEdgeTexture = "Interface\\Tooltips\\UI-Tooltip-Border"
+    box._rivalsEdgeSize = edgeSize
+
+    if box.SetBackdrop then
+        local inset = edgeSize >= 12 and 3 or 2
+        box:SetBackdrop({
+            edgeFile = box._rivalsEdgeTexture,
+            edgeSize = edgeSize,
+            insets = {left = inset, right = inset, top = inset, bottom = inset},
+        })
+        box:SetBackdropBorderColor(.56, .39, .22, .70)
+        box._rivalsUsesBlizzardBackdrop = true
+    else
+        -- Test/legacy fallback. The live Classic client uses the native backdrop
+        -- above; these rails simply preserve a readable frame if BackdropTemplate
+        -- is unavailable.
+        local function Rail(r, g, b, a)
+            local tex = box:CreateTexture(nil, "BORDER")
+            tex:SetTexture("Interface\\Buttons\\WHITE8X8")
+            tex:SetVertexColor(r, g, b, a)
+            return tex
+        end
+        box.rails = {
+            top = Rail(.56, .39, .22, .72),
+            bottom = Rail(.30, .21, .13, .72),
+            left = Rail(.43, .30, .18, .68),
+            right = Rail(.50, .35, .20, .70),
+        }
+    end
+
+    function box:UpdatePixelSize(force)
+        if not self.rails then return end
+        local scale = self.GetEffectiveScale and self:GetEffectiveScale() or 1
+        local p = 1 / math.max(.01, scale)
+        local thickness = self._rivalsEdgeSize >= 12 and (2 * p) or p
+        if not force and self.pixelSize == p then return end
+        self.pixelSize = p
+        local r = self.rails
+        r.top:ClearAllPoints(); r.top:SetPoint("TOPLEFT", self, "TOPLEFT", thickness, 0); r.top:SetPoint("TOPRIGHT", self, "TOPRIGHT", -thickness, 0); r.top:SetHeight(thickness)
+        r.bottom:ClearAllPoints(); r.bottom:SetPoint("BOTTOMLEFT", self, "BOTTOMLEFT", thickness, 0); r.bottom:SetPoint("BOTTOMRIGHT", self, "BOTTOMRIGHT", -thickness, 0); r.bottom:SetHeight(thickness)
+        r.left:ClearAllPoints(); r.left:SetPoint("TOPLEFT", self, "TOPLEFT", 0, -thickness); r.left:SetPoint("BOTTOMLEFT", self, "BOTTOMLEFT", 0, thickness); r.left:SetWidth(thickness)
+        r.right:ClearAllPoints(); r.right:SetPoint("TOPRIGHT", self, "TOPRIGHT", 0, -thickness); r.right:SetPoint("BOTTOMRIGHT", self, "BOTTOMRIGHT", 0, thickness); r.right:SetWidth(thickness)
+    end
+    box:UpdatePixelSize(true)
+    return box
+end
+
 function T.Border(parent, x, y, width, height)
     local box = CreateFrame("Frame", nil, parent, BackdropTemplateMixin and "BackdropTemplate" or nil)
     box:SetPoint("TOPLEFT", x, y); box:SetSize(width, height)
@@ -377,6 +436,137 @@ function T.Border(parent, x, y, width, height)
     end
     return box
 end
+-- One scrollbar treatment for Rivals-owned panes.  The stock knob texture has
+-- generous transparent padding, so using it directly as a Slider thumb makes the
+-- visible knob stop short of the arrow buttons even when the value is exactly at
+-- min/max.  Keep an invisible native Slider thumb for drag behavior, then draw the
+-- visible Blizzard knob ourselves so its artwork actually tucks under the arrow
+-- buttons at both endpoints.
+function T.ScrollBar(parent, step)
+    local bar = CreateFrame("Frame", nil, parent)
+    bar:SetSize(18, 160)
+    bar.step = step or 28
+
+    local function Arrow(direction)
+        local button = CreateFrame("Button", nil, bar)
+        button:SetSize(18, 18)
+        local stem = "Interface\\Buttons\\UI-ScrollBar-Scroll" .. direction .. "Button-"
+        button._rivalsDim = stem .. "Disabled"
+        button._rivalsLit = stem .. "Up"
+        button:SetNormalTexture(button._rivalsDim)
+        button:SetPushedTexture(stem .. "Down")
+        button:SetHighlightTexture(stem .. "Highlight", "ADD")
+        button.endpointGlow = button:CreateTexture(nil, "OVERLAY")
+        button.endpointGlow:SetAllPoints(button)
+        button.endpointGlow:SetTexture(stem .. "Highlight")
+        button.endpointGlow:SetBlendMode("ADD")
+        button.endpointGlow:SetAlpha(.85)
+        button.endpointGlow:Hide()
+        return button
+    end
+
+    bar.up = Arrow("Up")
+    bar.up:SetPoint("TOP", bar, "TOP", 0, 0)
+    bar.down = Arrow("Down")
+    bar.down:SetPoint("BOTTOM", bar, "BOTTOM", 0, 0)
+
+    -- The native Slider owns value/drag semantics only.  Its thumb is transparent;
+    -- the visible thumb below is positioned independently so transparent pixels in
+    -- UI-ScrollBar-Knob cannot create endpoint gaps.
+    bar.slider = CreateFrame("Slider", nil, bar)
+    bar.slider:SetPoint("TOP", bar, "TOP", 0, -16)
+    bar.slider:SetPoint("BOTTOM", bar, "BOTTOM", 0, 16)
+    bar.slider:SetWidth(14)
+    bar.slider:SetOrientation("VERTICAL")
+    if bar.slider.SetObeyStepOnDrag then bar.slider:SetObeyStepOnDrag(false) end
+    if bar.slider.SetHitRectInsets then bar.slider:SetHitRectInsets(-4, -4, 0, 0) end
+    bar.nativeThumb = bar.slider:CreateTexture(nil, "ARTWORK")
+    bar.nativeThumb:SetColorTexture(1, 1, 1, .001)
+    bar.nativeThumb:SetSize(18, 30)
+    bar.slider:SetThumbTexture(bar.nativeThumb)
+
+    -- Track extends two pixels beneath each arrow button so the whole control reads
+    -- as one continuous Blizzard scrollbar instead of three detached pieces.
+    bar.track = bar:CreateTexture(nil, "BACKGROUND")
+    bar.track:SetTexture("Interface\\Buttons\\UI-ScrollBar-Middle")
+    bar.track:SetPoint("TOP", bar, "TOP", 0, -16)
+    bar.track:SetPoint("BOTTOM", bar, "BOTTOM", 0, 16)
+    bar.track:SetWidth(8)
+    bar.track:SetAlpha(.72)
+
+    -- Oversize the visual knob slightly and let it slide under the arrows.  At the
+    -- exact minimum/maximum the visible gray knob therefore meets the arrow artwork,
+    -- which is the behavior the rest of the addon expects visually.
+    bar.thumb = bar:CreateTexture(nil, "ARTWORK")
+    bar.thumb:SetTexture("Interface\\Buttons\\UI-ScrollBar-Knob")
+    bar.thumb:SetSize(18, 32)
+
+    function bar:UpdateVisibleThumb(value)
+        local low, high = self.slider:GetMinMaxValues()
+        low, high = tonumber(low) or 0, tonumber(high) or 0
+        value = tonumber(value) or self.slider:GetValue() or low
+        local t = (high > low) and math.max(0, math.min(1, (value - low) / (high - low))) or 0
+        local height = self:GetHeight() or 160
+        local thumbH = 32
+        -- Eight pixels from either outer edge gives the knob ten pixels of overlap
+        -- beneath each 18px arrow. The arrow button renders above it, so only the
+        -- seamless contact edge is visible even with transparent knob padding.
+        local topY = 8
+        local bottomY = math.max(topY, height - 8 - thumbH)
+        local y = topY + (bottomY - topY) * t
+        self.thumb:ClearAllPoints()
+        self.thumb:SetPoint("TOP", self, "TOP", 0, -y)
+    end
+
+    function bar:RefreshEndpointLights(value)
+        local low, high = self.slider:GetMinMaxValues()
+        value = tonumber(value) or self.slider:GetValue() or low or 0
+        low, high = tonumber(low) or 0, tonumber(high) or 0
+        local epsilon = math.max(.01, math.abs(high - low) * .001)
+        local atTop = value <= low + epsilon
+        local atBottom = value >= high - epsilon
+        self.up:SetNormalTexture(atTop and self.up._rivalsLit or self.up._rivalsDim)
+        self.down:SetNormalTexture(atBottom and self.down._rivalsLit or self.down._rivalsDim)
+        self.up.endpointGlow:SetShown(atTop)
+        self.down.endpointGlow:SetShown(atBottom)
+        self:UpdateVisibleThumb(value)
+    end
+    function bar:SetMinMaxValues(low, high)
+        self.slider:SetMinMaxValues(low or 0, high or 0)
+        self:RefreshEndpointLights()
+    end
+    function bar:GetMinMaxValues() return self.slider:GetMinMaxValues() end
+    function bar:SetValue(value) self.slider:SetValue(value or 0); self:RefreshEndpointLights(value) end
+    function bar:GetValue() return self.slider:GetValue() end
+    function bar:SetValueStep(value)
+        self.step = value or self.step
+        if self.slider.SetValueStep then self.slider:SetValueStep(value or 1) end
+    end
+    function bar:SetObeyStepOnDrag(value)
+        if self.slider.SetObeyStepOnDrag then self.slider:SetObeyStepOnDrag(value) end
+    end
+    function bar:SetOnValueChanged(handler)
+        self._rivalsValueChanged = handler
+    end
+
+    bar.slider:SetScript("OnValueChanged", function(_, value)
+        bar:RefreshEndpointLights(value)
+        if bar._rivalsValueChanged then bar._rivalsValueChanged(bar, value) end
+    end)
+    bar:SetScript("OnSizeChanged", function(self)
+        self:UpdateVisibleThumb(self:GetValue())
+    end)
+    local function Nudge(sign)
+        local low, high = bar:GetMinMaxValues()
+        bar:SetValue(math.max(low or 0, math.min(high or 0, (bar:GetValue() or 0) + sign * (bar.step or 1))))
+    end
+    bar.up:SetScript("OnClick", function() Nudge(-1) end)
+    bar.down:SetScript("OnClick", function() Nudge(1) end)
+    bar:SetMinMaxValues(0, 0)
+    bar:SetValue(0)
+    return bar
+end
+
 -- The connected title-plaque assembly used by Zurk Maps. Keep the ornament
 -- construction in one place so Rivals' rating card and secondary windows use
 -- the exact same endcaps, trim, fill, and text placement.

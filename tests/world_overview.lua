@@ -22,7 +22,7 @@ RivalsCharacterPanel:Hide()
 assert(W.db.worldPvPOverviewMode == "world")
 RivalsCharacterPanel:Show()
 assert(W.overviewMode == "world" and W.overviewFrame:IsShown())
-assert(CharacterFrameTab6:GetText() == "WPvP")
+assert(CharacterFrameTab6 == nil and RivalsCharacterTab.rivalsLabel:GetText() == "WPvP")
 
 -- A live page change is animated as a horizontal swipe, then settles into the
 -- same Overview bounds with only the selected page shown.
@@ -32,7 +32,7 @@ W.overviewHost.scripts.OnUpdate(W.overviewHost, .30)
 assert(W.overviewMode == "duels")
 assert(W.db.worldPvPOverviewMode == "duels")
 assert(W.duelOverviewFrame:IsShown() and not W.overviewFrame:IsShown())
-assert(CharacterFrameTab6:GetText() == "Duels")
+assert(CharacterFrameTab6 == nil and RivalsCharacterTab.rivalsLabel:GetText() == "Duels")
 assert(not W.overviewHost.scripts.OnUpdate)
 assert(W.duelDot.dot.textColor[1] > W.worldDot.dot.textColor[1])
 -- Duel-only controls are children of the moving Duel page. The shared period

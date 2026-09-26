@@ -1,14 +1,14 @@
-## Rivals 0.21.88-beta
+## Rivals 0.21.181-beta
 
-Changes since 0.21.45-beta:
+Changes since the last GitHub push, 0.21.88-beta:
 
-- Improved World PvP encounter separation: leaving combat starts a 10-second grace period, while a new opponent after combat ends starts a separate encounter. This prevents unrelated fights from inflating encounter headcounts.
-- Refined friendly headcounts to count players who actively attack an encounter enemy. Chat summaries now use the same contested-fight counts as History and Solo 1vN tracking.
-- Fixed kill streaks to continue through harmless disengages and reset on player death. Improved zone detection and Favorite Zone handling for older records with continent-level locations.
-- Added detection of observable enemy world buffs and consumable buffs, including buffs already active when an enemy is seen. Detected buffs appear in dedicated Items & Abilities sections.
-- Redesigned Solo 1vN result notifications with animated presentation, opponent details, and lifetime rivalry tooltips.
-- Reworked Encounter Details with clearer map, outcome, location, and opponent panels; improved long-location wrapping, readable durations, and smooth scrolling for opponent lists.
-- Expanded Summary and opponent tooltips with damage exchanged, observed actions, kill attribution, detected buffs, encounter context, and lifetime rivalry records.
-- Improved Duel and World PvP combat-log readability with class-colored names, distinct damage/healing colors, highlighted abilities and interrupts, and broader class inference from observed abilities.
-- Duel Details and World PvP Encounter Details now close each other when opened, preventing overlapping detail windows.
-- Cleaned up Matchups labels, map-coordinate formatting, and Most Killed/Nemesis displays.
+- Added frozen per-encounter consumable-cost estimates using TSM DBMarket with Auctionator fallback, a participant/item ledger, and explicit unpriced-item information. Added reagent accounting, Zanza/Juju replacement proxies, fixed Noggenfogger vendor pricing, and historical-record repairs; reusable equipment and conjured mana gems are excluded from spend.
+- Redesigned World PvP Summary with compact encounter stats, damage dealt/taken and recovery breakdowns, detailed killing-blow tooltips, and a wider opponent roster. Retained NPC participation is shown separately from PvP headcounts, with duplicate NPCs grouped.
+- Expanded Enemy Buffs to observable helpful auras with a scrolling icon grid, item/spell tooltips, and class-colored opponent selection. Improved primary-opponent selection, mixed-level encounter descriptions, and filtering of incidental hits from displayed headcounts. Added Bubble Hearthed outcome detection.
+- Improved Items & Abilities with participant filters, unified category sections, clearer category plaques, adaptive window sizing, and correct class/faction PvP Insignia classification, including older records.
+- Added independent automatic screenshot settings for duel wins and tracked World PvP enemy deaths, with delayed capture so result text can appear and duplicate death signals suppressed. World PvP tracking is now always enabled.
+- Isolated the Rivals Character pane tab from Blizzard's native tab bookkeeping to address combat taint. Refined tab positioning, labels, selection behavior, and access while the Character pane is already open in combat.
+- Standardized scrollbars and corrected endpoint travel, list gutters, clipping, empty states, and short-list spacing throughout the interface. Refined Overview transitions and opponent portrait plaques, layering, and hover behavior.
+- Preserved captured encounter portraits during the current session and expanded stable legacy portrait fallbacks, including curated Horde race/class combinations and varied Human Mage displays.
+- Hardened combat-log rendering against malformed legacy swing-event metadata and improved reconstruction of historical damage and consumable evidence. Encounter Details resets to Summary after closing.
+- Refreshed the World PvP and duel promo rotation, including consumable-spend messaging.

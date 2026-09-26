@@ -3,7 +3,7 @@ local originalCreate = CreateFrame
 function CreateFrame(kind, name, parent, template)
     local f = originalCreate()
     f.visible = true
-    function f:SetAllPoints() end
+    function f:SetAllPoints(target) self.allPoints = target end
     function f:SetFrameStrata() end
     function f:GetFrameLevel() return self.frameLevel or 1 end
     function f:SetFrameLevel(level) self.frameLevel = level end
@@ -87,36 +87,144 @@ function CreateFrame(kind, name, parent, template)
     return f
 end
 CharacterFrame = CreateFrame(); CharacterFrame.numTabs = 5
+CharacterFrame.GetBottom = function() return 100 end
 CharacterFrameCloseButton = CreateFrame()
+CharacterFrameCloseButton.points = {{"CENTER", CharacterFrame, "TOPRIGHT", -44, -25}}
+function CharacterFrameCloseButton:GetNumPoints() return #self.points end
+function CharacterFrameCloseButton:GetPoint(i) return unpack(self.points[i]) end
+function CharacterFrameCloseButton:ClearAllPoints() self.points = {} end
+function CharacterFrameCloseButton:SetPoint(...) self.points[#self.points + 1] = {...} end
+local inCombat = false
+function InCombatLockdown() return inCombat end
 CHARACTERFRAME_SUBFRAMES = {"PaperDollFrame", "PetPaperDollFrame", "ReputationFrame", "SkillFrame", "HonorFrame"}
+local nativeGeometryReady = false
 for i, name in ipairs(CHARACTERFRAME_SUBFRAMES) do
     CreateFrame("Frame", name)
-    CreateFrame("Button", "CharacterFrameTab" .. i)
+    local nativeTab = CreateFrame("Button", "CharacterFrameTab" .. i)
+    nativeTab.GetRight = function()
+        if not nativeGeometryReady then return nil end
+        return ({100, 150, 230, 300, 365})[i]
+    end
 end
+CharacterFrame.selectedTab = 1
+CharacterFrameTab1:SetText("Character")
+CharacterFrameTab1:SetSize(86, 32)
+CharacterFrameTab1.selected = true
+CharacterFrameTab2:SetText("Reputation")
+CharacterFrameTab2:SetSize(98, 32)
+-- Reproduce the Era layout seen in game: the pet tab can be hidden while Honor
+-- remains the rightmost visible native CharacterFrame tab.
+CharacterFrameTab2:Hide()
+CharacterFrameTab5:Show()
 function PanelTemplates_SetNumTabs(frame, n) frame.numTabs = n end
-function PanelTemplates_TabResize() end
-function ToggleCharacter(name)
+function PanelTemplates_TabResize(tab, padding, absoluteSize, maxWidth, absoluteTextSize)
+    tab.resizeArgs = {padding, absoluteSize, maxWidth, absoluteTextSize}
+    if absoluteSize then tab.width = absoluteSize end
+end
+function PanelTemplates_SelectTab(tab) tab.selected = true; tab.enabled = false end
+function PanelTemplates_DeselectTab(tab) tab.selected = false; tab.enabled = true end
+function CharacterFrame_ShowSubFrame(name)
     for _, sub in ipairs(CHARACTERFRAME_SUBFRAMES) do _G[sub]:Hide() end
     _G[name]:Show()
+end
+function ToggleCharacter(name)
+    CharacterFrame_ShowSubFrame(name)
+    if hooks.CharacterFrame_ShowSubFrame then hooks.CharacterFrame_ShowSubFrame(name) end
 end
 local state = DP.Rating.New()
 local journal = {}
 assert(DP.InstallCharacterTab(function() return state end, function() return journal end))
-assert(CharacterFrame.numTabs == 6)
-assert(CharacterFrameTab6.point[2] == CharacterFrameTab5)
-assert(CharacterFrameTab6.text == "Duels")
-CharacterFrameTab6.scripts.OnClick()
+assert(CharacterFrame.numTabs == 5, "Rivals must not alter Blizzard's native tab count")
+assert(CharacterFrameTab6 == nil, "Rivals must not create CharacterFrameTab6")
+assert(#CHARACTERFRAME_SUBFRAMES == 5, "Rivals must not join CHARACTERFRAME_SUBFRAMES")
+assert(RivalsCharacterTab.point[1] == "LEFT" and RivalsCharacterTab.point[2] == CharacterFrameTab5
+    and RivalsCharacterTab.point[3] == "RIGHT", "Rivals should follow the rightmost visible native tab without joining its registry")
+assert(RivalsCharacterTab.point[4] == -15 and RivalsCharacterTab.point[5] == 0,
+    "Rivals should use Blizzard's normal 15px tab overlap")
+-- Initial installation can happen before Blizzard has resolved native tab screen
+-- coordinates. The fallback must still select the last visible native tab.
+nativeGeometryReady = true
+RivalsCharacterTab:Show()
+advance(0)
+assert(RivalsCharacterTab.point[2] == CharacterFrameTab5,
+    "Rivals should remain anchored after Honor when native tab geometry becomes available")
+assert(RivalsCharacterTab.width == 64, "Rivals tab should use the fixed 64px width")
+assert(RivalsCharacterTab.resizeArgs[2] == 64 and RivalsCharacterTab.resizeArgs[4] == nil,
+    "64px must be the tab absolute size, not absolute text width")
+assert(RivalsCharacterNativeTabCover == nil, "Rivals must not cover native tabs with a mouse-blocking frame")
+assert(CharacterFrame.selectedTab == 1 and CharacterFrameTab1.selected == true,
+    "installing Rivals must not alter Blizzard's native selected tab")
+assert(RivalsCharacterTab.text == "", "the template FontString must stay empty so selected-state funneling cannot truncate the label")
+assert(RivalsCharacterTab.rivalsLabel and RivalsCharacterTab.rivalsLabel.text == "Duels")
+assert(RivalsCharacterTab.rivalsLabel.width == 60, "Rivals should own a full-width overlay label independent of Blizzard's selected-tab text region")
+assert(RivalsCharacterTab.rivalsLabel.point[5] == 2, "Rivals overlay label should sit 2px higher to match the native tab baseline")
+local initialTabPoint = {unpack(RivalsCharacterTab.point)}
+local originalOverviewMode = DP.WorldPvP.GetOverviewMode
+DP.WorldPvP.GetOverviewMode = function() return "world" end
+DP.RefreshRivalsCharacterTabLabel()
+assert(RivalsCharacterTab.text == "" and RivalsCharacterTab.rivalsLabel.text == "WPvP" and RivalsCharacterTab.width == 64,
+    "switching overview modes must update the overlay label without resizing the Rivals tab")
+assert(RivalsCharacterTab.point[1] == initialTabPoint[1] and RivalsCharacterTab.point[2] == initialTabPoint[2]
+    and RivalsCharacterTab.point[3] == initialTabPoint[3] and RivalsCharacterTab.point[4] == initialTabPoint[4]
+    and RivalsCharacterTab.point[5] == initialTabPoint[5], "switching overview modes must not move/crop the Rivals tab")
+DP.WorldPvP.GetOverviewMode = originalOverviewMode
+DP.RefreshRivalsCharacterTabLabel()
+assert(RivalsCharacterTab.text == "" and RivalsCharacterTab.rivalsLabel.text == "Duels" and RivalsCharacterTab.width == 64)
+-- Rivals visually deselects the currently selected Blizzard tab itself so the
+-- native button remains hoverable/clickable, without changing selectedTab.
+CharacterFrame.selectedTab = 2
+CharacterFrameTab1.selected = false
+CharacterFrameTab2.selected = true
+RivalsCharacterTab.scripts.OnClick()
 assert(RivalsCharacterPanel:IsShown() and not HonorFrame:IsShown())
+assert(CharacterFrameCloseButton.points[1][4] == -46 and CharacterFrameCloseButton.points[1][5] == -25,
+    "Rivals should align the native close button 2px left with its custom chrome socket")
+assert(RivalsCharacterTab.selected)
+assert(RivalsCharacterTab.width == 64 and RivalsCharacterTab.text == ""
+    and RivalsCharacterTab.rivalsLabel.text == "Duels",
+    "selecting the Rivals tab must preserve the full overlay label instead of shrinking it into ellipses")
+assert(RivalsCharacterTab.rivalsLabel.textColor[1] == 1 and RivalsCharacterTab.rivalsLabel.textColor[2] == 1,
+    "the selected Rivals overlay label should use the native selected-tab white treatment")
+assert(RivalsCharacterTab.rivalsLabel.point[5] == 4,
+    "the selected Rivals overlay label should rise 2px like Blizzard's native selected tab text")
+assert(CharacterFrame.selectedTab == 2, "Rivals must not change Blizzard selectedTab")
+assert(CharacterFrameTab2.selected == false and CharacterFrameTab2.enabled == true,
+    "the selected native tab should be visually deselected and mouse-active while Rivals is open")
 assert(#RivalsCharacterPanel.chrome == 4) -- One complete, matching frame texture set.
 assert(RivalsCharacterPanel.logo and RivalsCharacterPanel.logo:IsShown())
 assert(not RivalsCharacterPanel.logo.mask and RivalsCharacterPanel.logo.blendMode == "BLEND")
 for _, texture in ipairs(RivalsCharacterPanel.chrome) do assert(texture:IsShown()) end
 ToggleCharacter("HonorFrame")
 assert(HonorFrame:IsShown() and not RivalsCharacterPanel:IsShown())
+assert(CharacterFrameCloseButton.points[1][4] == -44 and CharacterFrameCloseButton.points[1][5] == -25,
+    "leaving Rivals should restore Blizzard's original close-button anchor")
+assert(not RivalsCharacterTab.selected)
+assert(RivalsCharacterTab.rivalsLabel.point[5] == 2,
+    "the Rivals overlay label should return to the normal native-tab baseline when deselected")
+assert(CharacterFrame.selectedTab == 2 and CharacterFrameTab2.selected == true and CharacterFrameTab2.enabled == false
+    and not CharacterFrameTab1.selected, "leaving Rivals should restore Blizzard's selected tab appearance")
 for _, texture in ipairs(RivalsCharacterPanel.chrome) do assert(not texture:IsShown()) end
 assert(not RivalsCharacterPanel.logoFrame:IsShown())
+inCombat = true
+local messageCount = #messages
+CharacterFrame:Show()
+HonorFrame:Show()
+assert(DP.ShowRivalsCharacterPanel() == true)
+assert(RivalsCharacterPanel:IsShown() and not HonorFrame:IsShown())
+assert(CharacterFrameTab2.selected == false and CharacterFrameTab2.enabled == true,
+    "opening Rivals in combat must visually deselect the native selected tab without changing selectedTab")
+assert(CharacterFrame.selectedTab == 2, "combat visual deselection must not change Blizzard selectedTab")
+assert(CharacterFrame.numTabs == 5 and CharacterFrameTab6 == nil and #CHARACTERFRAME_SUBFRAMES == 5)
+assert(#messages == messageCount, "clicking the attached Rivals tab should not be refused when CharacterFrame is already open in combat")
+DP.HideRivalsCharacterPanel()
+CharacterFrame:Hide()
+assert(DP.ShowRivalsCharacterPanel() == false)
+assert(not RivalsCharacterPanel:IsShown())
+assert(#messages == messageCount + 1 and messages[#messages]:find("open the Character pane", 1, true))
+CharacterFrame:Show()
+inCombat = false
 assert(not DP.InstallCharacterTab(function() return state end, function() end))
-print("PASS: Duels tab follows Honor; native subframe switching and installation idempotency")
+print("PASS: isolated Rivals tab follows native row geometry, keeps its full overlay label readable, works from an already-open CharacterFrame in combat, preserves native tab mouse behavior, and keeps Blizzard selectedTab untouched")
 
 for i = 1, 12 do
     local r = {id = i, modelVersion = 1, timestamp = 1800000000 + i, won = i % 2 == 0,
@@ -218,8 +326,10 @@ assert(owner.recoveryAudit[#owner.recoveryAudit].action == "accept")
 print("PASS: undo preview, report restoration, monotonic IDs, reacceptance and audit history")
 
 -- Layout contracts for the reported overlap/navigation regressions.
+local chromeTextures = {}
+for _, texture in ipairs(RivalsCharacterPanel.chrome or {}) do chromeTextures[texture] = true end
 for _, texture in ipairs(RivalsCharacterPanel.textures or {}) do
-    if texture ~= RivalsCharacterPanel.logo then
+    if texture ~= RivalsCharacterPanel.logo and not chromeTextures[texture] then
         assert(texture.point[3] <= -74, "Custom background must stay below the native header")
     end
 end

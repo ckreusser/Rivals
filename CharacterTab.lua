@@ -2,19 +2,24 @@ local _, DP = ...
 
 function DP.InstallCharacterTab(getRating, getRecords)
     if DP.characterPanel or not CharacterFrame or not CharacterFrameTab5 then return false end
-    local id = (CharacterFrame.numTabs or 5) + 1
-    while _G["CharacterFrameTab" .. id] do id = id + 1 end
+    -- Rivals must not join Blizzard's CharacterFrame tab/subframe registries.
+    -- Those registries are traversed by the protected ToggleCharacter path; an
+    -- addon-owned CharacterFrameTab6 taints that traversal and prevents C from
+    -- opening the character pane during combat. Keep our panel/button completely
+    -- separate while preserving the attached-tab appearance.
     local panel = CreateFrame("Frame", "RivalsCharacterPanel", CharacterFrame)
     panel:SetAllPoints(CharacterFrame)
-    panel:SetID(id)
+    local tab, tabLabel
+    local tabHovered = false
+    local pendingNativeRestore = false
     panel:Hide()
-    -- Classic's window chrome belongs to the selected subframe. Keep our copy
-    -- on CharacterFrame's BORDER layer: the portrait is BACKGROUND and must
-    -- sit under its circular rim; the native title remains on its child frame.
+    -- Keep all Rivals-owned chrome on the Rivals panel itself. Do not add regions
+    -- to CharacterFrame; modifying Blizzard-owned frame regions is unnecessary
+    -- taint surface.
     panel.chrome = {}
     for _, part in ipairs({{"TopLeft", 256, 0, 0}, {"TopRight", 128, 256, 0},
         {"BottomLeft", 256, 0, -256}, {"BottomRight", 128, 256, -256}}) do
-        local texture = CharacterFrame:CreateTexture(nil, "BORDER")
+        local texture = panel:CreateTexture(nil, "BORDER")
         texture:SetTexture("Interface\\PaperDollInfoFrame\\UI-Character-General-" .. part[1])
         texture:SetSize(part[2], 256)
         texture:SetPoint("TOPLEFT", part[3], part[4])
@@ -58,21 +63,99 @@ function DP.InstallCharacterTab(getRating, getRecords)
     panel.logo:SetVertexColor(.98, .98, .98, .97)
     panel.logo:SetBlendMode("BLEND")
     panel.logoFrame:Hide()
-    local portraitPoints, closePoints
+
+    -- Rivals redraws the CharacterFrame body chrome with the classic General
+    -- texture set. Its top-right close-button socket sits 2px left of the
+    -- stock CharacterFrame anchor, so temporarily align Blizzard's existing
+    -- close button to that socket while our panel is visible. This is purely
+    -- visual: it does not touch CharacterFrame tab/subframe registration or
+    -- selected-tab state.
+    local closePoints
+    local function AlignCloseButtonToRivalsChrome()
+        local close = CharacterFrameCloseButton
+        if not close or not close.GetNumPoints then return end
+        if not closePoints then
+            closePoints = {}
+            for i = 1, close:GetNumPoints() do
+                closePoints[i] = {close:GetPoint(i)}
+            end
+        end
+        close:ClearAllPoints()
+        for _, point in ipairs(closePoints) do
+            close:SetPoint(point[1], point[2], point[3], (point[4] or 0) - 2, point[5] or 0)
+        end
+    end
+
     local function RestoreCloseButton()
-        if not closePoints or not CharacterFrameCloseButton then return end
-        CharacterFrameCloseButton:ClearAllPoints()
-        for _, point in ipairs(closePoints) do CharacterFrameCloseButton:SetPoint(unpack(point)) end
+        local close = CharacterFrameCloseButton
+        if not close or not closePoints then return end
+        close:ClearAllPoints()
+        for _, point in ipairs(closePoints) do
+            close:SetPoint(unpack(point))
+        end
         closePoints = nil
     end
-    local function RestorePortrait()
-        if not portraitPoints or not CharacterFramePortrait then return end
-        CharacterFramePortrait:ClearAllPoints()
-        for _, point in ipairs(portraitPoints) do CharacterFramePortrait:SetPoint(unpack(point)) end
-        portraitPoints = nil
+
+    local function UpdateTabLabelColor(selected)
+        if not tabLabel or not tabLabel.SetTextColor then return end
+        if selected or tabHovered then
+            tabLabel:SetTextColor(1, 1, 1)
+        else
+            tabLabel:SetTextColor(1, .82, 0)
+        end
     end
+
+    local function UpdateTabLabelPosition(selected)
+        if not tabLabel or not tabLabel.ClearAllPoints or not tabLabel.SetPoint then return end
+        -- Blizzard raises the text on the active CharacterFrame tab slightly as
+        -- the selected artwork opens into the pane. Mirror that treatment on our
+        -- independent overlay label without handing the tab back to PanelTemplates.
+        tabLabel:ClearAllPoints()
+        tabLabel:SetPoint("CENTER", tab, "CENTER", 0, selected and 4 or 2)
+    end
+
+    local function SetTabSelected(selected)
+        if not tab then return end
+        if selected and PanelTemplates_SelectTab then
+            PanelTemplates_SelectTab(tab)
+        elseif not selected and PanelTemplates_DeselectTab then
+            PanelTemplates_DeselectTab(tab)
+        end
+        UpdateTabLabelPosition(selected)
+        UpdateTabLabelColor(selected)
+    end
+    local function CurrentNativeTab()
+        local selected = CharacterFrame and CharacterFrame.selectedTab or 1
+        local native = selected and _G["CharacterFrameTab" .. selected] or nil
+        if native == tab then native = nil end
+        return native or CharacterFrameTab1
+    end
+
+    local function RestoreNativeTabVisual()
+        if InCombatLockdown and InCombatLockdown() then
+            pendingNativeRestore = true
+            return
+        end
+        pendingNativeRestore = false
+        local native = CurrentNativeTab()
+        if native and PanelTemplates_SelectTab then PanelTemplates_SelectTab(native) end
+    end
+
+    local function DeselectNativeTabVisual()
+        -- This changes only the existing Blizzard tab button's presentation; it
+        -- does not alter CharacterFrame.selectedTab, invoke PanelTemplates_SetTab,
+        -- or switch CharacterFrame subframes. Keeping it active in combat prevents
+        -- the underlying native tab from looking selected at the same time as the
+        -- isolated Rivals tab.
+        local native = CurrentNativeTab()
+        if native and PanelTemplates_DeselectTab then
+            PanelTemplates_DeselectTab(native)
+        end
+    end
+
     panel:SetScript("OnHide", function()
-        RestorePortrait()
+        SetTabSelected(false)
+        RestoreNativeTabVisual()
         RestoreCloseButton()
         if DP.ResetDuelViewToOverview then
             DP.ResetDuelViewToOverview()
@@ -280,23 +363,9 @@ function DP.InstallCharacterTab(getRating, getRecords)
     if DP.WorldPvP and DP.WorldPvP.InstallOverview then DP.WorldPvP.InstallOverview(overview, duelPage) end
     DP.InstallViews(content, getRating, getRecords, overview)
     panel:SetScript("OnShow", function()
-        local close = CharacterFrameCloseButton
-        if close and close.GetNumPoints and not closePoints then
-            closePoints = {}
-            for i = 1, close:GetNumPoints() do closePoints[i] = {close:GetPoint(i)} end
-            close:ClearAllPoints()
-            for _, point in ipairs(closePoints) do
-                close:SetPoint(point[1], point[2], point[3], (point[4] or 0) - 2, point[5] or 0)
-            end
-        end
-        if CharacterFramePortrait and not portraitPoints then
-            portraitPoints = {}
-            for i = 1, CharacterFramePortrait:GetNumPoints() do
-                portraitPoints[i] = {CharacterFramePortrait:GetPoint(i)}
-            end
-            CharacterFramePortrait:ClearAllPoints()
-            CharacterFramePortrait:SetPoint("TOPLEFT", CharacterFrame, "TOPLEFT", 8, -7)
-        end
+        SetTabSelected(true)
+        DeselectNativeTabVisual()
+        AlignCloseButtonToRivalsChrome()
         for _, texture in ipairs(panel.chrome) do texture:Show() end
         panel.logoFrame:Show()
         DP.RefreshCharacterTab()
@@ -311,45 +380,183 @@ function DP.InstallCharacterTab(getRating, getRecords)
             if C_Timer and C_Timer.After then C_Timer.After(.04, PlayResetSweep) else PlayResetSweep() end
         end
     end)
-    CHARACTERFRAME_SUBFRAMES[#CHARACTERFRAME_SUBFRAMES + 1] = "RivalsCharacterPanel"
-    local tab = CreateFrame("Button", "CharacterFrameTab" .. id, CharacterFrame, "CharacterFrameTabButtonTemplate")
-    tab:SetID(id)
-    tab:SetText("Duels")
-    tab:SetScript("OnClick", function() ToggleCharacter("RivalsCharacterPanel", true) end)
+    tab = CreateFrame("Button", "RivalsCharacterTab", CharacterFrame, "CharacterFrameTabButtonTemplate")
+    -- The stock CharacterFrameTabButtonTemplate squeezes its own FontString when
+    -- the tab is selected so the text fits inside the inward-sloping/funnel art.
+    -- That looks native, but on our compact standalone tab it turns Duels/WPvP
+    -- into ellipses. Keep the native tab artwork and click behavior, but draw an
+    -- addon-owned label over it so readability wins over the selected-tab funnel.
+    tab:SetText("")
+    tabLabel = tab:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    tabLabel:SetPoint("CENTER", tab, "CENTER", 0, 2)
+    tabLabel:SetWidth(60)
+    tabLabel:SetJustifyH("CENTER")
+    if tabLabel.SetWordWrap then tabLabel:SetWordWrap(false) end
+    tabLabel:SetText("Duels")
+    tab.rivalsLabel = tabLabel
+    UpdateTabLabelColor(false)
+
+    tab:SetScript("OnClick", function()
+        if DP.ShowRivalsCharacterPanel then DP.ShowRivalsCharacterPanel() end
+    end)
     tab:SetScript("OnEnter", function()
+        tabHovered = true
+        UpdateTabLabelColor(panel:IsShown())
         GameTooltip:SetOwner(tab, "ANCHOR_RIGHT")
         GameTooltip:SetText("Duel rating, World PvP, and rivalry record")
     end)
-    tab:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    PanelTemplates_SetNumTabs(CharacterFrame, id)
-    PanelTemplates_TabResize(tab, 0)
-    local layingOut = false
-    local function Layout()
-        if layingOut then return end
-        layingOut = true
-        tab:ClearAllPoints()
-        tab:SetPoint("LEFT", CharacterFrameTab5:IsShown() and CharacterFrameTab5 or CharacterFrameTab4, "RIGHT", -16, 0)
-        local right, left, edge = tab:GetRight(), CharacterFrameTab1:GetLeft(), CharacterFrameCloseButton:GetRight()
-        if right and left and edge and right > edge then
-            local visible = {}
-            for i = 1, id do
-                local candidate = _G["CharacterFrameTab" .. i]
-                if candidate and candidate:IsShown() then visible[#visible + 1] = candidate end
+    tab:SetScript("OnLeave", function()
+        tabHovered = false
+        UpdateTabLabelColor(panel:IsShown())
+        GameTooltip:Hide()
+    end)
+
+    -- Keep the independent Rivals button visually in Blizzard's native tab row
+    -- without registering it as CharacterFrameTab6.  Classic tabs overlap their
+    -- neighbors by 15px; matching that geometry is more reliable than anchoring
+    -- from CharacterFrame's right edge because the tab artwork extends beyond
+    -- the button's logical bounds. Keep the compact 64px geometry; the separate
+    -- overlay FontString above is what guarantees Duels/WPvP remain fully readable.
+    local RIVALS_TAB_WIDTH = 64
+    local RIVALS_TAB_OVERLAP = -15
+
+    local function RightmostVisibleNativeTab()
+        local best, bestRight
+        local fallback
+        local count = (CharacterFrame and CharacterFrame.numTabs) or 5
+        for i = 1, count do
+            local native = _G["CharacterFrameTab" .. i]
+            if native and native ~= tab and (not native.IsShown or native:IsShown()) then
+                -- On the first CharacterFrame show after /reload, Blizzard may not
+                -- have assigned screen coordinates to every native tab yet. Keep
+                -- the highest-index visible tab as a deterministic fallback so
+                -- Rivals lands after Honor instead of temporarily stacking over it.
+                fallback = native
+                local right = native.GetRight and native:GetRight() or nil
+                if right and (not bestRight or right > bestRight) then
+                    best, bestRight = native, right
+                end
             end
-            local width = math.max(42, (edge - left + 16 * (#visible - 1)) / #visible)
-            for _, candidate in ipairs(visible) do PanelTemplates_TabResize(candidate, 0, nil, nil, width) end
         end
-        layingOut = false
+        return best or fallback or CharacterFrameTab5 or CharacterFrameTab4 or CharacterFrameTab1
+    end
+
+    local function LayoutRivalsTab()
+        if PanelTemplates_TabResize then
+            PanelTemplates_TabResize(tab, 0, RIVALS_TAB_WIDTH)
+        elseif tab.SetWidth then
+            tab:SetWidth(RIVALS_TAB_WIDTH)
+        end
+        if tab.ClearAllPoints then tab:ClearAllPoints() end
+
+        local native = RightmostVisibleNativeTab()
+        if native then
+            tab:SetPoint("LEFT", native, "RIGHT", RIVALS_TAB_OVERLAP, 0)
+        else
+            tab:SetPoint("BOTTOMRIGHT", CharacterFrame, "BOTTOMRIGHT", -30, -30)
+        end
+    end
+    -- CharacterFrameTabButtonTemplate is born in its selected/funnel state.
+    -- Because Rivals is deliberately *not* registered in CharacterFrame.numTabs,
+    -- Blizzard never performs the initial deselect for us. Explicitly establish
+    -- the correct visual state before the button is first shown; otherwise a
+    -- fresh /reload makes the inactive Rivals tab look selected until the user
+    -- visits Rivals once.
+    LayoutRivalsTab()
+    SetTabSelected(false)
+    tab:SetScript("OnShow", function()
+        LayoutRivalsTab()
+        SetTabSelected(panel:IsShown())
+        -- Child OnShow can run before Blizzard finishes laying out the native
+        -- CharacterFrame tabs. Recheck once on the next frame so real coordinates
+        -- replace the index fallback as soon as they are available.
+        if C_Timer and C_Timer.After then
+            C_Timer.After(0, function()
+                if tab and tab.IsShown and tab:IsShown() then LayoutRivalsTab() end
+            end)
+        end
+    end)
+
+    -- Blizzard still owns CharacterFrame.selectedTab.  While Rivals is shown we
+    -- visually deselect (and therefore re-enable) that *existing* native tab so
+    -- it keeps normal hover/click behavior.  We never create a CharacterFrameTab6,
+    -- change selectedTab, or insert Rivals into Blizzard's tab registry.
+    local nativeStateEvents = CreateFrame("Frame", nil, CharacterFrame)
+    if nativeStateEvents.RegisterEvent then
+        nativeStateEvents:RegisterEvent("PLAYER_REGEN_ENABLED")
+        nativeStateEvents:SetScript("OnEvent", function()
+            if pendingNativeRestore and not panel:IsShown() then RestoreNativeTabVisual() end
+        end)
+    end
+
+    local function CombatBlocked()
+        local message = "Rivals: open the Character pane before entering combat to use the Rivals tab."
+        if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
+            DEFAULT_CHAT_FRAME:AddMessage("|cffd0a45c" .. message .. "|r")
+        end
+    end
+
+    local function HideNativeCharacterSubframes()
+        if not CHARACTERFRAME_SUBFRAMES then return end
+        for _, frameName in ipairs(CHARACTERFRAME_SUBFRAMES) do
+            local frame = _G[frameName]
+            if frame and frame.Hide then frame:Hide() end
+        end
+    end
+
+    function DP.HideRivalsCharacterPanel()
+        if panel:IsShown() then panel:Hide() end
+        SetTabSelected(false)
+    end
+
+    function DP.ShowRivalsCharacterPanel()
+        local inCombat = InCombatLockdown and InCombatLockdown()
+        -- Opening CharacterFrame itself from addon code is the protected action
+        -- that must stay out of combat. If the user already has CharacterFrame
+        -- open (which is necessarily true when they can click this attached tab),
+        -- switching to our addon-owned panel does not need ToggleCharacter() or
+        -- ShowUIPanel(), so the Rivals tab can remain usable during combat.
+        if not CharacterFrame:IsShown() then
+            if inCombat then
+                CombatBlocked()
+                return false
+            end
+            if ToggleCharacter then
+                ToggleCharacter("PaperDollFrame", true)
+            elseif ShowUIPanel then
+                ShowUIPanel(CharacterFrame)
+            elseif CharacterFrame.Show then
+                CharacterFrame:Show()
+            end
+        end
+        -- These are the already-visible native content panes, not the protected
+        -- UIPanel container. Hiding them avoids double-rendering underneath the
+        -- Rivals overlay while leaving CharacterFrame.selectedTab and Blizzard's
+        -- tab registry untouched.
+        HideNativeCharacterSubframes()
+        LayoutRivalsTab()
+        panel:Show()
+        SetTabSelected(true)
+        return true
+    end
+
+    -- Native tab/subframe switches should dismiss the Rivals overlay, but the
+    -- secure Blizzard function itself remains untouched. hooksecurefunc executes
+    -- our post-hook without tainting CharacterFrame_ShowSubFrame.
+    if hooksecurefunc and CharacterFrame_ShowSubFrame then
+        hooksecurefunc("CharacterFrame_ShowSubFrame", function()
+            if panel:IsShown() then panel:Hide() end
+        end)
     end
     function DP.RefreshRivalsCharacterTabLabel()
         local world = DP.WorldPvP and DP.WorldPvP.GetOverviewMode and DP.WorldPvP.GetOverviewMode() == "world"
         local label = world and "WPvP" or "Duels"
-        if tab:GetText() ~= label then tab:SetText(label) end
-        PanelTemplates_TabResize(tab, 0)
-        Layout()
+        if tabLabel and tabLabel:GetText() ~= label then tabLabel:SetText(label) end
+        -- Keep the template's built-in text empty; PanelTemplates_SelectTab may
+        -- otherwise reapply its narrow selected-state text region.
+        if tab:GetText() ~= "" then tab:SetText("") end
+        LayoutRivalsTab()
     end
-    hooksecurefunc("CharacterFrame_TabBoundsCheck", Layout)
-    CharacterFrame:HookScript("OnShow", Layout)
     DP.characterPanel = panel
     DP.RefreshRivalsCharacterTabLabel()
     return true

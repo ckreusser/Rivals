@@ -1,0 +1,10 @@
+Rivals 0.21.181-beta
+Source: installed Classic Era AddOns/Rivals build.
+Baseline: origin/main 6a6b0e9 (0.21.88-beta).
+All 55 Lua files compile with lupa.lua51. All TOC runtime files exist.
+Parser, tracker, specialization, usage/consumable pricing, rating and protection assertions passed before the full suite stopped at tests/verification.lua:42 (previously documented baseline failure).
+Focused tests/run_encounter_fixes.py passes parser/usage/pricing checks, then stops during Character UI setup because the mock lacks SetNormalTexture; later focused assertions were not reached.
+No in-game validation performed.
+Runtime files preserved from installed build. Core.lua internal capture VERSION remains 0.21.127-beta, while Rivals.toc declares 0.21.181-beta.
+README version corrected; cumulative CURSEFORGE-CHANGELOG.md updated. Detailed CHANGELOG.md preserved from the installed build.
+Local .preNNN backups and Python bytecode excluded.

@@ -1,5 +1,5 @@
 local addonName, DP = ...
-local VERSION, TRACE_LIMIT, ACTIVITY_LIMIT = "0.21.46-beta", 1000, 200
+local VERSION, TRACE_LIMIT, ACTIVITY_LIMIT = "0.21.127-beta", 1000, 200
 local frame = CreateFrame("Frame")
 local db, observer, tracker, parsers, ready, rating
 local seasons, selectedPeriod = {}, nil
@@ -107,6 +107,28 @@ function DP.SetProfileSharing(enabled)
     db.shareProfile = enabled and true or false
     Say("Profile summary sharing " .. (db.shareProfile and "on" or "off") .. ".")
     if DP.RefreshCharacterTab then DP.RefreshCharacterTab() end
+end
+
+function DP.DuelScreenshotsEnabled()
+    return db and db.duelScreenshots == true
+end
+
+function DP.WorldPvPScreenshotsEnabled()
+    return db and db.worldPvPScreenshots == true
+end
+
+function DP.SetDuelScreenshots(enabled)
+    if not db then return end
+    db.duelScreenshots = enabled and true or false
+    Say("Duel screenshots " .. (db.duelScreenshots and "on" or "off") .. ".")
+    if DP.RefreshDuelViews then DP.RefreshDuelViews() end
+end
+
+function DP.SetWorldPvPScreenshots(enabled)
+    if not db then return end
+    db.worldPvPScreenshots = enabled and true or false
+    Say("World PvP screenshots " .. (db.worldPvPScreenshots and "on" or "off") .. ".")
+    if DP.RefreshDuelViews then DP.RefreshDuelViews() end
 end
 
 function DP.DisplayPeriodName()
@@ -248,6 +270,30 @@ local function Trace(event, ...)
         args = args}, TRACE_LIMIT)
 end
 
+function DP.TakeRivalsScreenshot(kind, subject)
+    if not db then return false end
+    local enabled = kind == "duel" and db.duelScreenshots == true or
+        kind == "world" and db.worldPvPScreenshots == true
+    if not enabled or type(Screenshot) ~= "function" then return false end
+    local ok, err = pcall(Screenshot)
+    if not ok then
+        Trace("SCREENSHOT_FAILED", kind, subject or "", tostring(err))
+        return false
+    end
+    Trace("SCREENSHOT", kind, subject or "")
+    return true
+end
+
+local DUEL_SCREENSHOT_DELAY = 0.20
+
+local function ScheduleDuelScreenshot(subject)
+    local function Capture()
+        if DP.TakeRivalsScreenshot then DP.TakeRivalsScreenshot("duel", subject) end
+    end
+    Trace("DUEL_SCREENSHOT_SCHEDULED", subject or "", DUEL_SCREENSHOT_DELAY)
+    if C_Timer and C_Timer.After then C_Timer.After(DUEL_SCREENSHOT_DELAY, Capture) else Capture() end
+end
+
 local function UnitIdentity(unit)
     if not unit or not UnitExists(unit) or not UnitIsPlayer(unit) then return nil end
     local name, realm = UnitName(unit)
@@ -354,17 +400,40 @@ local function ShowExport(profile)
         window:SetScript("OnDragStart", window.StartMoving)
         window:SetScript("OnDragStop", window.StopMovingOrSizing)
         window.TitleText:SetText("Rivals - capture report (Ctrl+A, Ctrl+C)")
-        local scroll = CreateFrame("ScrollFrame", nil, window, "UIPanelScrollFrameTemplate")
+        local scroll = CreateFrame("ScrollFrame", nil, window)
         scroll:SetPoint("TOPLEFT", 14, -34)
-        scroll:SetPoint("BOTTOMRIGHT", -32, 14)
+        scroll:SetPoint("BOTTOMRIGHT", -23, 14)
         local edit = CreateFrame("EditBox", nil, scroll)
         edit:SetMultiLine(true)
         edit:SetAutoFocus(false)
         edit:SetFontObject(ChatFontNormal)
-        edit:SetWidth(640)
+        edit:SetWidth(663)
         edit:SetMaxLetters(0)
         edit:SetScript("OnEscapePressed", function() window:Hide() end)
         scroll:SetScrollChild(edit)
+        local scrollBar = DP.Theme and DP.Theme.ScrollBar and DP.Theme.ScrollBar(window, 32)
+        if scrollBar then
+            scrollBar:SetPoint("TOPRIGHT", window, "TOPRIGHT", -10, -34)
+            scrollBar:SetPoint("BOTTOMRIGHT", window, "BOTTOMRIGHT", -10, 14)
+            scrollBar:SetOnValueChanged(function(self, value)
+                if self._syncing then return end
+                local range = math.max(0, (edit:GetHeight() or 0) - (scroll:GetHeight() or 0))
+                scroll:SetVerticalScroll(math.max(0, math.min(range, value or 0)))
+            end)
+            local function Sync(reset)
+                local range = math.max(0, (edit:GetHeight() or 0) - (scroll:GetHeight() or 0))
+                scrollBar._syncing = true; scrollBar:SetMinMaxValues(0, range); scrollBar:SetValue(reset and 0 or math.min(range, scroll:GetVerticalScroll() or 0)); scrollBar._syncing = false
+                scrollBar:SetShown(range > 1)
+                if reset then scroll:SetVerticalScroll(0) end
+            end
+            scroll:EnableMouseWheel(true)
+            scroll:SetScript("OnMouseWheel", function(_, delta)
+                local low, high = scrollBar:GetMinMaxValues()
+                scrollBar:SetValue(math.max(low or 0, math.min(high or 0, (scrollBar:GetValue() or 0) - delta * 32)))
+            end)
+            window.SyncScrollbar = Sync
+            window.scrollBar = scrollBar
+        end
         window.edit = edit
         DP.window = window
         UISpecialFrames[#UISpecialFrames + 1] = "RivalsCaptureWindow"
@@ -398,6 +467,7 @@ local function ShowExport(profile)
     end
     DP.window.TitleText:SetText(profile and "Rivals - local rating" or "Rivals - report (Ctrl+A, Ctrl+C)")
     DP.window.edit:SetText(report)
+    if DP.window.SyncScrollbar then DP.window.SyncScrollbar(true) end
     DP.window:Show()
     DP.window.edit:SetFocus()
     DP.window.edit:HighlightText()
@@ -703,6 +773,15 @@ frame:SetScript("OnEvent", function(_, event, ...)
             if winner then
                 local accepted, reason = tracker:Result(winner, loser, parser.outcome, GetTime())
                 Trace("RESULT_CLASSIFICATION", accepted, reason, winner, loser)
+                -- Anchor duel screenshots to the localized result message rather than
+                -- DUEL_FINISHED. Waiting one short render window lets Blizzard's
+                -- "has defeated ... in a duel" feedback actually appear on screen.
+                -- Only local-player victories are captured. Losses and
+                -- recovered/duplicate result chatter do not create screenshots.
+                if accepted and reason ~= "recovered-history-only" and
+                    DP.Parser.SameName(winner, tracker.playerName) then
+                    ScheduleDuelScreenshot(loser)
+                end
                 PersistSession()
                 return
             end
@@ -744,7 +823,7 @@ SlashCmdList.RIVALS = function(command)
     if not ready then Say("Capture is not available on this client or saved-data version."); return end
     command = (command or ""):lower():match("^%s*(.-)%s*$")
     if command == "" or command == "rating" then
-        if DP.characterPanel then ToggleCharacter("RivalsCharacterPanel", true)
+        if DP.ShowRivalsCharacterPanel then DP.ShowRivalsCharacterPanel()
         else Say("Character pane is not available yet; open it and try again.") end
     elseif command == "season start" then
         if tracker.session then Say("Finish or cancel the current duel before starting a season."); return end
@@ -764,9 +843,11 @@ SlashCmdList.RIVALS = function(command)
         if DP.RefreshCharacterTab then DP.RefreshCharacterTab() end
     elseif command == "world" then
         if DP.WorldPvP and DP.WorldPvP.SetOverviewMode then DP.WorldPvP.SetOverviewMode("world") end
-        if DP.SelectDuelView then DP.SelectDuelView("Overview"); ToggleCharacter("RivalsCharacterPanel", true) end
+        if DP.SelectDuelView then DP.SelectDuelView("Overview") end
+        if DP.ShowRivalsCharacterPanel then DP.ShowRivalsCharacterPanel() end
     elseif command == "graph" then
-        if DP.SelectDuelView then DP.SelectDuelView("Graph"); ToggleCharacter("RivalsCharacterPanel", true) end
+        if DP.SelectDuelView then DP.SelectDuelView("Graph") end
+        if DP.ShowRivalsCharacterPanel then DP.ShowRivalsCharacterPanel() end
     elseif command == "mode rated" or command == "mode casual" then
         DP.ToggleDuelMode(command == "mode rated" and "rated" or "casual")
     elseif command == "verify on" or command == "verify off" then
@@ -782,11 +863,12 @@ SlashCmdList.RIVALS = function(command)
         Say("Diagnostic trace " .. (db.traceEnabled and "on" or "off") .. ".")
     elseif command == "interrupted" then
         DP.RetryRecovery()
-        if DP.SelectDuelView then DP.SelectDuelView("Interrupted"); ToggleCharacter("RivalsCharacterPanel", true) end
+        if DP.SelectDuelView then DP.SelectDuelView("Interrupted") end
+        if DP.ShowRivalsCharacterPanel then DP.ShowRivalsCharacterPanel() end
     elseif command == "history" or command == "opponents" or command == "classes" or command == "leaderboard" then
         if DP.SelectDuelView then
             DP.SelectDuelView(command:sub(1, 1):upper() .. command:sub(2))
-            ToggleCharacter("RivalsCharacterPanel", true)
+            if DP.ShowRivalsCharacterPanel then DP.ShowRivalsCharacterPanel() end
         end
     elseif command == "export" then
         ShowExport()

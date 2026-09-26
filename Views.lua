@@ -345,18 +345,59 @@ function DP.InstallViews(panel, getRating, getRecords, overview)
     sharingHelp:SetText("Shares your rating summary only when another Rival inspects you.\nEnabled by default; no duel history is transmitted.")
     local shareOn = Button(manage, "On", 30, -189, 146, function() if DP.SetProfileSharing then DP.SetProfileSharing(true) end end)
     local shareOff = Button(manage, "Off", 176, -189, 146, function() if DP.SetProfileSharing then DP.SetProfileSharing(false) end end)
-    local worldTrackingTitle = Label(manage, -226, "GameFontNormal")
-    worldTrackingTitle:SetJustifyH("CENTER"); worldTrackingTitle:SetText("WORLD PVP TRACKING")
-    local worldTrackingHelp = Label(manage, -247, "GameFontDisableSmall")
-    worldTrackingHelp:SetJustifyH("CENTER"); worldTrackingHelp:SetText("Automatically records open-world player fights. No duel rating impact.")
-    local worldOn = Button(manage, "On", 30, -270, 146, function() if DP.WorldPvP then DP.WorldPvP.SetEnabled(true) end end)
-    local worldOff = Button(manage, "Off", 176, -270, 146, function() if DP.WorldPvP then DP.WorldPvP.SetEnabled(false) end end)
-    local recoveryTitle = Label(manage, -314, "GameFontNormal")
+    local function ScreenshotCheckbox(text, x, y, getEnabled, setEnabled, tooltipTitle, tooltipLine)
+        local check = CreateFrame("CheckButton", nil, manage, "UICheckButtonTemplate")
+        check:SetSize(24, 24)
+        check:SetPoint("TOPLEFT", x, y)
+        -- Let the adjacent label behave like part of the checkbox without stretching its artwork.
+        if check.SetHitRectInsets then check:SetHitRectInsets(0, -70, 0, 0) end
+        -- Lightweight fallbacks keep stripped-down test environments usable.
+        if not check.SetChecked then
+            function check:SetChecked(value) self.rivalsChecked = value and true or false end
+        end
+        if not check.GetChecked then
+            function check:GetChecked() return self.rivalsChecked and true or false end
+        end
+        local label = manage:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        label:SetPoint("LEFT", check, "RIGHT", 2, 0)
+        label:SetText(text)
+        check.rivalsLabel = label
+        check:SetScript("OnClick", function(self)
+            if setEnabled then setEnabled(self:GetChecked() and true or false) end
+        end)
+        check:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText(tooltipTitle)
+            GameTooltip:AddLine(tooltipLine, 1, 1, 1, true)
+            GameTooltip:Show()
+        end)
+        check:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        check.Refresh = function(self)
+            self:SetChecked(getEnabled and getEnabled() or false)
+        end
+        check:Refresh()
+        return check
+    end
+
+    local screenshotTitle = Label(manage, -220, "GameFontNormal")
+    screenshotTitle:SetJustifyH("CENTER"); screenshotTitle:SetText("AUTOMATIC SCREENSHOTS")
+    local duelScreenshot = ScreenshotCheckbox("Duels", 82, -239,
+        function() return DP.DuelScreenshotsEnabled and DP.DuelScreenshotsEnabled() or false end,
+        DP.SetDuelScreenshots,
+        "Duel screenshots",
+        "Takes a screenshot when a tracked duel finishes.")
+    local worldScreenshot = ScreenshotCheckbox("World PvP", 194, -239,
+        function() return DP.WorldPvPScreenshotsEnabled and DP.WorldPvPScreenshotsEnabled() or false end,
+        DP.SetWorldPvPScreenshots,
+        "World PvP screenshots",
+        "Takes one screenshot each time a tracked enemy player dies.")
+
+    local recoveryTitle = Label(manage, -289, "GameFontNormal")
     recoveryTitle:SetJustifyH("CENTER"); recoveryTitle:SetText("RECOVERY")
-    local recoveryHelp = Label(manage, -314, "GameFontDisableSmall"); recoveryHelp:Hide()
-    local recoveryOpen = Button(manage, "Interrupted duels  >", 30, -334, 292, function() Select("Interrupted") end)
-    local manageOverviewBack = Button(manage, "< Overview", 30, -395, 142, function() Select("Overview") end)
-    local clearProfiles = Button(manage, "Clear Rivals cache", 180, -395, 142, function()
+    local recoveryHelp = Label(manage, -289, "GameFontDisableSmall"); recoveryHelp:Hide()
+    local recoveryOpen = Button(manage, "Interrupted duels  >", 30, -309, 292, function() Select("Interrupted") end)
+    local manageOverviewBack = Button(manage, "< Overview", 30, -350, 142, function() Select("Overview") end)
+    local clearProfiles = Button(manage, "Clear Rivals cache", 180, -350, 142, function()
         if StaticPopup_Show then
             StaticPopup_Show("RIVALS_CLEAR_PROFILE_CACHE")
         else
@@ -376,8 +417,11 @@ function DP.InstallViews(panel, getRating, getRecords, overview)
     local pageLabel = Label(body, -386)
     pageLabel:ClearAllPoints(); pageLabel:SetPoint("TOPLEFT", 95, -386); pageLabel:SetWidth(162); pageLabel:SetJustifyH("CENTER")
     local clear = Button(body, "< Matchups", 180, -137, 142, function() Select(filterSource or "Opponents") end)
-    local matchups = DP.Theme.DataTab(body, "Opponents", 30, -137, 146, function() Select("Opponents") end)
-    local classes = DP.Theme.DataTab(body, "Classes", 176, -137, 146, function() Select("Classes") end)
+    -- Matchup sub-tabs use the exact same horizontal guide as the list below.
+    -- This keeps the tabs, plaques, scrollbar gutter, and pane-edge buffers on
+    -- one shared grid instead of leaving the tabs inset farther than the rows.
+    local matchups = DP.Theme.DataTab(body, "Opponents", 18, -137, 147, function() Select("Opponents") end)
+    local classes = DP.Theme.DataTab(body, "Classes", 165, -137, 146, function() Select("Classes") end)
     local modeLabels = {All = "All modes", Rated = "Rated", Casual = "Casual",
         Unconfirmed = "Unconfirmed", Legacy = "Legacy"}
     local historySourceButton = DP.Theme.DropDown(body, 30, -104, 142,
@@ -446,24 +490,14 @@ function DP.InstallViews(panel, getRating, getRecords, overview)
     end
     recoveryStatus:ClearAllPoints(); recoveryStatus:SetPoint("TOPLEFT", 30, -165)
     local scrolling = false
-    local scrollbar = CreateFrame("Slider", nil, body)
-    scrollbar:SetPoint("TOPLEFT", 320, -168); scrollbar:SetSize(12, 212)
-    scrollbar:SetOrientation("VERTICAL")
-    -- Compact native Blizzard scrollbar treatment. The previous knob was mostly
-    -- outside the History gutter, so the list looked arbitrarily shifted left.
-    -- Keep the full control inside the pane and use the stock middle/knob art.
-    local scrollTrack = scrollbar:CreateTexture(nil, "BACKGROUND")
-    scrollTrack:SetTexture("Interface\\Buttons\\UI-ScrollBar-Middle")
-    scrollTrack:SetPoint("TOP", 0, -8); scrollTrack:SetPoint("BOTTOM", 0, 8)
-    scrollTrack:SetWidth(8); scrollTrack:SetAlpha(.72)
-    local thumb = scrollbar:CreateTexture(nil, "ARTWORK")
-    thumb:SetTexture("Interface\\Buttons\\UI-ScrollBar-Knob")
-    thumb:SetSize(16, 24)
-    scrollbar:SetThumbTexture(thumb)
-    if scrollbar.SetObeyStepOnDrag then scrollbar:SetObeyStepOnDrag(true) end
-    if scrollbar.SetHitRectInsets then scrollbar:SetHitRectInsets(-3, -3, 0, 0) end
+    local scrollbar = DP.Theme.ScrollBar(body, 1)
+    -- Keep the scrollbar in its own 18px gutter.  Row widths are expanded below
+    -- to meet the visible 8px track instead of stopping short and leaving a dead
+    -- strip between the plaques and the scrollbar.
+    scrollbar:SetPoint("TOPLEFT", 313, -168); scrollbar:SetSize(18, 212)
+    scrollbar:SetObeyStepOnDrag(true)
     scrollbar:SetValueStep(1); scrollbar:SetMinMaxValues(0, 0); scrollbar:SetValue(0)
-    scrollbar:SetScript("OnValueChanged", function(_, value)
+    scrollbar:SetOnValueChanged(function(_, value)
         if not scrolling then page = math.floor(value + .5) + 1; refresh() end
     end)
     body:EnableMouseWheel(true)
@@ -559,8 +593,8 @@ function DP.InstallViews(panel, getRating, getRecords, overview)
         nav = nav,
         shareOn = shareOn,
         shareOff = shareOff,
-        worldOn = worldOn,
-        worldOff = worldOff,
+        duelScreenshot = duelScreenshot,
+        worldScreenshot = worldScreenshot,
         detailTiles = detailTiles,
         detailsText = detailsText,
         scope = scope,
@@ -625,9 +659,8 @@ function DP.InstallViews(panel, getRating, getRecords, overview)
             local sharing = DP.ProfileSharingEnabled and DP.ProfileSharingEnabled() or false
             DP.Theme.ToggleButton(refreshUI.shareOn, sharing, "On")
             DP.Theme.ToggleButton(refreshUI.shareOff, not sharing, "Off")
-            local worldEnabled = DP.WorldPvP and DP.WorldPvP.Enabled and DP.WorldPvP.Enabled() or false
-            DP.Theme.ToggleButton(refreshUI.worldOn, worldEnabled, "On")
-            DP.Theme.ToggleButton(refreshUI.worldOff, not worldEnabled, "Off")
+            if refreshUI.duelScreenshot and refreshUI.duelScreenshot.Refresh then refreshUI.duelScreenshot:Refresh() end
+            if refreshUI.worldScreenshot and refreshUI.worldScreenshot.Refresh then refreshUI.worldScreenshot:Refresh() end
             return
         end
         if current == "Graph" then refreshUI.body:Hide(); overview:Hide(); refreshUI.graph:Show(); DP.RefreshGraph(); return end
@@ -800,8 +833,12 @@ function DP.InstallViews(panel, getRating, getRecords, overview)
         refreshUI.pageLabel:SetText(V.Count(#items, "record", "records"))
         refreshUI.previous:Hide(); refreshUI.nextPage:Hide()
         scrolling = true
-        refreshUI.scrollbar:ClearAllPoints(); refreshUI.scrollbar:SetPoint("TOPLEFT", current == "History" and 320 or 325, worldMatchupDetail and -188 or current == "History" and -135 or current == "Leaderboard" and -135 or matchupTabs and -160 or -168)
-        refreshUI.scrollbar:SetHeight(worldMatchupDetail and 168 or current == "History" and 235 or current == "Leaderboard" and 196 or matchupTabs and 220 or 212)
+        -- Seat the 18px scrollbar on the shared pane gutter.  The visible track now
+        -- sits in the dark list gutter instead of drifting toward the metal frame.
+        refreshUI.scrollbar:ClearAllPoints(); refreshUI.scrollbar:SetPoint("TOPLEFT", 313, worldMatchupDetail and -188 or current == "History" and -135 or current == "Leaderboard" and -135 or matchupTabs and -160 or -168)
+        -- Opponents/Classes show five rows at a time.  End the control with the
+        -- fifth plaque instead of letting the lower arrow hang below the list.
+        refreshUI.scrollbar:SetHeight(worldMatchupDetail and 168 or current == "History" and 235 or current == "Leaderboard" and 196 or matchupTabs and 196 or 212)
         refreshUI.scrollbar:SetMinMaxValues(0, math.max(0, #items - pageSize)); refreshUI.scrollbar:SetValue(page - 1)
         refreshUI.scrollbar:SetShown(#items > pageSize)
         scrolling = false
@@ -828,8 +865,16 @@ function DP.InstallViews(panel, getRating, getRecords, overview)
             local roomyWorldDetail = worldMatchupDetail
             local rowStep = roomyHistory and 60 or roomyWorldDetail and 50 or (current == "History" or current == "Leaderboard" or matchupTabs) and 39 or 42
             local historyRow = current == "History"
-            local rowX = historyRow and 18 or 30
-            local rowWidth = historyRow and 296 or 292
+            -- History and Matchups use the same left guide. Matchups was visibly
+            -- shifted right relative to the rest of the pane, especially once the
+            -- scrollbar appeared.
+            local leftAlignedList = historyRow or matchupTabs or worldMatchupDetail
+            local rowX = leftAlignedList and 18 or 30
+            -- Keep the plaque right edge at the established guide. With the
+            -- scrollbar at x=313 this leaves a small, even visual seam
+            -- instead of the oversized gap visible in the previous build.
+            local rowRight = 311
+            local rowWidth = rowRight - rowX
             row:SetPoint("TOPLEFT", rowX, -firstRowY - (i - 1) * rowStep)
             row:SetSize(rowWidth, roomyHistory and 58 or roomyWorldDetail and 48 or 40)
             row.first:ClearAllPoints(); row.first:SetPoint("TOPLEFT", 8, -6)
@@ -1107,6 +1152,6 @@ function DP.InstallViews(panel, getRating, getRecords, overview)
         historyMode = historyMode, historySource = historySourceButton, matchupSource = matchupSourceButton, boardFilter = boardFilter, boardSort = boardSort, clearProfiles = clearProfiles, scrollbar = scrollbar, body = body,
         details = details, detailsBack = detailsBack, graphBack = graphBack, period = periodButton, overviewPeriod = overviewPeriodButton, mode = modeButton, manageBack = manageBack, empty = empty, classes = classes, matchups = matchups,
         manage = manage, manageOverviewBack = manageOverviewBack, shareOn = shareOn, shareOff = shareOff, dev1vNToast = dev1vNToast,
-        worldOn = worldOn, worldOff = worldOff, recoveryOpen = recoveryOpen}
+        duelScreenshot = duelScreenshot, worldScreenshot = worldScreenshot, recoveryOpen = recoveryOpen}
     refresh()
 end

@@ -316,9 +316,24 @@ DP.UsageCatalog = {
     [16195] = {itemID=12440, name="Magic Knucklebone (DND)", quality=1, category="potions"},
     [16197] = {itemID=12443, name="Knucklebone Pouch (DND)", quality=1, category="equipment"},
     [16375] = {itemID=4945, name="Faintly Glowing Skull", quality=1, category="potions"},
+    -- Winterspring Juju consumables. These are bind-on-pickup rewards whose
+    -- replacement value is resolved through their corresponding E'ko in Usage.lua.
+    [16321] = {itemID=12459, name="Juju Escape", quality=1, category="potions"},
+    [16322] = {itemID=12450, name="Juju Flurry", quality=1, category="potions"},
+    [16323] = {itemID=12451, name="Juju Power", quality=1, category="potions"},
+    [16325] = {itemID=12457, name="Juju Chill", quality=1, category="potions"},
+    [16326] = {itemID=12455, name="Juju Ember", quality=1, category="potions"},
+    [16327] = {itemID=12458, name="Juju Guile", quality=1, category="potions"},
+    [16329] = {itemID=12460, name="Juju Might", quality=1, category="potions"},
     [16470] = {itemID=12532, name="Spire of the Stoneshaper", quality=3, category="equipment"},
     [16537] = {itemID=12586, name="Immature Venom Sac", quality=1, category="potions"},
     [16589] = {itemID=8529, name="Noggenfogger Elixir", quality=1, category="potions"},
+    -- Noggenfogger's three random aura results. Retaining these spell IDs lets
+    -- legacy encounters recover multiple separate drinks even when the item-use
+    -- cast itself was not saved.
+    [16591] = {itemID=8529, name="Noggenfogger Elixir", quality=1, category="potions"},
+    [16593] = {itemID=8529, name="Noggenfogger Elixir", quality=1, category="potions"},
+    [16595] = {itemID=8529, name="Noggenfogger Elixir", quality=1, category="potions"},
     [16622] = {itemID=12643, name="Dense Weightstone", quality=1, category="equipment"},
     [16623] = {itemID=12645, name="Thorium Shield Spike", quality=2, category="equipment"},
     [16629] = {itemID=12650, name="Attuned Dampener", quality=1, category="potions"},
@@ -740,4 +755,9 @@ DP.UsageCatalog = {
     [30331] = {itemID=23794, name="Permanent Sheen of Zanza", quality=2, category="potions"},
     [30336] = {itemID=23795, name="Permanent Spirit of Zanza", quality=2, category="potions"},
     [30338] = {itemID=23796, name="Permanent Swiftness of Zanza", quality=2, category="potions"},
+    -- Classic Era Chronoboon item-use spells. Both items are consumed on use;
+    -- Supercharged replacement cost is proxied to the base Displacer.
+    [349858] = {itemID=184937, name="Chronoboon Displacer", quality=1, category="potions"},
+    [349863] = {itemID=184938, name="Supercharged Chronoboon Displacer", quality=1, category="potions"},
+    [349981] = {itemID=184938, name="Supercharged Chronoboon Displacer", quality=1, category="potions"},
 }

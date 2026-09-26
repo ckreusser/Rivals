@@ -7,24 +7,94 @@ local colors = {[0]="9d9d9d", [1]="ffffff", [2]="1eff00", [3]="0070dd", [4]="a33
 U.sections = {{"potions", "Potions/Consumables:"}, {"engineering", "Engineering Gadgets:"}, {"equipment", "Equipment:"},
     {"cooldowns", "Cooldowns (≥3 min):"}, {"racials", "Racials:"}}
 
--- Several Classic Era PvP insignias share generic effect spell names. Resolve
--- the faction/class-specific trinket instead of displaying the internal spell.
+-- Classic Era's original PvP trinkets are class- and faction-specific items,
+-- but CLEU reports one of five generic internal "Immune ..." item-effect spells.
+-- Treat every one of those effects as equipment, then recover the exact Insignia
+-- from the actor's class/faction instead of misclassifying the 5 minute effect as
+-- a class cooldown.
 local insigniaItems = {
-    Horde = {WARRIOR = 18834, HUNTER = 18846, SHAMAN = 18845},
-    Alliance = {WARRIOR = 18854, HUNTER = 18856},
+    Horde = {
+        WARRIOR = 18834, SHAMAN = 18845, HUNTER = 18846, ROGUE = 18849,
+        MAGE = 18850, PRIEST = 18851, WARLOCK = 18852, DRUID = 18853,
+    },
+    Alliance = {
+        WARRIOR = 18854, HUNTER = 18856, ROGUE = 18857, WARLOCK = 18858,
+        MAGE = 18859, PRIEST = 18862, DRUID = 18863, PALADIN = 18864,
+    },
+}
+local insigniaSpells = {
+    [5579] = true,  -- Immune Root/Snare/Stun (Warrior/Hunter/Shaman)
+    [23273] = true, -- Immune Charm/Fear/Polymorph (Rogue/Warlock)
+    [23274] = true, -- Immune Fear/Polymorph/Snare (Mage)
+    [23276] = true, -- Immune Fear/Polymorph/Stun (Priest/Paladin)
+    [23277] = true, -- Immune Charm/Fear/Stun (Druid)
+}
+local factionByRace = {
+    Human = "Alliance", Dwarf = "Alliance", NightElf = "Alliance", Gnome = "Alliance",
+    Orc = "Horde", Scourge = "Horde", Undead = "Horde", Tauren = "Horde", Troll = "Horde",
 }
 
-local function ResolveInsignia(spellID, session)
-    if spellID ~= 5579 then return nil end -- Immune Root/Snare/Stun
-    local faction = UnitFactionGroup and UnitFactionGroup("player") or nil
-    local class = session and session.identity and session.identity.class
+local function OppositeFaction(faction)
+    if faction == "Alliance" then return "Horde" end
+    if faction == "Horde" then return "Alliance" end
+end
+
+local function FindIdentity(session, guid, record)
+    if guid and session then
+        if session.participants and session.participants[guid] then return session.participants[guid] end
+        if session.enemies and session.enemies[guid] then return session.enemies[guid] end
+        if session.friendlies and session.friendlies[guid] then return session.friendlies[guid] end
+    end
+    if guid and record then
+        local saved = record.session and record.session.participants
+        if saved and saved[guid] then return saved[guid] end
+        for _, group in ipairs({record.enemies or {}, record.friendlies or {}}) do
+            for _, identity in ipairs(group) do
+                if identity and identity.guid == guid then return identity end
+            end
+        end
+    end
+    return session and session.identity or nil
+end
+
+local function ActorFaction(session, guid, record, identity)
+    local race = identity and (identity.raceFile or identity.race)
+    local faction = race and factionByRace[tostring(race):gsub("%s+", "")] or nil
+    if faction then return faction end
+
+    local playerFaction = UnitFactionGroup and UnitFactionGroup("player") or nil
+    local playerGUID = (session and session.playerGUID) or (record and record.playerGUID)
+    if guid and playerGUID and guid == playerGUID then return playerFaction end
+
+    if guid and session and session.worldPvP and session.enemies and session.enemies[guid] then
+        return OppositeFaction(playerFaction)
+    end
+    if guid and record and record.kind == "worldpvp" then
+        for _, enemy in ipairs(record.enemies or {}) do
+            if enemy and enemy.guid == guid then return OppositeFaction(playerFaction) end
+        end
+    end
+    -- Classic Era duels are same-faction; friendly/open-world actors also use the
+    -- player's faction when no retained race is available.
+    return playerFaction
+end
+
+local function ResolveInsignia(spellID, session, guid, spellName, record)
+    if not insigniaSpells[tonumber(spellID)] then return nil end
+    local identity = FindIdentity(session, guid, record)
+    local class = identity and identity.class or nil
+    if not class and guid and session and guid == session.playerGUID then class = session.playerClass end
+    if not class and guid and record and guid == record.playerGUID then class = record.playerClass end
+    local faction = ActorFaction(session, guid, record, identity)
     local itemID = faction and class and insigniaItems[faction] and insigniaItems[faction][class] or nil
     return {
         itemID = itemID,
-        name = faction == "Alliance" and "Insignia of the Alliance" or "Insignia of the Horde",
+        name = faction == "Alliance" and "Insignia of the Alliance" or
+            faction == "Horde" and "Insignia of the Horde" or "PvP Insignia",
         quality = 3,
         category = "equipment",
         forceItem = true,
+        pvpInsignia = true,
     }
 end
 
@@ -192,7 +262,7 @@ function U.Observe(session, playerGUID, now, event, sourceGUID, spellID, spellNa
         item, ambiguous = ResolvePlayerItem(spellID)
         if not item and not ambiguous then item = Catalog(spellID) end
     else
-        item = ResolveInsignia(spellID, session) or Catalog(spellID)
+        item = ResolveInsignia(spellID, session, sourceGUID, spellName) or Catalog(spellID)
     end
     local long = type(baseCooldown) == "number" and baseCooldown >= 180000
     if not item and ambiguous then
@@ -335,19 +405,137 @@ end
 -- stored as a chronological event list instead of the duel-only player/opponent
 -- pair. The detail dataframe can then filter by participant without adding more
 -- and more horizontal columns for 1v2+ fights.
+-- Reagents which are consumed by combat-relevant spells rather than by an
+-- explicit item-use spell.  These are recorded as their own consumable events
+-- so the encounter economy can include them without pretending the spell itself
+-- is an item.  Name fallbacks keep rank variants and localization-adjacent Era
+-- builds useful when a spell ID differs.
+local REAGENT_BY_SPELL = {
+    [1856] = {itemID=5140, name="Flash Powder"}, [1857] = {itemID=5140, name="Flash Powder"}, -- Vanish
+    [2094] = {itemID=5530, name="Blinding Powder"}, -- Blind
+    [130] = {itemID=17056, name="Light Feather"}, -- Slow Fall
+    [1706] = {itemID=17056, name="Light Feather"}, -- Levitate
+    [23028] = {itemID=17020, name="Arcane Powder"}, -- Arcane Brilliance
+    [20484] = {itemID=17034, name="Maple Seed"},
+    [20739] = {itemID=17035, name="Stranglethorn Seed"},
+    [20742] = {itemID=17036, name="Ashwood Seed"},
+    [20747] = {itemID=17037, name="Hornbeam Seed"},
+    [20748] = {itemID=17038, name="Ironwood Seed"}, -- Rebirth ranks
+    [19752] = {itemID=17033, name="Symbol of Divinity"}, -- Divine Intervention
+    [17877] = {itemID=6265, name="Soul Shard"}, [18867] = {itemID=6265, name="Soul Shard"},
+    [18868] = {itemID=6265, name="Soul Shard"}, [18869] = {itemID=6265, name="Soul Shard"},
+    [18871] = {itemID=6265, name="Soul Shard"}, -- Shadowburn ranks
+    [6353] = {itemID=6265, name="Soul Shard"}, [17924] = {itemID=6265, name="Soul Shard"},
+    [27211] = {itemID=6265, name="Soul Shard"}, -- Soul Fire variants seen on Era-family clients
+}
+local REAGENT_BY_NAME = {
+    ["Vanish"] = {itemID=5140, name="Flash Powder"},
+    ["Blind"] = {itemID=5530, name="Blinding Powder"},
+    ["Slow Fall"] = {itemID=17056, name="Light Feather"},
+    ["Levitate"] = {itemID=17056, name="Light Feather"},
+    ["Arcane Brilliance"] = {itemID=17020, name="Arcane Powder"},
+    ["Prayer of Fortitude"] = {itemID=17029, name="Sacred Candle"},
+    ["Prayer of Spirit"] = {itemID=17029, name="Sacred Candle"},
+    ["Prayer of Shadow Protection"] = {itemID=17029, name="Sacred Candle"},
+    ["Greater Blessing of Kings"] = {itemID=21177, name="Symbol of Kings"},
+    ["Greater Blessing of Might"] = {itemID=21177, name="Symbol of Kings"},
+    ["Greater Blessing of Wisdom"] = {itemID=21177, name="Symbol of Kings"},
+    ["Greater Blessing of Salvation"] = {itemID=21177, name="Symbol of Kings"},
+    ["Greater Blessing of Light"] = {itemID=21177, name="Symbol of Kings"},
+    ["Greater Blessing of Sanctuary"] = {itemID=21177, name="Symbol of Kings"},
+    ["Divine Intervention"] = {itemID=17033, name="Symbol of Divinity"},
+    ["Shadowburn"] = {itemID=6265, name="Soul Shard"},
+    ["Soul Fire"] = {itemID=6265, name="Soul Shard"},
+}
+
+local function WorldUsageEvent(session, event)
+    session.worldUsage = session.worldUsage or {version = 2, events = {}}
+    local events = session.worldUsage.events
+    -- CLEU can occasionally surface the same item-use signal twice on Era-family
+    -- clients. Two uses of the same consumable by the same player cannot happen
+    -- inside a single instant, so collapse duplicate item rows within 0.75 sec.
+    if event and event.itemID and event.guid then
+        local eventTime = tonumber(event.t) or 0
+        for index = #events, math.max(1, #events - 10), -1 do
+            local prior = events[index]
+            if prior and prior.guid == event.guid and tonumber(prior.itemID) == tonumber(event.itemID) then
+                local dt = math.abs(eventTime - (tonumber(prior.t) or 0))
+                if dt <= .75 then return false end
+                if dt > 4 then break end
+            end
+        end
+    end
+    if #events >= 128 then session.worldUsage.truncated = true; return false end
+    events[#events + 1] = event
+    return true
+end
+
+local function WorldUsageBase(session, sourceGUID, sourceName, destGUID, destName, spellID, spellName)
+    return {
+        t = math.max(0, GetTime() - (session.startedElapsed or GetTime())),
+        guid = sourceGUID,
+        actorName = sourceName,
+        targetGUID = destGUID,
+        targetName = destName,
+        sourceSpellID = spellID,
+        sourceSpellName = spellName,
+        count = 1,
+    }
+end
+
+local function ReagentForSpell(spellID, spellName)
+    return REAGENT_BY_SPELL[spellID] or REAGENT_BY_NAME[spellName]
+end
+
+local function RecentWorldItemUse(session, guid, itemID, seconds)
+    local events = session and session.worldUsage and session.worldUsage.events or nil
+    if not events then return false end
+    local now = math.max(0, GetTime() - (session.startedElapsed or GetTime()))
+    for index = #events, math.max(1, #events - 12), -1 do
+        local entry = events[index]
+        if entry and entry.guid == guid and tonumber(entry.itemID) == tonumber(itemID) and
+                math.abs(now - (tonumber(entry.t) or 0)) <= (seconds or 3) then return true end
+    end
+    return false
+end
+
 function U.WorldObserve(session, playerGUID, info)
-    if not session or not session.worldPvP or type(info) ~= "table" or info[2] ~= "SPELL_CAST_SUCCESS" then return end
+    if not session or not session.worldPvP or type(info) ~= "table" then return end
+    local eventType = info[2]
     local sourceGUID, sourceName, destGUID, destName = info[4], info[5], info[8], info[9]
-    if not sourceGUID or not session.participants or not session.participants[sourceGUID] then return end
     local spellID, spellName = info[12], info[13]
+    -- Classic Era's Chronoboon charge can surface only as the applied
+    -- Supercharged aura in CLEU. Treat that aura as proof that one base
+    -- Chronoboon Displacer was consumed, while deduping the normal Charging cast
+    -- if a client happens to emit both signals.
+    if eventType == "SPELL_AURA_APPLIED" and tonumber(spellID) == 349981 then
+        if not sourceGUID or not session.participants or not session.participants[sourceGUID] then return end
+        if not RecentWorldItemUse(session, sourceGUID, 184937, 10) then
+            local event = WorldUsageBase(session, sourceGUID, sourceName, destGUID, destName, 349981, spellName)
+            event.spellID = 349981
+            event.nameSpell = spellName
+            event.name = "Chronoboon Displacer"
+            event.itemID = 184937
+            event.itemName = "Chronoboon Displacer"
+            event.kind = "item"
+            event.category = "potions"
+            event.consumable = true
+            WorldUsageEvent(session, event)
+        end
+        return
+    end
+    if eventType ~= "SPELL_CAST_SUCCESS" then return end
+    if not sourceGUID or not session.participants or not session.participants[sourceGUID] then return end
     if type(spellID) ~= "number" then return end
 
     local item, ambiguous
     if sourceGUID == playerGUID then
         item, ambiguous = ResolvePlayerItem(spellID)
-        if not item and not ambiguous then item = Catalog(spellID) end
+        if not item and not ambiguous then
+            item = ResolveInsignia(spellID, session, sourceGUID, spellName) or Catalog(spellID)
+        end
     else
-        item = Catalog(spellID)
+        item = ResolveInsignia(spellID, session, sourceGUID, spellName) or Catalog(spellID)
     end
     local cooldown
     if GetSpellBaseCooldown then cooldown = GetSpellBaseCooldown(spellID) end
@@ -355,38 +543,854 @@ function U.WorldObserve(session, playerGUID, info)
     if not item and ambiguous then
         item = Catalog(spellID) or {name = spellName or ("Spell " .. spellID), category = "equipment", ambiguous = true}
     end
-    if not item and not long and not racialSpells[spellID] then return end
+    local reagent = ReagentForSpell(spellID, spellName)
+    if not item and not long and not racialSpells[spellID] and not reagent then return end
 
-    local category = type(item) == "table" and item.category or nil
-    local itemName = type(item) == "table" and item.name or nil
-    category = EngineeringCategory(itemName) or category
-    if not category then
-        category = racialSpells[spellID] and "racials" or (item and "equipment" or "cooldowns")
+    if item or long or racialSpells[spellID] then
+        local category = type(item) == "table" and item.category or nil
+        local itemName = type(item) == "table" and item.name or nil
+        category = EngineeringCategory(itemName) or category
+        if not category then
+            category = racialSpells[spellID] and "racials" or (item and "equipment" or "cooldowns")
+        end
+        local event = WorldUsageBase(session, sourceGUID, sourceName, destGUID, destName, spellID, spellName)
+        event.spellID = spellID
+        event.nameSpell = spellName
+        event.name = spellName or itemName or ("Spell " .. spellID)
+        event.kind = item and "item" or racialSpells[spellID] and "racial" or "cooldown"
+        event.itemID = type(item) == "table" and item.itemID or nil
+        event.itemName = itemName
+        event.quality = type(item) == "table" and item.quality or nil
+        event.category = category
+        event.cooldown = long and cooldown / 1000 or nil
+        if not (tonumber(event.itemID) == 184937 and RecentWorldItemUse(session, sourceGUID, 184937, 10)) then
+            WorldUsageEvent(session, event)
+        end
     end
-    session.worldUsage = session.worldUsage or {version = 1, events = {}}
-    local events = session.worldUsage.events
-    if #events >= 128 then session.worldUsage.truncated = true; return end
-    events[#events + 1] = {
-        t = math.max(0, GetTime() - (session.startedElapsed or GetTime())),
-        guid = sourceGUID,
-        actorName = sourceName,
-        targetGUID = destGUID,
-        targetName = destName,
-        spellID = spellID,
-        nameSpell = spellName,
-        name = spellName or itemName or ("Spell " .. spellID),
-        kind = item and "item" or racialSpells[spellID] and "racial" or "cooldown",
-        itemID = type(item) == "table" and item.itemID or nil,
-        itemName = itemName,
-        quality = type(item) == "table" and item.quality or nil,
-        category = category,
-        cooldown = long and cooldown / 1000 or nil,
-        count = 1,
+
+    if reagent then
+        local event = WorldUsageBase(session, sourceGUID, sourceName, destGUID, destName, spellID, spellName)
+        event.spellID = spellID
+        event.itemID = reagent.itemID
+        event.itemName = reagent.name
+        event.name = reagent.name
+        event.kind = "reagent"
+        event.category = "reagents"
+        event.consumable = true
+        event.count = reagent.count or 1
+        WorldUsageEvent(session, event)
+    end
+end
+
+-- Encounter consumable economy ------------------------------------------------
+-- Keep the migration generation in one exported constant so WorldPvP and the
+-- snapshot writer cannot silently drift apart. Any change to legacy evidence or
+-- proxy pricing must bump this number so already-frozen legacy snapshots are
+-- recalculated once with the improved logic.
+U.LEGACY_CONSUMABLE_BACKFILL_VERSION = 10
+
+-- Prices are resolved once, when the encounter is finalized, and copied into
+-- the record. Historical records never query a pricing addon again, so their
+-- totals remain stable even as the market moves.
+local ZERO_GOLD_COST_ITEMS = {
+    [5513]=true, -- Mana Jade
+    [5514]=true, -- Mana Agate
+    [8007]=true, -- Mana Citrine
+    [8008]=true, -- Mana Ruby
+}
+
+local CONSUMABLE_NAME_TERMS = {
+    "potion", "elixir", "flask", "bandage", "dynamite", "grenade", "bomb", "sapper",
+    "target dummy", "magic dust", "juju", "zanza", "firewater", "sharpening stone",
+    "weightstone", "mana oil", "wizard oil", "scroll", "rune", "tea", "healthstone",
+    "whipper root", "night dragon", "crystal charge", "crystal restore", "crystal force",
+    "crystal ward", "crystal yield", "crystal spire", "food", "drink",
+}
+
+local function LowerName(entry, itemName)
+    return tostring(itemName or entry.itemName or entry.name or ""):lower()
+end
+
+local function ItemConsumptionMeta(itemID)
+    if not itemID then return nil, nil, nil, nil end
+    local name, _, _, _, _, _, _, _, equipLoc, _, sellPrice, classID, subclassID = ItemInfo(itemID)
+    return name, equipLoc, classID, subclassID, sellPrice
+end
+
+local function LooksConsumedByName(name)
+    name = tostring(name or ""):lower()
+    for _, term in ipairs(CONSUMABLE_NAME_TERMS) do
+        if name:find(term, 1, true) then return true end
+    end
+    return false
+end
+
+function U.IsConsumableWorldEvent(entry)
+    if type(entry) ~= "table" or not entry.itemID then return false end
+    if entry.consumable == false then return false end
+
+    -- Prefer our catalog/category knowledge before item-cache heuristics.  This is
+    -- important for uncached gear such as Diamond Flask: its name contains
+    -- "Flask", but it is reusable equipment and must never become encounter spend.
+    local known = Catalog(tonumber(entry.spellID or entry.sourceSpellID))
+    if entry.category == "equipment" or (known and known.category == "equipment") then return false end
+    if entry.kind == "reagent" or entry.category == "reagents" then return true end
+    if entry.consumable == true then return true end
+
+    local itemName, equipLoc, classID = ItemConsumptionMeta(entry.itemID)
+    -- Anything with an equipment location is reusable gear even if the use spell
+    -- happens to sit in the engineering section.
+    if type(equipLoc) == "string" and equipLoc ~= "" then return false end
+    -- Blizzard item class 0 is Consumable on Classic clients.
+    if classID == 0 then return true end
+    if entry.category == "potions" or (known and known.category == "potions") then return true end
+    return LooksConsumedByName(LowerName(entry, itemName))
+end
+
+local function TSMItemString(itemID)
+    local _, link = ItemInfo(itemID)
+    if type(TSM_API) == "table" and type(TSM_API.ToItemString) == "function" and link then
+        local ok, value = pcall(TSM_API.ToItemString, link)
+        if ok and type(value) == "string" and value ~= "" then return value end
+    end
+    -- TSM4 Classic-era builds expose the older TSMAPI_FOUR surface rather than
+    -- TSM_API. Supporting both lets Rivals read the same DBMarket value visible
+    -- in the player's TSM tooltip instead of silently freezing an item unpriced.
+    if type(TSMAPI_FOUR) == "table" and type(TSMAPI_FOUR.Item) == "table" and
+            type(TSMAPI_FOUR.Item.ToItemString) == "function" and link then
+        local ok, value = pcall(TSMAPI_FOUR.Item.ToItemString, link)
+        if ok and type(value) == "string" and value ~= "" then return value end
+    end
+    return "i:" .. tostring(itemID)
+end
+
+local function TSMPrice(itemID)
+    local itemString = TSMItemString(itemID)
+    if type(TSM_API) == "table" and type(TSM_API.GetCustomPriceValue) == "function" then
+        local ok, value = pcall(TSM_API.GetCustomPriceValue, "DBMarket", itemString)
+        if ok and type(value) == "number" and value > 0 then
+            return math.floor(value + .5), "TradeSkillMaster", "DBMarket"
+        end
+    end
+    if type(TSMAPI_FOUR) == "table" and type(TSMAPI_FOUR.CustomPrice) == "table" and
+            type(TSMAPI_FOUR.CustomPrice.GetValue) == "function" then
+        local ok, value = pcall(TSMAPI_FOUR.CustomPrice.GetValue, "DBMarket", itemString)
+        if ok and type(value) == "number" and value > 0 then
+            return math.floor(value + .5), "TradeSkillMaster", "DBMarket"
+        end
+    end
+end
+
+local function AuctionatorPrice(itemID)
+    local api = type(Auctionator) == "table" and Auctionator.API and Auctionator.API.v1
+    if api and type(api.GetAuctionPriceByItemID) == "function" then
+        local ok, value = pcall(api.GetAuctionPriceByItemID, "Rivals", tonumber(itemID))
+        if ok and type(value) == "number" and value > 0 then
+            local age
+            if type(api.GetAuctionAgeByItemID) == "function" then
+                local ageOK, ageValue = pcall(api.GetAuctionAgeByItemID, "Rivals", tonumber(itemID))
+                if ageOK and type(ageValue) == "number" then age = ageValue end
+            end
+            return math.floor(value + .5), "Auctionator", nil, age
+        end
+    end
+    -- Older Classic-era Auctionator branches exposed this compatibility getter.
+    if type(Atr_GetAuctionBuyout) == "function" then
+        local _, link = ItemInfo(itemID)
+        local ok, value = pcall(Atr_GetAuctionBuyout, link or tonumber(itemID))
+        if ok and type(value) == "number" and value > 0 then
+            return math.floor(value + .5), "Auctionator", "legacy"
+        end
+    end
+end
+
+function U.HasSnapshotPriceSource()
+    if type(TSM_API) == "table" and type(TSM_API.GetCustomPriceValue) == "function" then return true end
+    if type(TSMAPI_FOUR) == "table" and type(TSMAPI_FOUR.CustomPrice) == "table" and
+            type(TSMAPI_FOUR.CustomPrice.GetValue) == "function" then return true end
+    local api = type(Auctionator) == "table" and Auctionator.API and Auctionator.API.v1
+    if api and type(api.GetAuctionPriceByItemID) == "function" then return true end
+    return type(Atr_GetAuctionBuyout) == "function"
+end
+
+local ZANZA_ITEMS = {[20079]=true, [20080]=true, [20081]=true}
+local HAKKARI_BIJOUS = {19707, 19708, 19709, 19710, 19711, 19712, 19713, 19714, 19715}
+local HAKKARI_BIJOU_NAMES = {
+    [19707]="Red Hakkari Bijou", [19708]="Blue Hakkari Bijou", [19709]="Yellow Hakkari Bijou",
+    [19710]="Orange Hakkari Bijou", [19711]="Green Hakkari Bijou", [19712]="Purple Hakkari Bijou",
+    [19713]="Bronze Hakkari Bijou", [19714]="Silver Hakkari Bijou", [19715]="Gold Hakkari Bijou",
+}
+-- One destroyed Hakkari Bijou grants one Zandalar Honor Token, and one token
+-- purchases one Zanza potion.  The correct replacement-cost ratio is 1:1.
+local ZANZA_BIJOU_COUNT = 1
+
+-- Winterspring repeatable quests exchange 3 E'ko for 3 matching Jujus, so one
+-- Juju represents one E'ko of replacement cost.  The Juju itself is BOP and has
+-- no meaningful auction market, while the E'ko is tradeable.
+local JUJU_EKO_PROXY = {
+    [12450]=12430, -- Juju Flurry  <- Frostsaber E'ko
+    [12451]=12431, -- Juju Power   <- Winterfall E'ko
+    [12455]=12432, -- Juju Ember   <- Shardtooth E'ko
+    [12458]=12433, -- Juju Guile   <- Wildkin E'ko
+    [12457]=12434, -- Juju Chill   <- Chillwind E'ko
+    [12459]=12435, -- Juju Escape  <- Ice Thistle E'ko
+    [12460]=12436, -- Juju Might   <- Frostmaul E'ko
+}
+local EKO_NAMES = {
+    [12430]="Frostsaber E'ko", [12431]="Winterfall E'ko", [12432]="Shardtooth E'ko",
+    [12433]="Wildkin E'ko", [12434]="Chillwind E'ko", [12435]="Ice Thistle E'ko", [12436]="Frostmaul E'ko",
+}
+
+-- A Supercharged Chronoboon is created by consuming one base Chronoboon.  It
+-- has no independent market value, so releasing one uses the base item's
+-- replacement cost rather than pretending the generated item is free/unpriced.
+local CHRONOBOON_PROXY = {[184938]=184937}
+
+local function DirectSnapshotPrice(itemID)
+    local value, source, sourceKey, age = TSMPrice(itemID)
+    if value then return value, source, sourceKey, age end
+    return AuctionatorPrice(itemID)
+end
+
+local function ZanzaProxyPrice()
+    local best, bestSource, bestKey, bestAge, bestBijou
+    for _, bijouID in ipairs(HAKKARI_BIJOUS) do
+        local value, source, sourceKey, age = DirectSnapshotPrice(bijouID)
+        if value and (not best or value < best) then
+            best, bestSource, bestKey, bestAge, bestBijou = value, source, sourceKey, age, bijouID
+        end
+    end
+    if best then
+        local bijouName = HAKKARI_BIJOU_NAMES[bestBijou] or select(1, ItemInfo(bestBijou)) or "Hakkari Bijou"
+        return best * ZANZA_BIJOU_COUNT, bestSource,
+            (bestKey and (bestKey .. " / ") or "") .. "1x " .. bijouName,
+            bestAge, bestBijou, bijouName
+    end
+end
+
+local function SingleProxyPrice(proxyItemID, label)
+    local value, source, sourceKey, age = DirectSnapshotPrice(proxyItemID)
+    if not value then return nil end
+    local proxyName = select(1, ItemInfo(proxyItemID)) or label
+    return value, source, (sourceKey and (sourceKey .. " / ") or "") .. "1x " .. proxyName, age, proxyItemID, proxyName
+end
+
+function U.GetSnapshotPrice(itemID)
+    itemID = tonumber(itemID)
+    if not itemID then return nil end
+    -- Noggenfogger is a fixed vendor purchase in Classic Era. Marin sells five
+    -- for 35 silver, so each consumed elixir is exactly 7 silver replacement cost.
+    if itemID == 8529 then return 700, "Vendor", "Fixed vendor price", nil, nil, nil end
+    -- Proxy-derived BOP/generated consumables before trying their own item ID;
+    -- stale addon databases sometimes expose meaningless prices for those IDs.
+    if ZANZA_ITEMS[itemID] then return ZanzaProxyPrice() end
+    local ekoID = JUJU_EKO_PROXY[itemID]
+    if ekoID then
+        local ekoName = EKO_NAMES[ekoID] or select(1, ItemInfo(ekoID)) or "E'ko"
+        return SingleProxyPrice(ekoID, ekoName)
+    end
+    local chronoboonID = CHRONOBOON_PROXY[itemID]
+    if chronoboonID then return SingleProxyPrice(chronoboonID, "Chronoboon Displacer") end
+    return DirectSnapshotPrice(itemID)
+end
+
+local NOGGENFOGGER_AURA_SPELLS = {[16591]=true, [16593]=true, [16595]=true}
+
+local CatalogByName
+local function ConsumableFromTrackedBuff(buff)
+    if type(buff) ~= "table" then return nil end
+    local known = buff.spellID and Catalog(tonumber(buff.spellID)) or nil
+    if known and known.category == "equipment" then return nil end
+    if known and known.category == "potions" and known.itemID then
+        if tonumber(buff.spellID) == 349981 then return 184937, "Chronoboon Displacer", 1 end
+        return tonumber(known.itemID), known.name or buff.name, known.quality
+    end
+    if buff.itemID then
+        local probe = {itemID=tonumber(buff.itemID), spellID=tonumber(buff.spellID),
+            name=buff.name, itemName=buff.name, category="potions"}
+        if U.IsConsumableWorldEvent(probe) then return tonumber(buff.itemID), buff.name end
+    end
+    local byName = CatalogByName(buff.name)
+    if byName and byName.category == "potions" then return tonumber(byName.itemID), byName.name, byName.quality end
+end
+
+local function CurrentConsumableEvents(session)
+    local source = session and session.worldUsage and session.worldUsage.events or {}
+    local events, counts = {}, {}
+    local function Key(guid, itemID) return tostring(guid or "unknown") .. ":" .. tostring(itemID or "") end
+    local lastSeen = {}
+    for _, entry in ipairs(source) do
+        local include = true
+        if U.IsConsumableWorldEvent(entry) and entry.itemID and entry.guid then
+            local key = Key(entry.guid, tonumber(entry.itemID))
+            local at = tonumber(entry.t) or 0
+            local prior = lastSeen[key]
+            -- Repair old records which retained duplicate CLEU/item-use signals.
+            -- The same consumable cannot legitimately be used twice inside this
+            -- short window (and FAP/LIP have much longer cooldowns).
+            if prior ~= nil and math.abs(at - prior) <= .75 and not entry.legacyAuraEvidence then
+                include = false
+            else
+                lastSeen[key] = at
+                counts[key] = (counts[key] or 0) + math.max(1, tonumber(entry.count) or 1)
+            end
+        end
+        if include then events[#events + 1] = entry end
+    end
+
+    local inferred = 0
+    for _, enemy in pairs(session and session.enemies or {}) do
+        local detected = enemy and enemy.detectedBuffs and enemy.detectedBuffs.consumables
+        if type(detected) == "table" then
+            local demand = {}
+            for _, buff in pairs(detected) do
+                local itemID, itemName, quality = ConsumableFromTrackedBuff(buff)
+                if itemID then
+                    local key = Key(enemy.guid, itemID)
+                    if NOGGENFOGGER_AURA_SPELLS[tonumber(buff.spellID)] then
+                        demand[key] = (demand[key] or 0) + 1
+                    else
+                        demand[key] = math.max(demand[key] or 0, 1)
+                    end
+                    while (counts[key] or 0) < demand[key] do
+                        events[#events + 1] = {
+                            t = tonumber(buff.appliedAt or buff.firstSeenAt) or 0,
+                            guid = enemy.guid, actorName = enemy.name,
+                            spellID = tonumber(buff.spellID), sourceSpellID = tonumber(buff.spellID),
+                            sourceSpellName = buff.name, name = itemName or buff.name,
+                            itemID = itemID, itemName = itemName or buff.name, quality = quality,
+                            kind = "item", category = "potions", consumable = true, count = 1,
+                            buffInferred = true,
+                        }
+                        counts[key] = (counts[key] or 0) + 1
+                        inferred = inferred + 1
+                    end
+                end
+            end
+        end
+    end
+    return events, inferred
+end
+
+local function ActorMeta(session, guid, fallbackName)
+    local identity = session.participants and session.participants[guid]
+    return {
+        guid = guid,
+        name = identity and identity.name or fallbackName or (guid == session.playerGUID and session.playerName) or "Unknown",
+        class = identity and identity.class or (guid == session.playerGUID and session.playerClass) or nil,
     }
 end
 
+function U.CaptureWorldConsumableCost(session, options)
+    options = options or {}
+    local capturedAt = tonumber(options.capturedAt) or (time and time() or 0)
+    local snapshot = {version=1, captureModelVersion=2, capturedAt=capturedAt, totalCopper=0, pricedCount=0, unpricedCount=0,
+        actors={}, priceSourceOrder={"Fixed vendor prices", "TradeSkillMaster DBMarket", "Auctionator"}}
+    if options.backfilled then
+        snapshot.backfilled = true
+        snapshot.originalEncounterTimestamp = tonumber(options.originalEncounterTimestamp)
+    end
+    -- Reconcile the same retained casts, item uses and aura evidence used by
+    -- historical repair before freezing a new encounter's prices.
+    local evidence = session
+    if not options.backfilled and U.ReconstructLegacyWorldUsage then
+        local enemies = {}
+        for _, enemy in pairs(session.enemies or {}) do enemies[#enemies + 1] = enemy end
+        local usage = U.ReconstructLegacyWorldUsage({enemies=enemies}, session)
+        evidence = {worldUsage=usage, enemies=session.enemies}
+    end
+    local events, buffInferredCount = CurrentConsumableEvents(evidence)
+    snapshot.buffInferredCount = tonumber(buffInferredCount) or 0
+    if not events or #events == 0 then return snapshot end
+    -- A shared cache can be supplied while migrating older records. That makes
+    -- the migration a coherent one-time market snapshot: the same item receives
+    -- the same captured value across every legacy encounter in that pass.
+    local actorsByGUID, priceCache = {}, options.priceCache or {}
+
+    local function Price(itemID)
+        local cached = priceCache[itemID]
+        if cached then return cached[1], cached[2], cached[3], cached[4], cached[5], cached[6] end
+        local value, source, sourceKey, age, proxyItemID, proxyItemName = U.GetSnapshotPrice(itemID)
+        priceCache[itemID] = {value or false, source, sourceKey, age, proxyItemID, proxyItemName}
+        return value, source, sourceKey, age, proxyItemID, proxyItemName
+    end
+
+    for _, entry in ipairs(events) do
+        if U.IsConsumableWorldEvent(entry) and not ZERO_GOLD_COST_ITEMS[tonumber(entry.itemID)] then
+            local guid = entry.guid or "unknown"
+            local actor = actorsByGUID[guid]
+            if not actor then
+                actor = ActorMeta(session, guid, entry.actorName)
+                actor.totalCopper, actor.pricedCount, actor.unpricedCount, actor.items = 0, 0, 0, {}
+                actor._items = {}
+                actorsByGUID[guid] = actor
+                snapshot.actors[#snapshot.actors + 1] = actor
+            end
+            local itemID = tonumber(entry.itemID)
+            local key = tostring(itemID or entry.itemName or entry.name or entry.spellID or "unknown")
+            local item = actor._items[key]
+            if not item then
+                local itemName = itemID and select(1, ItemInfo(itemID)) or nil
+                item = {itemID=itemID, name=itemName or entry.itemName or entry.name or "Unknown consumable", count=0,
+                    firstUsedAt=entry.t or 0}
+                actor._items[key] = item
+                actor.items[#actor.items + 1] = item
+            end
+            local count = math.max(1, tonumber(entry.count) or 1)
+            item.count = item.count + count
+            if itemID and item.unitCopper == nil and not item.priceChecked then
+                item.priceChecked = true
+                local price, source, sourceKey, age, proxyItemID, proxyItemName = Price(itemID)
+                item.unitCopper, item.priceSource, item.priceSourceKey, item.priceAgeDays = price, source, sourceKey, age
+                item.priceProxyItemID = proxyItemID
+                item.priceProxyItemName = proxyItemName
+                item.priceCapturedAt = snapshot.capturedAt
+            end
+        end
+    end
+
+    for _, actor in ipairs(snapshot.actors) do
+        table.sort(actor.items, function(a, b)
+            if (a.firstUsedAt or 0) ~= (b.firstUsedAt or 0) then return (a.firstUsedAt or 0) < (b.firstUsedAt or 0) end
+            return tostring(a.name) < tostring(b.name)
+        end)
+        for _, item in ipairs(actor.items) do
+            if item.unitCopper and item.unitCopper > 0 then
+                item.totalCopper = item.unitCopper * item.count
+                actor.totalCopper = actor.totalCopper + item.totalCopper
+                actor.pricedCount = actor.pricedCount + item.count
+                snapshot.totalCopper = snapshot.totalCopper + item.totalCopper
+                snapshot.pricedCount = snapshot.pricedCount + item.count
+            else
+                item.unpriced = true
+                actor.unpricedCount = actor.unpricedCount + item.count
+                snapshot.unpricedCount = snapshot.unpricedCount + item.count
+            end
+        end
+        actor._items = nil
+    end
+    snapshot.partial = snapshot.unpricedCount > 0 and true or nil
+    return snapshot
+end
+
+
+function U.SanitizeConsumableCostSnapshot(record)
+    local snapshot = type(record) == "table" and record.consumableCost or nil
+    if type(snapshot) ~= "table" or type(snapshot.actors) ~= "table" then return false end
+    local changed = false
+    local actors = {}
+    snapshot.totalCopper, snapshot.pricedCount, snapshot.unpricedCount = 0, 0, 0
+    for _, actor in ipairs(snapshot.actors) do
+        local items = {}
+        actor.totalCopper, actor.pricedCount, actor.unpricedCount = 0, 0, 0
+        for _, item in ipairs(type(actor.items) == "table" and actor.items or {}) do
+            local zeroCost = ZERO_GOLD_COST_ITEMS[tonumber(item.itemID)]
+            if not zeroCost then
+                local name = tostring(item.name or "")
+                zeroCost = name == "Mana Agate" or name == "Mana Jade" or name == "Mana Citrine" or name == "Mana Ruby"
+            end
+            if zeroCost then
+                changed = true
+            else
+                items[#items + 1] = item
+                local count = math.max(1, tonumber(item.count) or 1)
+                if item.unpriced or not tonumber(item.unitCopper) or tonumber(item.unitCopper) <= 0 then
+                    actor.unpricedCount = actor.unpricedCount + count
+                    snapshot.unpricedCount = snapshot.unpricedCount + count
+                else
+                    local total = tonumber(item.totalCopper) or (tonumber(item.unitCopper) * count)
+                    item.totalCopper = total
+                    actor.totalCopper = actor.totalCopper + total
+                    actor.pricedCount = actor.pricedCount + count
+                    snapshot.totalCopper = snapshot.totalCopper + total
+                    snapshot.pricedCount = snapshot.pricedCount + count
+                end
+            end
+        end
+        actor.items = items
+        if #items > 0 then actors[#actors + 1] = actor elseif #((actor.items) or {}) == 0 then changed = true end
+    end
+    snapshot.actors = actors
+    snapshot.partial = snapshot.unpricedCount > 0 and true or nil
+    if changed then snapshot.zeroGoldCostSanitized = 1 end
+    return changed
+end
+
+local function LegacyParticipants(record, saved)
+    local participants = {}
+    for guid, identity in pairs(type(saved.participants) == "table" and saved.participants or {}) do
+        participants[guid] = identity
+    end
+    local function Add(guid, name, class)
+        if not guid then return end
+        local identity = participants[guid] or {}
+        identity.name = identity.name or name
+        identity.class = identity.class or class
+        participants[guid] = identity
+    end
+    Add(record.playerGUID, record.playerName, record.playerClass)
+    for _, enemy in ipairs(record.enemies or {}) do Add(enemy.guid, enemy.name, enemy.class) end
+    for _, friendly in ipairs(record.friendlies or {}) do Add(friendly.guid, friendly.name, friendly.class) end
+    return participants
+end
+
+local function ShallowCopy(source)
+    local copy = {}
+    for key, value in pairs(type(source) == "table" and source or {}) do copy[key] = value end
+    return copy
+end
+
+local function CleanLegacyItemName(name)
+    if type(name) ~= "string" or name == "" then return nil end
+    name = name:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+    local linked = name:match("|Hitem:[^|]+|h%[([^%]]+)%]|h")
+    if linked then name = linked end
+    name = name:gsub("^%[", ""):gsub("%]$", "")
+    return name
+end
+
+CatalogByName = function(name)
+    name = CleanLegacyItemName(name)
+    if not name or not DP.UsageCatalog then return nil end
+    for _, candidate in pairs(DP.UsageCatalog) do
+        if type(candidate) == "table" and candidate.itemID and candidate.name == name then return candidate end
+    end
+end
+
+local function NormalizeLegacyUsageEvent(entry)
+    if type(entry) ~= "table" then return nil end
+    local event = ShallowCopy(entry)
+    local spellID = tonumber(event.spellID or event.sourceSpellID)
+    local known = spellID and Catalog(spellID) or nil
+    if known then
+        -- Legacy rows occasionally retained a spell/effect ID in itemID. For
+        -- catalogued consumables the catalog identity is authoritative, so use
+        -- the real item ID rather than letting a stale field make the row vanish
+        -- from the cost ledger while Items & Abilities can still display it.
+        if known.itemID and known.category ~= "equipment" then
+            event.itemID = tonumber(known.itemID)
+        else
+            event.itemID = tonumber(event.itemID) or tonumber(known.itemID)
+        end
+        event.itemName = known.name or event.itemName
+        event.name = event.name or event.itemName or known.name
+        event.quality = event.quality or known.quality
+        event.category = known.category or event.category
+        event.kind = event.kind or (known.itemID and "item" or nil)
+        if known.category == "potions" or known.category == "reagents" then event.consumable = true end
+    end
+    local byName = CatalogByName(event.itemName or event.name or event.sourceSpellName)
+    if byName and byName.category ~= "equipment" then
+        -- Exact retained item names are another strong legacy signal. Canonicalize
+        -- them even when an old row contains a bogus/non-item itemID.
+        event.itemID = tonumber(byName.itemID) or tonumber(event.itemID)
+        event.itemName = byName.name or event.itemName
+        event.name = event.name or byName.name
+        event.quality = event.quality or byName.quality
+        event.category = byName.category or event.category
+        event.kind = event.kind or "item"
+        if byName.category == "potions" or byName.category == "reagents" then event.consumable = true end
+    end
+    -- The Supercharged aura is the retained CLEU evidence emitted when a base
+    -- Chronoboon Displacer is consumed to store world buffs.  Price/count that
+    -- original consumed item, not the generated Supercharged item.
+    if spellID == 349981 and event.event == "SPELL_AURA_APPLIED" then
+        event.itemID = 184937
+        event.itemName = "Chronoboon Displacer"
+        event.name = "Chronoboon Displacer"
+        event.category = "potions"
+        event.kind = "item"
+        event.consumable = true
+    end
+    return event
+end
+
+local function ReconstructLegacyWorldUsage(record, saved)
+    local usage = {version = 2, events = {}}
+    local sources, retainedCounts, totalCounts = {}, {}, {}
+
+    local function ItemKey(guid, itemID)
+        return itemID and (tostring(guid or "unknown") .. ":" .. tostring(itemID)) or nil
+    end
+
+    local function AddEvent(rawEvent, source)
+        local event = NormalizeLegacyUsageEvent(rawEvent)
+        if not event then return false end
+        local known = Catalog(tonumber(event.spellID or event.sourceSpellID))
+        local legacyConsumable = event.itemID and
+            ((known and known.category ~= "equipment" and (known.category == "potions" or known.category == "reagents")) or
+             event.category == "potions" or event.category == "reagents" or event.consumable == true)
+        if not legacyConsumable and not U.IsConsumableWorldEvent(event) then return false end
+        event.legacySource = event.legacySource or source
+        usage.events[#usage.events + 1] = event
+        local key = ItemKey(event.guid, tonumber(event.itemID))
+        local count = math.max(1, tonumber(event.count) or 1)
+        if key then totalCounts[key] = (totalCounts[key] or 0) + count end
+        if source == "worldUsage" and key then retainedCounts[key] = (retainedCounts[key] or 0) + count end
+        if source then sources[source] = true end
+        return true
+    end
+
+    -- Retained usage is the highest-confidence source. Normalize old rows first:
+    -- early 0.21 builds often saved spell/name/category but omitted itemID, which
+    -- made the pricing pass throw away rows that Items & Abilities could display.
+    local retained = saved.worldUsage
+    if type(retained) == "table" and type(retained.events) == "table" then
+        for _, entry in ipairs(retained.events) do AddEvent(entry, "worldUsage") end
+    end
+
+    local log = type(saved.worldCombatLog) == "table" and saved.worldCombatLog or nil
+    if log then
+        local logEvidenceCounts, recentCasts = {}, {}
+        local function EvidenceKey(guid, spellID)
+            return tostring(guid or "unknown") .. ":" .. tostring(spellID or "")
+        end
+        local function AddLogCandidate(event)
+            event = NormalizeLegacyUsageEvent(event)
+            if not event or not U.IsConsumableWorldEvent(event) then return false end
+            local key = ItemKey(event.guid, tonumber(event.itemID))
+            if not key then return false end
+            logEvidenceCounts[key] = (logEvidenceCounts[key] or 0) + math.max(1, tonumber(event.count) or 1)
+            -- Reconcile, don't blanket-dedupe: if the retained table has one FAP
+            -- but the combat log proves two, recover the missing second use.
+            if logEvidenceCounts[key] > (retainedCounts[key] or 0) then return AddEvent(event, "worldCombatLog") end
+            return false
+        end
+
+        for _, entry in ipairs(log) do
+            local spellID, spellName = tonumber(entry.spellID), entry.spellName
+            local eventType = entry.event
+            local now = tonumber(entry.t) or 0
+            local castKey = EvidenceKey(entry.sourceGUID, spellID)
+            if eventType == "SPELL_CAST_SUCCESS" and entry.sourceGUID and spellID then
+                recentCasts[castKey] = now
+                local item = Catalog(spellID)
+                if item then
+                    AddLogCandidate({
+                        event = eventType, t = now, guid = entry.sourceGUID, actorName = entry.sourceName,
+                        targetGUID = entry.destGUID, targetName = entry.destName, sourceSpellID = spellID,
+                        sourceSpellName = spellName, spellID = spellID, nameSpell = spellName,
+                        name = spellName or item.name or ("Spell " .. spellID), kind = "item",
+                        itemID = item.itemID, itemName = item.name, quality = item.quality,
+                        category = EngineeringCategory(item.name) or item.category, count = 1,
+                    })
+                end
+                local reagent = ReagentForSpell(spellID, spellName)
+                if reagent then
+                    AddLogCandidate({
+                        event = eventType, t = now, guid = entry.sourceGUID, actorName = entry.sourceName,
+                        targetGUID = entry.destGUID, targetName = entry.destName, sourceSpellID = spellID,
+                        sourceSpellName = spellName, spellID = spellID, itemID = reagent.itemID,
+                        itemName = reagent.name, name = reagent.name, kind = "reagent", category = "reagents",
+                        consumable = true, count = reagent.count or 1,
+                    })
+                end
+            elseif eventType == "SPELL_AURA_APPLIED" and entry.sourceGUID and spellID then
+                local sameCast = recentCasts[castKey]
+                local duplicateCast = sameCast and math.abs(now - sameCast) <= 3
+                if NOGGENFOGGER_AURA_SPELLS[spellID] then
+                    -- The item-use cast is 16589 while the three possible result
+                    -- auras use 16591/16593/16595. If both signals survived, one
+                    -- drink must not become two; if only distinct result auras
+                    -- survived, each aura is proof of a separate drink.
+                    local drinkAt = recentCasts[EvidenceKey(entry.sourceGUID, 16589)]
+                    duplicateCast = drinkAt and math.abs(now - drinkAt) <= 4
+                end
+                if spellID == 349981 then
+                    -- Charging uses spell 349858 and then applies aura 349981.
+                    -- Old logs frequently retained only the aura; use it as a
+                    -- fallback, but never count both signals for one Chronoboon.
+                    local chargeAt = recentCasts[EvidenceKey(entry.sourceGUID, 349858)]
+                    duplicateCast = chargeAt and math.abs(now - chargeAt) <= 10
+                    if not duplicateCast then
+                        AddLogCandidate({
+                            event = eventType, t = now, guid = entry.sourceGUID, actorName = entry.sourceName,
+                            targetGUID = entry.destGUID, targetName = entry.destName, sourceSpellID = spellID,
+                            sourceSpellName = spellName, spellID = spellID, name = "Chronoboon Displacer",
+                            itemID = 184937, itemName = "Chronoboon Displacer", kind = "item",
+                            category = "potions", consumable = true, count = 1,
+                        })
+                    end
+                elseif not duplicateCast then
+                    -- Aura application is useful fallback evidence for old logs
+                    -- which retained the buff but dropped the item cast itself.
+                    local item = Catalog(spellID)
+                    if item then
+                        AddLogCandidate({
+                            event = eventType, t = now, guid = entry.sourceGUID, actorName = entry.sourceName,
+                            targetGUID = entry.destGUID, targetName = entry.destName, sourceSpellID = spellID,
+                            sourceSpellName = spellName, spellID = spellID, name = spellName or item.name,
+                            itemID = item.itemID, itemName = item.name, quality = item.quality,
+                            kind = "item", category = EngineeringCategory(item.name) or item.category, count = 1,
+                        })
+                    end
+                end
+            end
+        end
+    end
+
+    local function ConsumableFromBuff(buff)
+        return ConsumableFromTrackedBuff(buff)
+    end
+
+    local inferredAuraCount = 0
+    local auraDemand = {}
+    local function AddBuffEvidence(enemy, buff)
+        local itemID, itemName, quality = ConsumableFromBuff(buff)
+        local key = itemID and ItemKey(enemy.guid, itemID) or nil
+        if not itemID or not key then return end
+
+        local spellID = tonumber(buff.spellID)
+        if NOGGENFOGGER_AURA_SPELLS[spellID] then
+            -- Different Noggenfogger result auras cannot come from one drink.
+            -- Treat each distinct retained result as another lower-bound use.
+            auraDemand[key] = (auraDemand[key] or 0) + 1
+        else
+            auraDemand[key] = math.max(auraDemand[key] or 0, 1)
+        end
+        if (totalCounts[key] or 0) >= auraDemand[key] then return end
+
+        local event = {
+            t = tonumber(buff.appliedAt or buff.firstSeenAt) or 0,
+            guid = enemy.guid, actorName = enemy.name,
+            spellID = spellID, sourceSpellID = spellID,
+            sourceSpellName = buff.name, name = itemName or buff.name, itemID = itemID,
+            itemName = itemName or buff.name, quality = quality,
+            kind = "item", category = "potions", consumable = true, count = 1,
+            legacyAuraEvidence = buff.gainedDuringFight and "gained" or "present",
+        }
+        if AddEvent(event, "auraEvidence") then inferredAuraCount = inferredAuraCount + 1 end
+    end
+
+    -- A retained consumable aura is a one-use lower-bound for old encounters.
+    -- Deduplicate the same aura appearing in both detectedBuffs.consumables and
+    -- detectedBuffs.all, but preserve distinct Noggenfogger result auras because
+    -- each one proves another elixir was consumed.
+    for _, enemy in ipairs(record.enemies or {}) do
+        local detected = enemy.detectedBuffs
+        if type(detected) == "table" then
+            local unique = {}
+            local function Collect(bucket)
+                for _, buff in pairs(type(bucket) == "table" and bucket or {}) do
+                    local identity = tostring(buff.spellID or "") .. ":" .. tostring(buff.name or "")
+                    if not unique[identity] then unique[identity] = buff end
+                end
+            end
+            Collect(detected.consumables)
+            Collect(detected.all)
+            for _, buff in pairs(unique) do AddBuffEvidence(enemy, buff) end
+        end
+    end
+
+    if #usage.events == 0 then
+        return nil, true, log and "worldCombatLog-empty" or "no-retained-events", 0
+    end
+    table.sort(usage.events, function(a, b) return (tonumber(a.t) or 0) < (tonumber(b.t) or 0) end)
+    local sourceNames = {}
+    for _, name in ipairs({"worldUsage", "worldCombatLog", "auraEvidence"}) do
+        if sources[name] then sourceNames[#sourceNames + 1] = name end
+    end
+    return usage, true, table.concat(sourceNames, "+"), inferredAuraCount
+end
+
+-- WorldPvP's Items & Abilities pane uses this only to supplement missing
+-- retained combat-log item uses in legacy records. Aura-inferred long buffs
+-- remain in the dedicated ENEMY BUFFS viewer instead of being duplicated there.
+U.ReconstructLegacyWorldUsage = ReconstructLegacyWorldUsage
+
+-- A few legacy builds managed to freeze an empty cost snapshot even though the
+-- same encounter still has item-use rows that Items & Abilities can render.
+-- Treat that mismatch as repairable evidence instead of trusting the stale 0c
+-- snapshot forever. This is intentionally conservative: once a snapshot contains
+-- any priced or unpriced item, its captured prices stay frozen.
+local function LegacyUsageFingerprint(usage)
+    local counts = {}
+    for _, event in ipairs(usage and usage.events or {}) do
+        if U.IsConsumableWorldEvent(event) then
+            local key = tostring(event.guid or "unknown") .. ":" .. tostring(event.itemID or event.itemName or event.name or "unknown")
+            counts[key] = (counts[key] or 0) + math.max(1, tonumber(event.count) or 1)
+        end
+    end
+    local keys = {}
+    for key in pairs(counts) do keys[#keys + 1] = key end
+    table.sort(keys)
+    local out = {}
+    for _, key in ipairs(keys) do out[#out + 1] = key .. "=" .. tostring(counts[key]) end
+    return table.concat(out, "|")
+end
+
+local function SnapshotFingerprint(cost)
+    local counts = {}
+    for _, actor in ipairs(cost and cost.actors or {}) do
+        for _, item in ipairs(actor.items or {}) do
+            local key = tostring(actor.guid or "unknown") .. ":" .. tostring(item.itemID or item.name or "unknown")
+            counts[key] = (counts[key] or 0) + math.max(1, tonumber(item.count) or 1)
+        end
+    end
+    local keys = {}
+    for key in pairs(counts) do keys[#keys + 1] = key end
+    table.sort(keys)
+    local out = {}
+    for _, key in ipairs(keys) do out[#out + 1] = key .. "=" .. tostring(counts[key]) end
+    return table.concat(out, "|")
+end
+
+function U.NeedsLegacyConsumableBackfill(record)
+    if type(record) ~= "table" then return false end
+    local cost = record.consumableCost
+    if not cost then return true end
+    if not cost.backfilled then
+        -- Old live recordings could freeze a false zero before aura inference
+        -- existed. Preserve all nonempty market snapshots, including unpriced ones.
+        if (tonumber(cost.pricedCount) or 0) > 0 or (tonumber(cost.unpricedCount) or 0) > 0 or
+                #(cost.actors or {}) > 0 then return false end
+        local usage = ReconstructLegacyWorldUsage(record, record.session or {})
+        return usage ~= nil and #(usage.events or {}) > 0
+    end
+    if (tonumber(cost.legacyBackfillVersion) or 0) < U.LEGACY_CONSUMABLE_BACKFILL_VERSION then return true end
+
+    local saved = type(record.session) == "table" and record.session or {}
+    local usage = ReconstructLegacyWorldUsage(record, saved)
+    if usage and type(usage.events) == "table" and #usage.events > 0 then
+        -- Repair partial legacy snapshots too, not only 0c snapshots. This catches
+        -- the exact failure mode where Items & Abilities still shows four retained
+        -- consumables but an older ledger snapshot contains only one participant/item.
+        if LegacyUsageFingerprint(usage) ~= SnapshotFingerprint(cost) then return true end
+        return false
+    end
+    return (tonumber(cost.pricedCount) or 0) == 0 and (tonumber(cost.unpricedCount) or 0) == 0 and false or false
+end
+
+function U.CaptureLegacyWorldConsumableCost(record, capturedAt, priceCache, force)
+    if type(record) ~= "table" then return nil end
+    if record.consumableCost and not force then return record.consumableCost end
+    local saved = type(record.session) == "table" and record.session or {}
+    local legacyUsage, reconstructed, reconstructedFrom, inferredAuraCount = ReconstructLegacyWorldUsage(record, saved)
+    local legacySession = {
+        worldPvP = true,
+        worldUsage = legacyUsage,
+        participants = LegacyParticipants(record, saved),
+        playerGUID = record.playerGUID,
+        playerName = record.playerName,
+        playerClass = record.playerClass,
+        playerLevel = record.playerLevel,
+    }
+    local snapshot = U.CaptureWorldConsumableCost(legacySession, {
+        capturedAt = capturedAt,
+        priceCache = priceCache,
+        backfilled = true,
+        originalEncounterTimestamp = record.timestamp,
+    })
+    snapshot.legacyBackfillVersion = U.LEGACY_CONSUMABLE_BACKFILL_VERSION
+    snapshot.legacyReconstructed = reconstructed and true or nil
+    snapshot.legacyReconstructedFrom = reconstructedFrom
+    snapshot.legacyAuraInferredCount = tonumber(inferredAuraCount) or 0
+    snapshot.priceSourceReady = U.HasSnapshotPriceSource and U.HasSnapshotPriceSource() or nil
+    return snapshot
+end
+
 function U.Describe(entry, record)
-    local known = ResolveInsignia(entry.spellID, record and record.session) or Catalog(entry.spellID)
+    local known = ResolveInsignia(entry.spellID, record and record.session, entry.guid, entry.nameSpell or entry.name, record) or Catalog(entry.spellID)
     local id = entry.itemID or (known and known.itemID)
     local name, quality, itemClass
     -- Preserve multiple returns when resolving client item metadata.
@@ -396,7 +1400,8 @@ function U.Describe(entry, record)
     end
     name = name or entry.itemName or (known and known.name)
     quality = quality or entry.quality or (known and known.quality) or 1
-    local category = entry.category or (known and known.category) or (itemClass and (itemClass == 0 and "potions" or "equipment"))
+    local category = (known and known.forceItem and known.category) or entry.category or
+        (known and known.category) or (itemClass and (itemClass == 0 and "potions" or "equipment"))
     category = EngineeringCategory(name) or category
     if not category then
         category = (entry.kind == "racial" or racialSpells[entry.spellID]) and "racials" or
@@ -1066,7 +2071,32 @@ local function SelectCombatLogTab(window, key)
     window.logText:SetText(CombatLogText(window.record, key))
     local height = window.logText.GetStringHeight and window.logText:GetStringHeight() or 100
     window.logBody:SetHeight(math.max(128, (height or 100) + 10))
-    if window.logScroll.SetVerticalScroll then window.logScroll:SetVerticalScroll(0) end
+    if window.logScroll.RefreshRivalsScrollbar then window.logScroll:RefreshRivalsScrollbar(true)
+    elseif window.logScroll.SetVerticalScroll then window.logScroll:SetVerticalScroll(0) end
+end
+
+local function BindRivalsScroll(scroll, body, bar, step)
+    step = step or 28
+    bar:SetValueStep(step)
+    bar:SetOnValueChanged(function(self, value)
+        if self._syncing then return end
+        local range = math.max(0, (body:GetHeight() or 0) - (scroll:GetHeight() or 0))
+        value = math.max(0, math.min(range, value or 0))
+        scroll:SetVerticalScroll(value)
+    end)
+    function scroll:RefreshRivalsScrollbar(reset)
+        local range = math.max(0, (body:GetHeight() or 0) - (self:GetHeight() or 0))
+        local current = reset and 0 or math.max(0, math.min(range, self:GetVerticalScroll() or 0))
+        bar._syncing = true; bar:SetMinMaxValues(0, range); bar:SetValue(current); bar._syncing = false
+        bar:SetShown(range > 1)
+        if reset then self:SetVerticalScroll(0) end
+    end
+    scroll:EnableMouseWheel(true)
+    scroll:SetScript("OnMouseWheel", function(self, delta)
+        local low, high = bar:GetMinMaxValues()
+        bar:SetValue(math.max(low or 0, math.min(high or 0, (bar:GetValue() or 0) - delta * step)))
+    end)
+    scroll:RefreshRivalsScrollbar(true)
 end
 
 local function EnsureDetailWindow()
@@ -1111,12 +2141,15 @@ local function EnsureDetailWindow()
     window.summaryMeta = window:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     window.summaryMeta:SetPoint("TOPLEFT", 24, -81); window.summaryMeta:SetWidth(540); window.summaryMeta:SetJustifyH("LEFT")
 
-    window.tableHeader = CreateTableHeader(window, 540, 160, 190, false)
+    window.tableHeader = CreateTableHeader(window, 545, 160, 195, false)
     window.tableHeader:SetPoint("TOPLEFT", 20, -107)
 
-    local scroll = CreateFrame("ScrollFrame", nil, window, "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", 20, -137); scroll:SetSize(560, window.maxUsageHeight)
-    local body = CreateFrame("Frame", nil, scroll); body:SetSize(540, 1); scroll:SetScrollChild(body)
+    local scroll = CreateFrame("ScrollFrame", nil, window)
+    scroll:SetPoint("TOPLEFT", 20, -137); scroll:SetSize(545, window.maxUsageHeight)
+    local body = CreateFrame("Frame", nil, scroll); body:SetSize(545, 1); scroll:SetScrollChild(body)
+    window.usageScrollbar = DP.Theme.ScrollBar(window, 28)
+    window.usageScrollbar:SetPoint("TOPLEFT", 560, -137); window.usageScrollbar:SetSize(18, window.maxUsageHeight)
+    BindRivalsScroll(scroll, body, window.usageScrollbar, 28)
     window.body, window.rows, window.entryButtons, window.scroll = body, {}, {}, scroll
 
     -- Persistent duel combat log. Tabs sit on the upper lip of the inset box,
@@ -1128,11 +2161,14 @@ local function EnsureDetailWindow()
     logBox.border = DP.Theme.Border(logBox, 0, 0, 560, 190); logBox.border:ClearAllPoints(); logBox.border:SetAllPoints(logBox); logBox.border:EnableMouse(false)
     window.logBox = logBox
 
-    local logScroll = CreateFrame("ScrollFrame", nil, logBox, "UIPanelScrollFrameTemplate")
-    logScroll:SetPoint("TOPLEFT", 8, -9); logScroll:SetPoint("BOTTOMRIGHT", -30, 9)
-    local logBody = CreateFrame("Frame", nil, logScroll); logBody:SetSize(510, 128); logScroll:SetScrollChild(logBody)
+    local logScroll = CreateFrame("ScrollFrame", nil, logBox)
+    logScroll:SetPoint("TOPLEFT", 8, -9); logScroll:SetPoint("BOTTOMRIGHT", -17, 9)
+    local logBody = CreateFrame("Frame", nil, logScroll); logBody:SetSize(535, 128); logScroll:SetScrollChild(logBody)
     local logText = logBody:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    logText:SetPoint("TOPLEFT", 4, -4); logText:SetWidth(500); logText:SetJustifyH("LEFT")
+    logText:SetPoint("TOPLEFT", 4, -4); logText:SetWidth(527); logText:SetJustifyH("LEFT")
+    window.logScrollbar = DP.Theme.ScrollBar(logBox, 28)
+    window.logScrollbar:SetPoint("TOPRIGHT", logBox, "TOPRIGHT", -4, -8); window.logScrollbar:SetPoint("BOTTOMRIGHT", logBox, "BOTTOMRIGHT", -4, 8)
+    BindRivalsScroll(logScroll, logBody, window.logScrollbar, 28)
     if logText.SetJustifyV then logText:SetJustifyV("TOP") end
     if logText.SetWordWrap then logText:SetWordWrap(true) end
     window.logScroll, window.logBody, window.logText = logScroll, logBody, logText
@@ -1155,7 +2191,7 @@ local function EnsureDetailWindow()
 end
 
 local function LayoutDetailRows(window, groups)
-    local width, categoryWidth, playerWidth = 540, 160, 190
+    local width, categoryWidth, playerWidth = 545, 160, 195
     local opponentWidth = width - categoryWidth - playerWidth
     local entryIndex, y = 0, 0
     for index, group in ipairs(groups) do
@@ -1201,8 +2237,10 @@ local function LayoutDetailRows(window, groups)
     local displayHeight = math.min(window.maxUsageHeight or y, math.max(window.minUsageHeight or 44, y))
     window.scroll:SetHeight(displayHeight)
     window.body:SetHeight(math.max(1, y))
-    local scrollBar = window.scroll.ScrollBar or _G[(window.scroll.GetName and window.scroll:GetName()) and (window.scroll:GetName() .. "ScrollBar") or ""]
-    if scrollBar then scrollBar:SetShown(y > displayHeight + 1) end
+    if window.usageScrollbar then
+        window.usageScrollbar:SetHeight(displayHeight)
+        window.scroll:RefreshRivalsScrollbar(false)
+    end
     if window.logBox then
         window.logBox:ClearAllPoints()
         window.logBox:SetPoint("TOPLEFT", window.scroll, "BOTTOMLEFT", 0, -38)
@@ -1234,16 +2272,15 @@ function U.OpenDetails(record)
     if #groups == 0 then
         local row = window.rows[1]
         if not row then row = CreateDetailRow(window); window.rows[1] = row end
-        row:ClearAllPoints(); row:SetPoint("TOPLEFT", 0, 0); row:SetSize(540, 44); row.bg:SetColorTexture(.045, .055, .07, .54)
+        row:ClearAllPoints(); row:SetPoint("TOPLEFT", 0, 0); row:SetSize(545, 44); row.bg:SetColorTexture(.045, .055, .07, .54)
         row.category:ClearAllPoints(); row.category:SetText("|cffffce70Usage|r"); row.category:SetPoint("TOPLEFT", 10, -12)
         row.playerEmpty:SetText("No item, cooldown, racial, or engineering gadget use recorded.")
-        row.playerEmpty:ClearAllPoints(); row.playerEmpty:SetPoint("TOPLEFT", 170, -12); row.playerEmpty:SetWidth(350); row.playerEmpty:Show()
+        row.playerEmpty:ClearAllPoints(); row.playerEmpty:SetPoint("TOPLEFT", 170, -12); row.playerEmpty:SetWidth(355); row.playerEmpty:Show()
         row.opponentEmpty:Hide(); row:Show(); height = 44
         for index = 2, #window.rows do window.rows[index]:Hide() end
         window.scroll:SetHeight(height)
         window.body:SetHeight(height)
-        local scrollBar = window.scroll.ScrollBar or _G[(window.scroll.GetName and window.scroll:GetName()) and (window.scroll:GetName() .. "ScrollBar") or ""]
-        if scrollBar then scrollBar:Hide() end
+        if window.usageScrollbar then window.scroll:RefreshRivalsScrollbar(true) end
         if window.logBox then
             window.logBox:ClearAllPoints()
             window.logBox:SetPoint("TOPLEFT", window.scroll, "BOTTOMLEFT", 0, -38)

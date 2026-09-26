@@ -2,6 +2,9 @@ fire("PLAYER_LOGIN")
 fire("COMBAT_LOG_EVENT_UNFILTERED") -- Idle combat must not touch an out-of-scope player.
 local o = RivalsDB.observers["Player-1-A"]
 assert(o and #o.results == 0)
+local duelScreenshotCount = 0
+function Screenshot() duelScreenshotCount = duelScreenshotCount + 1 end
+DP.SetDuelScreenshots(true)
 SlashCmdList.RIVALS("trace on")
 fire("DUEL_REQUESTED", "Bob")
 fire("CHAT_MSG_SYSTEM", "Duel starting: 1")
@@ -14,8 +17,15 @@ function GetSpellBaseCooldown() return 180000 end
 fire("COMBAT_LOG_EVENT_UNFILTERED")
 CombatLogGetCurrentEventInfo, GetSpellBaseCooldown = savedCombatLog, savedBaseCooldown
 fire("DUEL_FINISHED")
+assert(duelScreenshotCount == 0) -- DUEL_FINISHED is too early for visible result text.
 advance(1)
 fire("CHAT_MSG_SYSTEM", "Alice has defeated Bob in a duel.")
+assert(duelScreenshotCount == 0) -- Wait for the result text to render.
+advance(0.19)
+assert(duelScreenshotCount == 0)
+advance(0.02)
+assert(duelScreenshotCount == 1)
+DP.SetDuelScreenshots(false)
 assert(#o.results == 1 and o.results[1].won)
 assert(o.results[1].session.usage.player["999901"].count == 1)
 assert(#o.results[1].session.combatLog.myActions == 1 and #o.results[1].session.combatLog.toMe == 0)
@@ -74,7 +84,12 @@ advance(1)
 fire("CHAT_MSG_SYSTEM", "Duel starting: 1")
 advance(4.008)
 fire("DUEL_FINISHED")
+DP.SetDuelScreenshots(true)
+local screenshotsBeforeLoss = duelScreenshotCount
 fire("CHAT_MSG_SYSTEM", "Bob has defeated Alice in a duel.")
+advance(0.21)
+assert(duelScreenshotCount == screenshotsBeforeLoss) -- Duel screenshots are wins only.
+DP.SetDuelScreenshots(false)
 local r = o.results[#o.results]
 assert(r.durationQuality == "estimated" and math.abs(r.duration - 3.008) < 0.0001)
 assert(not r.ratingEligible and r.ratingDecision.delta == 0 and r.duelMode == "casual")

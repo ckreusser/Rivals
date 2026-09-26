@@ -1,3 +1,499 @@
+# 0.21.181-beta
+
+- Replace the Rivals promo rotation with the current World PvP- and duel-focused set selected for the addon.
+- Add a consumable-spend promo highlighting Rivals' estimate of how much gold enemy players burned during a fight.
+
+# 0.21.180-beta
+
+- Add curated Horde race/class portrait backfills for every playable Classic Era Horde combination: Orc, Tauren, Troll, and Undead/Forsaken. Legacy Alliance-player encounters can now use real Classic race/class character displays instead of falling through to a class icon.
+- Give most Horde race/class pairs multiple curated display IDs so different rivals can receive stable, varied synthetic portraits while preserving the existing actual-captured-portrait/display-ID priority.
+
+# 0.21.179-beta
+
+- Normalize Items & Abilities categories before sorting/rendering so each category gets one shared section across all participants. Resolved equipment such as class/faction PvP Insignias can no longer split EQUIPMENT/COOLDOWNS into duplicate plaques.
+- Fix zero/short Items & Abilities layouts by removing phantom scroll-body padding and sizing the detail window from the actual visible rows. Empty encounters now keep a normal dataframe/header area without spawning a bogus scrollbar.
+
+# 0.21.178-beta
+
+- Widen the World PvP Summary OPPONENTS box and its responsive plaques 12px to the right so its outer edge aligns exactly with the ENEMY BUFFS box above.
+- Items & Abilities now reclaims the scrollbar lane whenever scrolling is unnecessary, widening the dataframe to the same right-side inset as the left. Short lists also pull the window footer up to a matching 20px buffer below the last row.
+- Nudge the shared Character-pane History / Matchups / Rivals scrollbar one pixel right for final gutter alignment.
+
+# 0.21.177-beta
+
+- Recognize all five Classic Era PvP Insignia activation spells as trinket uses instead of generic ≥3 minute cooldowns.
+- Resolve the exact class/faction-specific Insignia of the Alliance/Horde for Warrior, Hunter, Rogue, Priest, Mage, Warlock, Druid, Shaman, and Paladin.
+- Reclassify already-recorded World PvP rows such as Druid `Immune Charm/Fear/Stun` into EQUIPMENT at display time, so existing encounter history is repaired without a data migration.
+
+# 0.21.176-beta
+
+- Move the shared Character-pane History/Matchups/Rivals scrollbar 4px left so its visible track sits fully inside the dark list gutter.
+- Shorten the Opponents/Classes scrollbar to the five-row list height so the lower arrow aligns with the bottom visible plaque instead of hanging below it.
+- Improve Items & Abilities category-divider legibility with a slightly taller plaque, larger outlined centered text, a stronger drop shadow, and a darker/less noisy rock fill.
+
+# 0.21.175-beta
+
+- Realign the Matchups Opponents/Classes tabs to the same horizontal guides as the plaques beneath them.
+- Rebalance Character-pane list geometry around an 18px left buffer, 5px plaque-to-scrollbar gap, 18px scrollbar, and 18px right buffer.
+- Nudge the shared History/Matchups/Rivals scrollbar 2px left and trim plaque width accordingly so the control sits fully between the rows and the pane border instead of riding the frame.
+
+# 0.21.174-beta
+
+- Class-color the Items & Abilities participant selector and its menu entries, including You, enemies, and friendly participants when class data is retained.
+- Remove the currently selected value from the Items & Abilities dropdown menu so every visible option changes the filter.
+- Apply the same current-selection removal to the ENEMY BUFFS dropdown while preserving its existing class-colored enemy names and level/race metadata.
+
+# 0.21.173-beta
+
+- Move the Items & Abilities participant selector onto the tab row and align its right edge with the ENEMY BUFFS selector above. Pull the dataframe upward into the vacated space.
+- Reserve the full 18px Items & Abilities scrollbar footprint instead of drawing the dataframe underneath it; the table and scrollbar now exactly span the 610px content area with matching outer insets.
+- Pull Character-pane list scrollbars 8px left so their entire arrow/track assembly remains inside the dark content inset. Shorten list plaques to stop 5px before the scrollbar, and move Matchups rows onto the same left guide as History.
+- Render Items & Abilities section-plaque labels in all caps.
+
+# 0.21.172-beta
+
+- Rebuild the shared Rivals scrollbar endpoint geometry: the native slider remains responsible for drag/value behavior, while the visible Blizzard knob is positioned independently so it physically reaches the top/bottom arrow buttons at minimum and maximum. The touched endpoint arrow now gets an explicit highlight glow.
+- Refit Character-pane History/Matchups/Rivals plaques to terminate at the visible scrollbar track instead of leaving a dead strip beside it.
+- Refit Rivals-owned scroll gutters across World PvP, Duel Details, combat logs, buff grids, export, and Character-pane lists so content terminates against the visible track rather than the invisible 18px control frame.
+- Replace the World PvP Items & Abilities participant filter with the compact ENEMY BUFFS selector treatment and move it into the open upper-right strip beneath the buff card.
+
+# 0.21.171-beta
+
+- Fix the standardized Rivals scrollbar thumb travel: the slider track now begins immediately beneath the 18px arrow buttons, eliminating the dead gap that kept the thumb from reaching the top/bottom endpoints.
+- Thicken the Items & Abilities category plaque borders from the standard 8px Blizzard tooltip edge to a 12px edge, with a slightly deeper rock-texture inset so the heavier frame stays clean.
+
+# 0.21.170-beta
+
+- Standardize Rivals scrollbars on one Blizzard-style arrow/track/thumb treatment across Matchups/History, World PvP opponent and buff lists, World PvP Items & Abilities, combat logs, duel details, and the capture report. Endpoint arrows now stay lit when the thumb is touching that end rather than lighting the direction with remaining travel.
+- Refit list gutters around the new 18px scrollbar so plaques and icon grids no longer collide with or leave arbitrary space beside the control.
+- Expand the World PvP Items & Abilities dataframe from 552px to 592px so the table runs directly into the scrollbar and the combined table+scrollbar assembly keeps the same outer inset on the right as the table has on the left.
+- Restyle Items & Abilities category dividers as rounded plaque rows with Blizzard `UI-Background-Rock`, centered gold labels, and a dark drop shadow.
+
+# 0.21.169-beta
+
+- Widen portrait/medallion opponent rows by 3px on the left while preserving the shared right guide. This compensates for transparent padding in the medallion art so portrait plaques have the same visible left/right breathing room as ordinary plaques.
+- Tighten Opponents row pitch from 60px to 56px, reducing the excessive vertical dead space without changing the 47px plaque height or 56px medallion size.
+- Replace the bad Human Mage legacy portrait display (3293) with a sex-aware pool of verified Human mage/portal-trainer displays. Existing legacy Human Mage rivals now vary by rival instead of all rendering the same non-Human portrait.
+
+# 0.21.168-beta
+
+- Keep the corner-free portrait-plaque masking from 0.21.167, but shrink the portrait occluder from the full 56px medallion to the 48px inner portrait region. This lets the rounded plaque border continue visibly beneath the medallion rim instead of stopping outside it.
+- The plaque rails now overlap the outer medallion by several pixels at both the top and bottom while the actual left corners remain clipped and matted away. The occluder still follows the hover animation, so that overlap remains consistent on mouseover.
+
+# 0.21.167-beta
+
+- Rebuild portrait-plaque left-end masking: the rounded Blizzard border now extends 18px past the row's left edge so its true left corners are completely outside the viewport, while the top/bottom rails still continue underneath the portrait.
+- Add a dedicated 16px left matte plus a full-size circular portrait matte to cover the clipped rail segment. This removes the visible square/corner stubs at rest and during hover without creating the prior gap between the plaque border and medallion.
+- Preserve the rounded Blizzard tooltip corners on the visible right side and on non-portrait plaques.
+
+# 0.21.166-beta
+
+- Replace the square rail-built Opponents plaque with Blizzard's rounded `UI-Tooltip-Border`, matching the surrounding border box shape.
+- Rebuild portrait plaque overlap around a dedicated border clip: the border itself extends left underneath the medallion while its rounded left corners live outside the visible clip and cannot peek out.
+- Add a circular portrait-backed occluder that moves/scales with the medallion, hiding the underlying rail only inside the portrait silhouette so the top/bottom border lines emerge cleanly from the medallion curve even on hover.
+
+# 0.21.165-beta
+
+- Replace the clipped tooltip-backdrop strategy on OPPONENTS plaques with fixed one-physical-pixel rails. Portrait rows now have a true open-left border: no left rail and no left corner artwork exists to peek around the medallion.
+- Start the portrait row's top/bottom rails underneath the medallion so they emerge at its right-hand curve instead of leaving the gap introduced by the clipping attempt.
+- Keep NPC rows fully boxed with the same rail treatment, while hover continues to animate content/portrait only and never resizes the border.
+
+# 0.21.164-beta
+
+- Fix portrait-row left corners properly by clipping the left 54px of the Blizzard tooltip border instead of merely moving the border underneath the circular portrait. The left rail/corners no longer exist in the visible region, including during the portrait hover bump.
+- Keep the plaque fill and row gutters unchanged, so this does not reintroduce the previous oversized left-side padding.
+
+# 0.21.163-beta
+
+- Fix portrait OPPONENTS plaques exposing their left tooltip-border corner again. The decorative border now starts beneath the portrait medallion center, while the plaque fill remains full-width underneath it.
+- Decouple the plaque fill/hover wash from the portrait border inset so hiding the corner does not bring back the oversized left-side dead space.
+
+# 0.21.162-beta
+
+- Remove the inner catch-light from OPPONENTS plaques. The extra top stroke was reading like a second border line beneath the actual plaque border.
+- Rebalance OPPONENTS row width and anchors so the list now uses matching left/right gutters instead of carrying a large left-side dead zone.
+- Extend portrait plaques farther underneath the portrait medallion so portrait and non-portrait rows no longer have oversized left padding.
+
+# 0.21.161-beta
+
+- Replace the malformed Character Create corner treatment on Opponents rows with Blizzard's native `UI-Tooltip-Border`, tinted down so the roster reads as rows rather than nested dialog boxes. The border is now physically stationary during hover, so it cannot grow or flicker with the bump.
+- Rework Opponents hover feedback to animate only the portrait/content highlight: a small portrait lift, two-pixel text nudge, and subtle warm wash. The plaque frame itself stays fixed.
+- Make player and NPC cards use the same fixed row width and `TOPRIGHT` registration. Portrait mode only changes the buried left edge; every visible plaque terminates on the same right-hand guide at rest and on hover.
+
+# 0.21.160-beta
+
+- Rebuild Opponents plaque trim with Blizzard `UI-CharacterCreate-MetalFrame-Horizontal` corner art and fixed one-physical-pixel rails. The decorative corners no longer grow with the 6% hover bump, avoiding the oversized animated-border look without returning to a tiled backdrop.
+- Right-lock every Opponents plaque, including player portraits and NPC rows. Hover expansion now grows leftward into a reserved hit area so all right edges stay aligned before, during, and after the bump.
+
+# 0.21.159-beta
+
+- Increase opponent hover expansion from 4% to 6%, with a 45ms entrance and 60ms return.
+- Replace animated tooltip-backdrop borders with untiled, fixed-thickness edge pieces and align their frame bounds to physical pixels.
+- Move resting portrait rows closer to the left side of the Opponents box. Reserve room on the right for the full expansion while retaining smooth upward row reveals and clipping.
+
+# 0.21.158-beta
+
+- Fix obscured opponent text by keeping the fill below the border and placing text/portrait artwork in an explicit foreground frame.
+- Restore the full 4% hover expansion with centered side clearance and portrait-row spacing. Resize the border at native scale while enlarging text and portraits together.
+- Animate hover-triggered row reveals upward through the smooth-scroll path instead of jumping instantly.
+- Shift Overview two UI units right, retaining its size and clipping bounds. Restore the original shared theme's border/texture rendering.
+- Focused regressions cover animated reveal, hover containment, layer order, hover-out, carousel, pricing and portrait capture.
+
+# 0.21.157-beta
+
+- Restore a stable Overview carousel hierarchy; prevent independent texture snapping from breaking thin box edges at fractional UI scales. Keep existing layout and colors.
+- Keep opponent hover visuals inside the list viewport. Reveal partially hidden rows on hover, with clearance for portrait rims, instead of moving them to an unclipped fullscreen overlay.
+- Replace scaled hover borders with a subtle frame-height expansion at unchanged texture/font scale. Attach the plaque fill to the complete border bounds so both resize together.
+
+# 0.21.156-beta
+
+- Bury portrait-plaque left edges and corners beneath the medallion center.
+- Center opponent plaques on their viewport and derive row widths from the actual panel width.
+- Render stationary Overview pages directly to avoid ScrollFrame compositing on their box edges. Retain clipping while swiping, with the existing colors and opacity unchanged.
+
+# 0.21.155-beta
+
+- Extend encounter plaques behind the portrait so their left corners are exposed.
+- Center both Overview pages within the visible Classic frame and clip swipes inside its stone border, excluding transparent frame padding.
+- Repair empty original Consumed snapshots from retained evidence on login, including the Kazzaraxia encounter. Reconcile uses, combat-log casts and detected buffs before pricing new recordings.
+- Fix the buff-name lookup scope and preserve separate Noggenfogger drinks inferred from distinct result auras.
+- Freeze encounter portraits and reuse their actual captured texture during the current UI session. Opening history no longer replaces portraits with a later live appearance. Runtime render textures cannot be persisted through reloads; saved display IDs and the existing backfilled portraits remain the fallback.
+- Validation: focused Lua 5.1 pricing/portrait/carousel regressions and read-only replay of saved encounter 64. In-game visual verification remains necessary; the older full suite also contains unrelated failing assertions.
+
+# 0.21.140-beta
+
+- Damage Exchange tooltips now show every retained ability/recovery source instead of collapsing the tail into `+N more`.
+- Damage tooltips are wider and use a screen-safe side anchor whose vertical position is clamped to keep long breakdowns on-screen.
+- Damage Dealt uses the same gold value color as the encounter-count/result numerals.
+- Replaced `Enemy recovered` / `You recovered` in the Summary with one neutral `Recovery` sublabel while preserving the smaller green recovery value.
+- OPPONENTS no longer reserves a scrollbar gutter when the roster fits. The scrollbar/track stay hidden and the opponent plaques expand across the full panel width until scrolling is actually required.
+
+# 0.21.139-beta
+
+- Replaced the mirrored Damage Exchange bars with compact text-first exchange rows: orange **Dealt** and red **Taken** totals, each with a smaller green recovery line beneath it. This removes the forced left/right symmetry and the red/green mixed-bar treatment while keeping recovery visible.
+- Damage Exchange tooltip titles now inherit the damage direction color and include the exact gross amount in the header. Redundant headline rows were removed, and the player's recovery breakdown no longer repeats the player name before every self-heal.
+- Reduced the Consumed money readout/icon scale slightly while preserving the compact centered row.
+
+# 0.21.138-beta
+
+- Reworked Damage Exchange bars to show each side as a share of total tracked damage instead of always normalizing the larger side to a full bar.
+- Recovery now colors the recovered portion of the same damage segment, leaving the damage color as net pressure rather than drawing a competing green mini-bar.
+- Condensed Damage Exchange tooltips, grouped NPC interference, limited repetitive ability rows, and bottom-anchored/clamped tall tooltips so they stay on-screen.
+- Merged duplicate same-name NPCs into one Opponents plaque with a count and combined contribution.
+- Compressed Consumed into a centered single-row stat and reduced the money/icon scale.
+
+## 0.21.137-beta
+- Rebuilt Damage Exchange reconstruction so older encounters can recover damage from retained combat-log names/text and opponent aggregate damage instead of displaying false zeroes when legacy GUID/amount fields are missing.
+- Made the stacked Damage Exchange bars taller and switched their fills/recovery strips to Blizzard's `UI-StatusBar` texture with distinct dealt/taken/recovery tinting.
+- Reworked Damage Exchange mouseovers into an opaque, alternating-row ledger with compact totals, per-player/NPC sections, ability breakdowns, and recovery sources.
+- Killing Blows mouseovers now show the lethal ability, hit/critical result, damage, and overkill when retained; new encounters now persist critical/overkill metadata on the lethal hit.
+- Tightened the Consumed footprint and enlarged the money readout/icons.
+- Excluded conjured Mage mana gems (Mana Agate/Jade/Citrine/Ruby) from consumable gold cost while leaving their uses visible in Items & Abilities.
+- Existing frozen snapshots are sanitized on encounter open so previously captured Mana Ruby entries disappear from Consumable Cost without repricing the rest of the encounter.
+
+## 0.21.136-beta
+- Rebuilt the World PvP **Summary** into an asymmetric layout: a compact **Encounter Stats** card on the left and a wider **Opponents** roster on the right. The old Enemy Players quadrant and standalone Encounter Context box are removed.
+- Added stacked mirrored **Damage Exchange** bars. Damage dealt fills left-to-right, damage taken fills right-to-left, and green inset segments show health restored on the affected side. Both bars share one scale for immediate visual comparison.
+- Damage mouseovers now break the exchange down by enemy/NPC source or target and by ability, then show observed health restoration and net pressure. Healing potions, bandages, Bloodthirst/Blood Craze-style heals, Crusader healing procs, and other CLEU healing are included when observed. New encounters retain overheal so the recovery bars use effective healing.
+- Folded retained NPC participation into **Opponents** as distinct NPC plaques. NPC damage/healing context is shown on the plaque/tooltip and NPCs remain excluded from the PvP NvN headcount.
+- Consolidated Kills, Killing Blows, Damage Exchange, and Consumable Cost into one coherent Encounter Stats card while preserving the Consumable Cost ledger mouseover.
+
+## 0.21.135-beta
+- Consumable Cost tooltip: removed the redundant frozen-price footer text, leaving only useful source/inference metadata.
+- Rebalanced tooltip vertical spacing with slightly more separation below the header and additional padding beneath the footer.
+
+## 0.21.134-beta
+- Header spacing: narrowed ENEMY BUFFS from 206px to 196px so the World PvP header has matching 20px outer gutters on both sides; selector, empty-state, and five-column buff grid resize with it.
+- Consumable Cost tooltip now sits 6px closer to the CONSUMED tile while retaining bottom-edge alignment.
+
+## 0.21.133-beta
+
+- Reduced the consumable ledger heading from the oversized large-font all-caps treatment to a quieter standard-size **Consumable Cost** header.
+
+## 0.21.132-beta
+
+- Strengthened the consumable ledger heading to **CONSUMABLE COST** and renamed the total row accordingly.
+- Added a truly opaque black layer beneath the Blizzard tooltip skin so underlying UI/world text cannot bleed through.
+- Pulled the ledger tooltip tight to the Consumed tile while preserving bottom-edge alignment.
+
+## 0.21.131-beta
+
+- Reworked the **Consumed** tooltip sizing around the actual rendered ledger columns. Long item names and the total row now expand the tooltip instead of ellipsizing, while short ledgers remain compact.
+- Removed the redundant populated-state snapshot sub-header so the ledger begins immediately beneath **Estimated consumables**.
+- Made the tooltip background fully opaque, switched its anchor so the tooltip bottom aligns with the bottom of the **Consumed** tile, and tightened the footer/bottom spacing.
+- Normalized the ledger row geometry so the left and right outer padding on the participant/header rows are identical.
+
+## 0.21.130-beta
+
+- Fixed partial legacy consumable snapshots so the **Consumed** ledger cross-checks itself against all retained Items & Abilities evidence. Missing player spend such as Free Action Potions and bandages, missing enemy consumables, and stale one-item snapshots now self-repair instead of staying frozen.
+- Hardened legacy event normalization: catalogued consumables now recover their canonical item ID from retained spell/name data even when an old record saved a bogus item ID or stale consumable flag.
+- Noggenfogger legacy inference now counts distinct retained Noggenfogger result auras as separate drinks while avoiding double-counting when the original item-use cast is also present.
+- Tightened the consumable ledger tooltip: quantity sits directly beside the item name, width is driven by ledger content rather than footer prose, bottom padding is reduced, and the footer is a single compact source/inference line.
+
+## 0.21.129-beta
+
+- Reworked the **Consumed** mouseover into a compact ledger: each participant and item is listed first, followed by a single **Total estimated consumables** row at the bottom. Legacy recalculation generation is bumped to 7 so previously partial backfills are rebuilt and can include the player plus every enemy with retained consumable-use/buff evidence.
+- Zanza and Winterspring Juju rows now show the actual frozen replacement item inline, e.g. **Swiftness of Zanza (Blue Hakkari Bijou)** or **Juju Power (Winterfall E'ko)**.
+- Replaced the addon-bronze tooltip frame with Blizzard's standard tooltip backdrop, made its width content-sensitive, increased bottom padding, and replaced the unsupported source-order arrow glyph with plain text.
+- **Noggenfogger Elixir** now uses its fixed Classic Era vendor replacement cost of 7 silver each instead of TSM/Auctionator market pricing.
+
+## 0.21.128-beta
+
+- Fixed legacy **Consumed** backfill so a stale zero-cost snapshot can no longer block reconstruction when the encounter still has recoverable consumable evidence. Rivals now cross-checks the frozen snapshot against the same retained usage/combat-log/buff evidence used by **Items & Abilities**.
+- Added an on-demand repair path when Encounter Details opens. If startup migration missed an old encounter but Items & Abilities can still recover Flask of Petrification, Magic Dust, Free Action Potion, bandages, Chronoboon, Zanzas/Jujus, etc., the Summary cost is rebuilt immediately from the player's current price snapshot and then frozen.
+- Legacy migration generation bumped to 6 so existing false-zero generation-5 snapshots are re-evaluated once. Snapshots that already contain priced or explicitly unpriced items are left untouched, preserving their historical captured values.
+
+## 0.21.127-beta
+
+- Fixed the migration-generation bug that prevented 0.21.126 from actually re-running legacy consumable backfill. The reconstruction/proxy logic had been improved, but the saved `legacyBackfillVersion` was accidentally left at 4, so 0.21.125 snapshots were considered current and never recalculated.
+- Legacy snapshots frozen by 0.21.123-0.21.126 are now recalculated once at generation 5. This makes the **Consumed** tile use the same retained potion/bandage/Magic Dust/etc. evidence already visible in **Items & Abilities**.
+- The recalculation also applies the corrected one-for-one replacement proxies from 0.21.126, so existing Zanza snapshots drop the old multi-Bijou valuation and Winterspring Jujus use one corresponding E'ko.
+- Centralized the legacy migration generation in `Usage.lua` and made World PvP read that exported value, preventing the snapshot writer and migration gate from silently getting out of sync again.
+
+## 0.21.126-beta
+
+- Corrected Zanza replacement cost to **1 Hakkari Bijou per Zanza** instead of three. Rivals still uses the cheapest currently priced interchangeable Bijou and freezes that value into the encounter snapshot.
+- Added one-for-one Winterspring Juju proxies: each Juju is valued from its corresponding E'ko (for example **Juju Power = 1 Winterfall E'ko**), including retained legacy buff inference.
+- Reworked legacy consumable reconstruction so old Items & Abilities rows that retained spell/name data but lost `itemID` are normalized back to their catalogued items before pricing. Repeated combat-log uses are reconciled by count instead of being blanket-deduplicated.
+- Added Classic Era Chronoboon handling. The Supercharged Chronoboon aura now recovers a consumed **Chronoboon Displacer** when that is the only retained CLEU evidence, and missing Chronoboon uses are supplemented into legacy Items & Abilities. Live encounters also capture the aura fallback without double-counting a normal Charging cast.
+- Added static Era mappings for the seven Winterspring Jujus plus Chronoboon/Supercharged Chronoboon use spells. Legacy backfill version is bumped again so 0.21.123-0.21.125 zero/partial snapshots are recalculated from the improved evidence.
+
+## 0.21.125-beta
+
+- Fixed legacy **Consumed** migration again: retained enemy elixir/flask/Juju/Zanza-style buff snapshots now contribute one inferred consumable to old encounters even when the original cast predates the fight or was never retained in `worldUsage`.
+- Legacy reconstruction now merges `worldUsage`, retained combat-log casts, and retained consumable-buff evidence instead of stopping as soon as any old `worldUsage` table exists.
+- Added TSM4 Classic-era (`TSMAPI_FOUR`) DBMarket support in addition to the newer `TSM_API` path, matching the market values visible in older/current Era TSM installs.
+- Legacy pricing is delayed briefly after login and retried once before freezing, avoiding false zero/unpriced snapshots while TSM/Auctionator market data is still initializing.
+- Reusable equipment is hard-excluded from consumable spend even when its name looks consumable; **Diamond Flask** is no longer counted as a consumed Flask.
+
+## 0.21.124-beta
+
+- Fixed the legacy **Consumed** backfill so it no longer depends exclusively on pre-existing `worldUsage` data. Older encounters now reconstruct consumable uses from their retained World PvP combat log, including catalogued consumable item casts and common spell reagents, then snapshot the player's current TSM DBMarket/Auctionator prices once and freeze them.
+- Added a second-pass migration for the empty legacy snapshots created by 0.21.123, so users who already loaded that build are automatically retried instead of being stuck at `0c`.
+- Enemy consumable buffs explicitly observed as gained during the fight can supplement missing cast records; buffs that were merely present at encounter start are intentionally not counted as spend.
+- Improved legacy Consumed tooltip diagnostics to distinguish a recoverable zero-use combat log from encounters that predate retained combat-use evidence entirely.
+
+## 0.21.123-beta
+
+- Backfilled **Consumed** pricing for every pre-0.21.122 World PvP encounter that lacks a saved cost snapshot. Rivals takes one coherent snapshot of the player's current TSM DBMarket/Auctionator values at migration time, applies those captured values to retained legacy consumable events, and then freezes them permanently on each historical encounter.
+- Legacy cost tooltips now explicitly identify the value as a one-time current-price snapshot rather than incorrectly claiming it was captured at the original encounter end.
+
+## 0.21.122-beta
+
+- Added an encounter-end **Consumed** estimate to World PvP Summary. The four primary tiles are now Enemy players, Consumed, Kills, and Killing blows; Honorable Kills remains secondary data outside this summary block.
+- Consumable replacement cost is snapshotted permanently when the encounter ends. Rivals prefers TSM `DBMarket`, falls back to Auctionator, records the source on each item, and never reprices historical encounters.
+- The Consumed mouseover groups spend by character and uses alternating item-row backgrounds for readability, with partial/unpriced disclosure when a detected consumable has no trustworthy market value.
+- Expanded World PvP consumable accounting to include consumed item uses across tracked participants plus common combat reagents such as Flash Powder, Blinding Powder, Light Feathers, candles, Symbols, seeds, and Soul Shards. Zanzas use a snapshotted Hakkari Bijou replacement-cost proxy when the bind-on-pickup potion itself has no market price. Reusable equipment is excluded.
+
+## 0.21.121-beta
+
+- Hide the ENEMY BUFFS opponent selector entirely when no enemy in the encounter has retained buff data.
+- Widen and align the selector with the BUFFS title and left edge of the icon grid.
+- Added a five-column scrolling buff viewport: the first ten buffs remain visible in two rows, while larger aura sets scroll vertically with the same Blizzard track/thumb treatment used by OPPONENTS.
+
+## 0.21.120-beta
+
+- Increased the ENEMY BUFFS selector height again for better vertical balance.
+- Rebuilt the open selector/menu chrome so it becomes one continuous Blizzard-style bordered control with no doubled seam or visual gap.
+- Replaced the soft quest-row hover glow with an inset clipped highlight so hover feedback stays entirely inside its assigned opponent row.
+
+## 0.21.119-beta
+
+- Tightened the ENEMY BUFFS selector into the header: slightly taller control, smaller title gap, and a menu that begins directly on the selector's bottom edge.
+- Switched the selector arrow to Blizzard's standard scroll-down button states and kept its native highlight visibly active on mouseover and while the menu is open.
+- Reworked opponent identity rows so the class-colored name stays left-aligned while full race and con-colored enemy level stay right-aligned; removed the `Lv` prefix and race abbreviations.
+- Reflowed observed buff icons left-to-right from the top-left in a five-column grid so five icons fit each row.
+
+## 0.21.118-beta
+
+- Fixed the ENEMY BUFFS runtime error caused by the selector label formatter being scoped inside the detail-window constructor instead of the shared refresh path.
+- Reworked the multi-opponent buff header with a wider card/selector, more breathing room between the title, selector, and icons, and compact class-colored `Name Level Race` rows (for example `Mol 60 Gnome` / `Dendreavers 39 NElf`).
+- Buff viewing now auto-selects the primary opponent when they have retained buffs; otherwise it prefers a buffed killing-blow/dead opponent, then any opponent with observed buffs, so useful aura data is shown immediately.
+- Preserved manual opponent selection after the detail pane opens, including intentionally selecting an opponent with no observed buffs.
+
+## 0.21.117-beta
+
+- Rebuilt the Encounter header hierarchy so NvN is the largest line and the remaining synopsis is shown once without duplicated kill/result text.
+- Renamed the aura card to ENEMY BUFFS, switching to ENEMY BUFFS REMOVED when the selected opponent died while tracked buffs were present.
+- Replaced the custom BUFFS dropdown outline with Blizzard's thin slider-border asset and strengthened the native arrow hover/open highlight.
+- Expanded the opponent selector to show class-colored names plus race and level, with race backfilled from GetPlayerInfoByGUID when available.
+- Replaced the broken OPPONENTS up/down glyphs with the native History-style scrollbar track and thumb for 5+ opponents.
+
+## 0.21.116-beta
+
+- Enlarged opponent buff icons so four columns use the BUFFS card width, centered with equal left/right padding, and let the icon art extend fully beneath the border.
+- Replaced the compact BUFFS selector's tiled tooltip edge with a uniform bronze rule border and made the Blizzard arrow highlight while hovered or while its menu is open.
+- Enlarged the ENCOUNTER text treatment when space permits and promoted NvN/headcount text to Rivals gold for stronger hierarchy.
+- Renamed Summary's OPPONENT RECORDS section to OPPONENTS.
+- Simplified World PvP history-card result lines to preserve the encounter synopsis first and NvN second, leaving lower-priority stats to the clicked Summary instead of ellipsizing.
+
+## 0.21.115-beta
+
+- Restyled opponent buff icons with slim tooltip borders, full interior icon fill, and mouseover sweeps that finish once started.
+- Replaced the BUFFS selector text glyph/global dropdown with a Blizzard-arrow compact selector and a perfectly aligned Rivals-owned menu using matching tooltip borders.
+- Renamed Bubble-Hearth Escape to Bubble Hearthed throughout World PvP encounter presentation.
+- Long-duration consumable buffs now use their source item tooltip in the buff viewer when Rivals can resolve the item.
+
+## 0.21.114-beta
+
+- Slimmed the multi-opponent BUFFS selector vertically while preserving its existing width.
+- Reworked Encounter header copy into cleaner classification, outcome, result/duration, and headcount lines.
+- Added slim bronze borders and a restrained hover sheen to opponent buff icons.
+- Added Paladin Divine Shield -> Hearthstone detection and a dedicated Bubble-Hearth Escape outcome, including retroactive classification when an older encounter retained the required combat-log evidence.
+
+## 0.21.113-beta
+
+- Added primary-opponent relevance scoring for World PvP encounters. Kills/killing blows and sustained interaction now outrank incidental one-off AoE contact, so the encounter is named/defaulted to the opponent who actually defined the fight.
+- Added mixed-level encounter presentation for fights containing both low-level and at-level/near-level enemies. Secondary lowbies remain recorded without hijacking the encounter identity.
+- Added a meaningful-engagement display filter so a one-off incidental hit can remain encounter context without automatically inflating the displayed PvP headcount; details can show forms such as `1 vs 1 • 2 encountered`.
+- Flipped the encounter header card back to LOCATION first with larger white location text. The LOCATION block takes only the height it needs, and ENCOUNTER dynamically consumes the remaining card space.
+- Reworked ENCOUNTER details into a wrapped, adaptive-font block so mixed-level/type/outcome/headcount descriptions shrink as needed instead of truncating or clipping.
+- Multi-opponent buff viewing now defaults to the primary opponent rather than alphabetical encounter order.
+
+## 0.21.112-beta
+
+- Reworked the World PvP encounter header: survival/death duration is condensed into the encounter result line, leaving the lower half of the Encounter card for Location.
+- Added a BUFFS header to the opponent-aura card and moved the multi-opponent selector into that header row.
+- Buff icons now form a right-to-left four-column grid beneath the header, dynamically sizing to keep the complete observed buff set inside the fixed-height card.
+- Kept the BUFFS card fixed to the same top/bottom geometry as the Encounter card.
+
+## 0.21.111-beta
+
+- Fixed the standalone Duels/WPvP CharacterFrame tab briefly anchoring over Honor on the first Character pane open after `/reload`. The initial layout now falls back to the highest-index visible native tab when Blizzard tab coordinates are not ready, then rechecks the anchor on the next frame.
+
+## 0.21.110-beta
+
+- Reworked the World PvP encounter-detail header: battle survival and duration now share one compact result line, while Location moved into the bottom of the Encounter card with automatic font reduction for unusually long zone/subzone names.
+- Replaced the redundant top-right Opponents list with an enemy-buff viewer. Buff icons fill from the top-right toward the left and wrap downward, and each icon exposes its normal spell tooltip on mouseover.
+- Multi-enemy encounters now show a centered Blizzard-style opponent dropdown above the buff viewer; single-enemy encounters use the full buff-card height with no selector.
+- Expanded enemy aura capture to retain every helpful buff Rivals can observe, including class/self buffs, blessings, protections, world buffs, elixirs, flasks, and similar long-lived effects.
+- Kept short-duration consumable effects such as Free Action Potion and Limited Invulnerability Potion out of the buff viewer and in Items & Abilities; long-lived buff snapshots are no longer duplicated there.
+
+## 0.21.109-beta
+
+- Automatic Duel screenshots now fire only when the local player wins the duel.
+- Losses, retreats where the local player loses, cancellations, unresolved duels, and stray result messages do not produce screenshots.
+- Kept the result-message timing anchor and 0.20-second render delay so the victory message is visible in win captures.
+
+## 0.21.108-beta
+
+- Moved automatic Duel screenshots from `DUEL_FINISHED` to the localized duel-result system message, so the capture is anchored to the actual win/loss feedback shown by the client.
+- Added a 0.20-second render delay after the duel result message so the “has defeated ... in a duel” text is visible in the screenshot.
+- Kept cancelled/unresolved duels from producing screenshots and retained the existing screenshot toggle behavior.
+
+## 0.21.107-beta
+
+- Delayed automatic World PvP screenshots by 0.20 seconds after the lethal damage event so the Killing Blow / honorable-kill floating combat text has time to animate into the captured frame.
+- Kept the lethal combat-log event as the timing anchor and retained PARTY_KILL / UNIT_DIED as deduplicated fallbacks when no lethal signal is available.
+
+## 0.21.106-beta
+
+- Moved automatic World PvP screenshots to the lethal damage combat-log event when an overkill/instakill signal is available, so capture is requested at the final floating-combat-text hit rather than waiting for PARTY_KILL / UNIT_DIED.
+- Kept PARTY_KILL / UNIT_DIED as deduplicated fallbacks for deaths that do not expose an earlier lethal-damage signal.
+
+## 0.21.105-beta
+
+- Removed the redundant screenshot folder/filename note from the automatic screenshot checkbox tooltips.
+- Restored the Rivals-only 2px close-button alignment so the red X sits correctly in the custom CharacterFrame chrome socket, while restoring Blizzard's original anchor whenever Rivals closes.
+- Kept the combat-taint-safe independent Rivals tab architecture unchanged.
+
+## 0.21.104-beta
+
+- Replaced the Duel and World PvP screenshot toggle buttons in Manage with native-style checkboxes whose checked state is read directly from the saved settings.
+- Removed the World PvP Tracking On/Off controls from Manage. Open-world PvP tracking is now always enabled, including for profiles that had previously saved it as disabled.
+- Tightened the Manage layout after removing the obsolete tracking section.
+
+## 0.21.103-beta
+
+- Added independent Manage toggles for automatic Duel and World PvP screenshots.
+- Duel screenshots fire when an active duel finishes; cancelled duel requests do not capture.
+- World PvP screenshots fire once per tracked enemy death and deduplicate overlapping PARTY_KILL / UNIT_DIED signals.
+- Screenshots use Blizzard's Screenshot API; the game controls the output folder and filename.
+
+## 0.21.102-beta
+
+- World PvP encounter details now reset to **Summary** after the detail pane is closed.
+- The selected detail tab is still preserved when moving directly from one open encounter to another.
+
+## 0.21.101-beta
+
+- Fixed the native CharacterFrame tab remaining visually selected when the isolated Duels/WPvP Rivals tab is opened during combat. Rivals now applies the same visual-only native-tab deselection in combat that it already used out of combat.
+- The combat path still leaves `CharacterFrame.selectedTab` untouched and does not call `PanelTemplates_SetTab()`, create `CharacterFrameTab6`, change `CharacterFrame.numTabs`, or register `RivalsCharacterPanel` in `CHARACTERFRAME_SUBFRAMES`.
+
+## 0.21.100-beta
+
+- Matched Blizzard's native CharacterFrame tab-label motion: the Rivals-owned Duels/WPvP label now rises 2px when selected and returns to the normal baseline when deselected.
+- Kept the full-width overlay label and all combat-taint isolation unchanged.
+
+## 0.21.99-beta
+
+- The isolated Duels/WPvP CharacterFrame tab can now be opened while in combat when the Blizzard Character pane is already visible. Rivals no longer rejects the attached tab click merely because `InCombatLockdown()` is active; it still refuses to invoke Blizzard's protected CharacterFrame-opening path from addon code during combat.
+- Moved the Rivals-owned Duels/WPvP tab label 2px upward to match the native Character/Reputation/Skills/Honor text baseline.
+- Preserved the combat-taint isolation: no `CharacterFrameTab6`, no `CharacterFrame.numTabs` changes, and no `CHARACTERFRAME_SUBFRAMES` registration.
+
+## 0.21.98-beta
+
+- Fixed the independent Duels/WPvP CharacterFrame tab starting in Blizzard's selected/funnel visual state after a fresh `/reload`.
+- The Rivals tab now explicitly initializes and re-shows as deselected unless the Rivals panel is actually active.
+- Re-centered the Rivals-owned Duels/WPvP overlay label vertically while preserving the full readable text in the selected funnel state.
+- Keeps the combat-taint isolation intact: no `CharacterFrameTab6`, no `CharacterFrame.numTabs` changes, and no `CHARACTERFRAME_SUBFRAMES` registration.
+
+## 0.21.97-beta
+
+- Fixed the isolated CharacterFrame launcher label still collapsing to `Du...` / `W...` when selected. The Rivals tab now keeps Blizzard's native selected-tab/funnel artwork but uses an addon-owned overlay label that is not constrained by the template's narrow selected-state text region.
+- Kept the existing 64px tab geometry and native-row alignment so the readability fix does not reintroduce the previous right-edge protrusion.
+- Preserved the combat-taint isolation: Rivals still never creates `CharacterFrameTab6`, changes `CharacterFrame.numTabs`, or joins `CHARACTERFRAME_SUBFRAMES`.
+
+## 0.21.96-beta
+
+- Fixed the isolated Rivals bottom tab still protruding past the CharacterFrame edge. It now follows Blizzard's own bottom-tab geometry by anchoring after the rightmost visible native Character tab with the standard 15px overlap instead of anchoring from the frame's right edge.
+- Increased the Rivals tab's fixed absolute width from 56px to 64px so `Duels` and `WPvP` remain readable when the button is selected/disabled instead of collapsing to `...`.
+- Preserved the combat-taint isolation: the Rivals button remains addon-owned and never becomes `CharacterFrameTab6`, changes `CharacterFrame.numTabs`, or joins `CHARACTERFRAME_SUBFRAMES`.
+
+## 0.21.95-beta
+
+- Fixed Blizzard Character/Reputation/etc. tabs losing mouseover/click behavior while the isolated Rivals pane was open. Rivals no longer places a cover button over the native selected tab; it visually deselects/re-enables that existing Blizzard tab while leaving `CharacterFrame.selectedTab` untouched.
+- Fixed the Rivals bottom tab extending beyond the CharacterFrame and becoming cropped after switching Duels/World PvP overview modes. The tab now uses a compact fixed 56px width in a right-edge slot inset from the frame chrome, with its vertical baseline matched to the native tabs.
+- Preserved the combat-taint fix: Rivals still does not create `CharacterFrameTab6`, modify `CharacterFrame.numTabs`, or join `CHARACTERFRAME_SUBFRAMES`.
+
+## 0.21.94-beta
+
+- Fixed the isolated Rivals CharacterFrame tab appearing oversized and extending past the right edge; its width is now explicitly 62px and it anchors after the last visible Blizzard tab instead of a hidden `CharacterFrameTab5`.
+- Fixed the native Blizzard tab and Rivals tab both appearing selected at once. Rivals now masks only the visual selected state with its own mouse-transparent tab copy while leaving Blizzard's real `CharacterFrame.selectedTab` and native tabs untouched.
+- Preserved the 0.21.93 combat-taint isolation: Rivals still does not create `CharacterFrameTab6`, change `CharacterFrame.numTabs`, or join `CHARACTERFRAME_SUBFRAMES`.
+
+## 0.21.93-beta
+
+- Fixed combat taint that could prevent the Blizzard Character pane from opening with `C` while in combat.
+- Rivals no longer creates `CharacterFrameTab6`, changes `CharacterFrame.numTabs`, or appends `RivalsCharacterPanel` to `CHARACTERFRAME_SUBFRAMES`; the Rivals tab is now visually attached but managed independently.
+- Removed Rivals' native CharacterFrame tab-resizing and portrait/close-button anchor rewrites, and moved Rivals chrome onto the Rivals-owned panel to reduce Blizzard-frame taint surface.
+- `/rivals` profile-opening commands now use the isolated Rivals pane opener and refuse only the Rivals pane during combat, leaving the normal Blizzard Character pane available.
+
+## 0.21.92-beta
+
+- Fixed Encounter Details combat-log crashes when a SWING event stored a boolean in the CLEU payload slot normally used for spell names.
+- World PvP logs now only persist spell ID/name metadata for actual SPELL_* and RANGE_* events, preventing swing damage/miss payloads from being misread as spells.
+- Hardened combat-log rendering and class inference so older affected encounters remain viewable and malformed non-string spell names are ignored safely.
+
+## 0.21.91-beta
+
+- Replaced the previous promo rotation with fifteen new PvP-focused messages centered on server villains, rival scores, post-fight proof, rogue grudges, outnumbered victories, cooldown usage, repeat opponents, matchup history, Duel Rating, and long-term PvP records.
+- Added the new cluster-focused opener and updated the 1vN promo to emphasize Rivals' victory fanfare and outnumbered-record tracking.
+- Kept the user-provided promo wording intact and verified every message remains within WoW chat-length limits with the CurseForge link appended.
+
+## 0.21.90-beta
+
+- Replaced the previous promo rotation with eleven shorter, hook-first PvP promos built around revenge, rivalry history, proof, real 1vN recognition, matchup grudges, post-fight analysis, and duel records.
+- Added an aggressive "Somebody's been camping you? Start keeping score." variant to the rotation.
+- Kept the copy explicit about Rivals being a Classic Era PvP addon where the message could otherwise read like ordinary chat.
+- Verified every promo remains within WoW chat-length limits with the CurseForge link appended.
+
+## 0.21.89-beta
+
+- Reworked all eight in-game promos around Rivals' strongest PvP hooks: keeping receipts, real solo 1vN detection, rival histories, encounter evidence, outnumbered records, and Duel Rating.
+- Clarified in the promo copy that Rivals is a Classic Era PvP addon where the name alone could be ambiguous in chat.
+- Kept every rotating promo within WoW chat-length limits when the CurseForge link is appended.
+
 ## 0.21.88-beta
 
 - Distinguished Encounter header opponent tooltips from Opponent Records: header rows now focus on the current fight, while Opponent Records focus on lifetime World PvP history.

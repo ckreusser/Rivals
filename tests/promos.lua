@@ -7,7 +7,7 @@ IsShiftKeyDown = function() return shift end
 GetChannelName = function(id) assert(id == 4); return channel end
 SendChatMessage = function(text, kind, language, target)
     assert(kind == "CHANNEL" and language == nil and target == 4)
-    assert(#text <= 255 and not text:find("cooldown"))
+    assert(#text <= 255)
     sends[#sends + 1] = text
 end
 local click = RivalsCharacterPanel.logoFrame.scripts.OnMouseUp
@@ -22,13 +22,13 @@ assert(#sends == 0 and RivalsDB.nextPromo == nil)
 channel = 4
 for i = 1, 8 do
     click(nil, "LeftButton")
-    assert(sends[i] == DP.Promos.messages[(i - 1) % 7 + 1] .. " " .. DP.Promos.url)
+    assert(sends[i] == DP.Promos.messages[(i - 1) % 8 + 1] .. " " .. DP.Promos.url)
 end
-assert(RivalsDB.nextPromo == 2)
+assert(RivalsDB.nextPromo == 1)
 SendChatMessage = function() error("unavailable") end
-click(nil, "LeftButton"); assert(RivalsDB.nextPromo == 2)
+click(nil, "LeftButton"); assert(RivalsDB.nextPromo == 1)
 SendChatMessage = function() return false end
-click(nil, "LeftButton"); assert(RivalsDB.nextPromo == 2)
+click(nil, "LeftButton"); assert(RivalsDB.nextPromo == 1)
 RivalsDB, SendChatMessage, GetChannelName = savedDB, savedSend, savedChannel
 IsControlKeyDown, IsShiftKeyDown = savedControl, savedShift
-print("PASS: logo modifier gating, exact /4 routing, seven approved promos, wrapping, saved cursor, message lengths and send failures")
+print("PASS: logo modifier gating, exact /4 routing, eight approved promos, wrapping, saved cursor, message lengths and send failures")

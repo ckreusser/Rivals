@@ -22,6 +22,12 @@ CombatLogGetCurrentEventInfo = function() return unpack(current) end
 DP.HasActiveDuel = function() return false end
 W.ShowResultToast = function() end
 
+-- World PvP tracking is no longer user-toggleable. Legacy profiles that had
+-- the old Manage toggle saved Off must be migrated back On at initialization.
+local legacyDisabledDb = {worldPvPEnabled = false}
+W.Initialize({}, legacyDisabledDb, {})
+assert(legacyDisabledDb.worldPvPEnabled == true and W.Enabled())
+
 local observer, db = {}, {}
 W.Initialize(observer, db, {})
 local player = COMBATLOG_OBJECT_TYPE_PLAYER
@@ -79,7 +85,7 @@ assert(passive and passive.enemyCount == 2 and passive.enemyDeaths == 2)
 assert(passive.peakContestingEnemies == 0 and passive.contestingEnemyCount == 0)
 assert(passive.resultKey == "kills" and passive.resultLabel == "2 KILLS")
 assert(W.EncounterHeadcount(passive) == "2 enemies")
-assert(W.SurvivalText(passive) == "no death")
+assert(W.SurvivalText(passive) == "survived")
 assert(W.Summary().outnumberedVictories == 0 and W.Summary().soloWins == 0)
 
 -- Max-level downward kills are labeled GANK; 5+ levels lower are LOWBIE GANK.
@@ -191,8 +197,10 @@ W.Initialize(observer9, db9, {})
 targetGUID, targetLevel = "Enemy-1", 60
 UnitBuff = function(unit, index)
     if unit ~= "target" then return nil end
-    if index == 1 then return "Rallying Cry of the Dragonslayer", nil, nil, nil, 7200, now + 7200, nil, nil, nil, 22888 end
-    if index == 2 then return "Elixir of the Mongoose", nil, nil, nil, 3600, now + 3600, nil, nil, nil, 17538 end
+    if index == 1 then return "Rallying Cry of the Dragonslayer", nil, "rally-icon", nil, 7200, now + 7200, nil, nil, nil, 22888 end
+    if index == 2 then return "Elixir of the Mongoose", nil, "mongoose-icon", nil, 3600, now + 3600, nil, nil, nil, 17538 end
+    if index == 3 then return "Blessing of Kings", nil, "kings-icon", nil, 300, now + 300, nil, nil, nil, 20217 end
+    if index == 4 then return "Free Action Potion", nil, "fap-icon", nil, 30, now + 30, nil, nil, nil, 6615 end
     return nil
 end
 fire{now, "SPELL_DAMAGE", false, "Player-1", "Alice", player + friendly, 0,
@@ -202,6 +210,90 @@ local buffed = observer9.worldPvP.encounters[1] and observer9.worldPvP.encounter
 assert(buffed and buffed.detectedBuffs and buffed.detectedBuffs.scanned)
 assert(buffed.detectedBuffs.world["22888"] and buffed.detectedBuffs.world["22888"].activeAtEngagement)
 assert(buffed.detectedBuffs.consumables["17538"] and buffed.detectedBuffs.consumables["17538"].activeAtEngagement)
+assert(buffed.detectedBuffs.all["22888"] and buffed.detectedBuffs.all["22888"].icon == "rally-icon")
+assert(buffed.detectedBuffs.all["17538"] and buffed.detectedBuffs.all["17538"].duration == 3600)
+assert(buffed.detectedBuffs.all["20217"] and buffed.detectedBuffs.all["20217"].name == "Blessing of Kings")
+assert(buffed.detectedBuffs.all["6615"] and buffed.detectedBuffs.all["6615"].duration == 30)
+local visibleBuffs = W.GetOpponentBuffsForDetail(buffed)
+local visibleNames, visibleByName = {}, {}
+for _, aura in ipairs(visibleBuffs) do visibleNames[aura.name] = true; visibleByName[aura.name] = aura end
+assert(visibleNames["Rallying Cry of the Dragonslayer"] and visibleNames["Elixir of the Mongoose"] and visibleNames["Blessing of Kings"])
+assert(visibleByName["Elixir of the Mongoose"].itemID == 13452)
+assert(not visibleNames["Free Action Potion"])
 UnitBuff = nil
 
-print("PASS: World PvP pressure, combat-boundary splitting, kill streaks, zone labels, ganks, notable-only toast policy, and enemy buff snapshots")
+-- A Paladin who successfully uses Divine Shield and then Hearthstone inside
+-- the bubble window is a specific escape outcome, not a generic disengage.
+local observerBH, dbBH = {}, {}
+W.Initialize(observerBH, dbBH, {})
+fire{now, "SPELL_DAMAGE", false, "Player-1", "Alice", player + friendly, 0,
+    "Enemy-Paladin", "Golden", player + hostile, 0, 123, "Mortal Strike", 1, 200, -1}
+fire{now, "SPELL_AURA_APPLIED", false, "Enemy-Paladin", "Golden", player + hostile, 0,
+    "Enemy-Paladin", "Golden", player + hostile, 0, 642, "Divine Shield", 2, "BUFF"}
+fire{now, "SPELL_CAST_SUCCESS", false, "Enemy-Paladin", "Golden", player + hostile, 0,
+    "Enemy-Paladin", "Golden", player + hostile, 0, 8690, "Hearthstone", 1}
+W.Finish("combat-ended")
+local bubbled = observerBH.worldPvP.encounters[1]
+assert(bubbled and bubbled.resultKey == "bubble_hearth" and bubbled.resultLabel == "BUBBLE HEARTHED")
+assert(bubbled.bubbleHearthEnemyGUID == "Enemy-Paladin")
+assert(W.BubbleHearthEnemy(bubbled) and W.BubbleHearthEnemy(bubbled).name == "Golden")
+assert(W.SurvivalText(bubbled) == "survived")
+
+-- Older records can be reclassified from their retained combat log even if the
+-- live session flag did not exist when they were recorded.
+bubbled.bubbleHearthEnemyGUID = nil
+for _, enemy in ipairs(bubbled.enemies or {}) do enemy.bubbleHearthed = nil end
+bubbled.resultKey, bubbled.resultLabel, bubbled.outcomeModelVersion = "disengaged", "DISENGAGED", 3
+W.Initialize(observerBH, dbBH, {})
+assert(bubbled.resultKey == "bubble_hearth" and bubbled.bubbleHearthEnemyGUID == "Enemy-Paladin")
+
+-- Automatic screenshots should use the lethal damage event as the timing
+-- anchor, but wait briefly for the Killing Blow / HK combat text to animate in.
+-- PARTY_KILL / UNIT_DIED remain fallback-only and must not race the pending timer.
+local screenshotCalls, screenshotTimers = {}, {}
+DP.TakeRivalsScreenshot = function(kind, subject)
+    screenshotCalls[#screenshotCalls + 1] = {kind = kind, subject = subject, event = current and current[2]}
+    return true
+end
+local oldCTimer = C_Timer
+C_Timer = {
+    After = function(delay, callback)
+        screenshotTimers[#screenshotTimers + 1] = {delay = delay, callback = callback, event = current and current[2]}
+    end,
+}
+local observer10, db10 = {}, {}
+W.Initialize(observer10, db10, {})
+targetGUID, targetLevel = "Enemy-1", 60
+fire{now, "SPELL_DAMAGE", false, "Player-1", "Alice", player + friendly, 0,
+    "Enemy-1", "Knife", player + hostile, 0, 123, "Mortal Strike", 1, 300, -1}
+assert(#screenshotCalls == 0 and #screenshotTimers == 0)
+fire{now, "SPELL_DAMAGE", false, "Player-1", "Alice", player + friendly, 0,
+    "Enemy-1", "Knife", player + hostile, 0, 123, "Mortal Strike", 1, 500, 42}
+assert(#screenshotCalls == 0 and #screenshotTimers == 1)
+assert(screenshotTimers[1].delay == 0.20 and screenshotTimers[1].event == "SPELL_DAMAGE")
+fire{now, "PARTY_KILL", false, "Player-1", "Alice", player + friendly, 0,
+    "Enemy-1", "Knife", player + hostile, 0}
+fire{now, "UNIT_DIED", false, nil, nil, 0, 0, "Enemy-1", "Knife", player + hostile, 0}
+assert(#screenshotCalls == 0)
+screenshotTimers[1].callback()
+assert(#screenshotCalls == 1 and screenshotCalls[1].subject == "Knife")
+
+-- If no lethal overkill signal is available, the later death event still
+-- captures immediately instead of waiting for a timer that was never armed.
+targetGUID = "Enemy-2"
+fire{now, "SPELL_DAMAGE", false, "Player-1", "Alice", player + friendly, 0,
+    "Enemy-2", "Mage", player + hostile, 0, 123, "Mortal Strike", 1, 200, -1}
+fire{now, "UNIT_DIED", false, nil, nil, 0, 0, "Enemy-2", "Mage", player + hostile, 0}
+assert(#screenshotCalls == 2 and screenshotCalls[2].event == "UNIT_DIED")
+C_Timer = oldCTimer
+DP.TakeRivalsScreenshot = nil
+
+-- History rows reserve compact space for the synopsis and NvN before lower-priority stats.
+local historyLine = W.HistoryResultLine({friendlyCount = 1, enemyCount = 2, enemyDeaths = 1,
+    resultKey = "outnumbered_escape", resultLabel = "OUTNUMBERED ESCAPE",
+    enemies = {{name = "Mol-Realm", class = "MAGE", level = 60, died = true},
+        {name = "Other-Realm", class = "ROGUE", level = 60}}})
+assert(historyLine:find("OUTNUMBERED ESCAPE", 1, true) and historyLine:find("1 vs 2", 1, true))
+assert(not historyLine:find("kill", 1, true) and not historyLine:find("...", 1, true))
+
+print("PASS: World PvP pressure, combat-boundary splitting, kill streaks, zone labels, ganks, bubble-hearth escapes, notable-only toast policy, complete enemy buff snapshots, and delayed lethal-hit screenshots")

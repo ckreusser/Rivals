@@ -2,7 +2,7 @@
 
 **Make every fight part of your story.** Rivals is a World of Warcraft Classic Era addon that adds a personal duel rating, duel history, open-world PvP encounters, and opponent insights to the Character and Inspect windows.
 
-**Current version:** 0.21.88-beta · **Client:** Classic Era (Interface 11509)
+**Current version:** 0.21.181-beta · **Client:** Classic Era (Interface 11509)
 
 ## Features
 
