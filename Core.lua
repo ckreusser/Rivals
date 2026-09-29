@@ -1,5 +1,5 @@
 local addonName, DP = ...
-local VERSION, TRACE_LIMIT, ACTIVITY_LIMIT = "1.0.0", 1000, 200
+local VERSION, TRACE_LIMIT, ACTIVITY_LIMIT = "1.0.101", 1000, 200
 local frame = CreateFrame("Frame")
 local db, observer, tracker, parsers, ready, rating
 local seasons, selectedPeriod = {}, nil
@@ -569,7 +569,7 @@ end
 
 local function Initialize()
     if WOW_PROJECT_ID ~= WOW_PROJECT_CLASSIC then
-        Say("This prototype supports Classic Era only.")
+        Say("Rivals supports Classic Era only.")
         return
     end
     if RivalsDB and RivalsDB.schemaVersion ~= 1 then
@@ -741,7 +741,7 @@ local function Initialize()
     DP.InstallCharacterTab(DisplayRating, DisplayRecords)
     for _, event in ipairs({"DUEL_REQUESTED", "DUEL_FINISHED", "DUEL_INBOUNDS", "DUEL_OUTOFBOUNDS",
         "DUEL_TO_THE_DEATH_REQUESTED", "CHAT_MSG_SYSTEM", "UI_INFO_MESSAGE", "UI_ERROR_MESSAGE",
-        "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED", "PLAYER_TARGET_CHANGED", "UPDATE_MOUSEOVER_UNIT", "NAME_PLATE_UNIT_ADDED", "UNIT_AURA", "PLAYER_ENTERING_WORLD",
+        "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED", "PLAYER_TARGET_CHANGED", "UPDATE_MOUSEOVER_UNIT", "NAME_PLATE_UNIT_ADDED", "UNIT_AURA", "UNIT_LEVEL", "GROUP_ROSTER_UPDATE", "PLAYER_ENTERING_WORLD",
         "PLAYER_DEAD", "PLAYER_LOGOUT", "START_TIMER", "MIRROR_TIMER_START", "ADDON_LOADED", "CHAT_MSG_ADDON",
         "ADDON_ACTION_BLOCKED", "ADDON_ACTION_FORBIDDEN", "COMBAT_LOG_EVENT_UNFILTERED",
         "BAG_UPDATE_DELAYED", "PLAYER_EQUIPMENT_CHANGED", "GET_ITEM_INFO_RECEIVED", "INSPECT_READY",

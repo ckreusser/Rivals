@@ -8,17 +8,95 @@ DP.WorldPvP = W
 -- let unrelated players arriving during the old 60-second inactivity window
 -- accumulate into one giant encounter. The 60-second timer remains only as a
 -- hard safety net for cases where combat-state events are missed.
-local COMBAT_END_GRACE = 10
-local INACTIVITY_TIMEOUT = 60
-local ALL_ENEMIES_DEAD_GRACE = 6
-local ENEMY_PRESSURE_WINDOW = 12
-local MAX_ENCOUNTERS = 250
-local MAX_WORLD_LOG = 160
-local WPVP_SCREENSHOT_KILL_DELAY = 0.20
-local BAND = bit and bit.band or bit32 and bit32.band
-local DIVINE_SHIELD_SPELLS = {[642] = true, [1020] = true}
-local HEARTHSTONE_SPELLS = {[8690] = true}
-local BUBBLE_HEARTH_WINDOW = 20
+-- Keep module-wide constants in one table instead of one top-level local per
+-- value. WorldPvP.lua is large enough that separate locals can hit Classic's
+-- 200-local-variable limit for the file chunk even though the individual
+-- functions are small.
+local CFG = {
+    COMBAT_END_GRACE = 10,
+    INACTIVITY_TIMEOUT = 60,
+    ALL_ENEMIES_DEAD_GRACE = 6,
+    ENEMY_PRESSURE_WINDOW = 12,
+    MAX_ENCOUNTERS = 250,
+    MAX_WORLD_LOG = 160,
+    WPVP_SCREENSHOT_KILL_DELAY = 0.20,
+    BAND = bit and bit.band or bit32 and bit32.band,
+    DIVINE_SHIELD_SPELLS = {[642] = true, [1020] = true},
+    HEARTHSTONE_SPELLS = {[8690] = true},
+    BUBBLE_HEARTH_WINDOW = 20,
+    -- Gnomish Mind Control Cap can temporarily charm a hostile player and make
+    -- PLAYER_REGEN_ENABLED fire in the middle of the same fight. Keep that
+    -- encounter alive through the control/backfire window instead of splitting it.
+    MIND_CONTROL_GRACE = 45,
+    -- Full-duration hard immunity can also create a legitimate combat drop while
+    -- the fight is still plainly in progress. Track the aura itself rather than
+    -- globally lengthening every encounter boundary. Ice Block is 10 seconds;
+    -- the small ceiling/after-fade buffers cover CLEU/regen ordering jitter.
+    COMBAT_SUSPENSION_MAX = 13,
+    COMBAT_SUSPENSION_POST_GRACE = 3,
+}
+
+function W.IsMindControlCapSpell(spellID, spellName)
+    local id = tonumber(spellID)
+    if id == 13180 or id == 13181 then return true end
+    return type(spellName) == "string" and spellName == "Gnomish Mind Control Cap"
+end
+
+function W.MindControlUseInfo(entry, participants)
+    if not entry or not W.IsMindControlCapSpell(entry.spellID, entry.spellName) then return nil end
+    local event = tostring(entry.event or "")
+    if event ~= "SPELL_CAST_SUCCESS" and event ~= "SPELL_AURA_APPLIED" and event ~= "SPELL_AURA_REFRESH" then return nil end
+    participants = participants or {}
+    if entry.itemUserGUID then
+        return entry.itemUserGUID, entry.itemUserName, entry.mindControlBackfire and true or false
+    end
+    if entry.sourceGUID and participants[entry.sourceGUID] then
+        return entry.sourceGUID, entry.sourceName, false
+    end
+    if entry.destGUID and participants[entry.destGUID] then
+        return entry.destGUID, entry.destName, true
+    end
+    return nil
+end
+
+-- Some defensive states can drop both players out of combat without ending the
+-- actual PvP engagement. Keep this deliberately narrow: these are encounter
+-- suspension mechanics, not a reason to make the normal combat-end grace longer.
+function W.IsCombatSuspensionSpell(spellID, spellName)
+    return spellName == "Ice Block"
+end
+
+function W.UpdateCombatSuspension(session, info, spellID, spellName)
+    if not session or not info or not W.IsCombatSuspensionSpell(spellID, spellName) then return end
+    local event = tostring(info[2] or "")
+    local guid = info[8] or info[4]
+    if not guid or not session.enemies or not session.enemies[guid] then return end
+    local now = GetTime()
+    session.combatSuspensions = session.combatSuspensions or {}
+    if event == "SPELL_CAST_SUCCESS" or event == "SPELL_AURA_APPLIED" or event == "SPELL_AURA_REFRESH" then
+        session.combatSuspensions[guid] = math.max(tonumber(session.combatSuspensions[guid]) or 0, now + CFG.COMBAT_SUSPENSION_MAX)
+        session.lastActivity = now
+    elseif event == "SPELL_AURA_REMOVED" then
+        session.combatSuspensions[guid] = nil
+        session.combatSuspensionGraceUntil = math.max(tonumber(session.combatSuspensionGraceUntil) or 0, now + CFG.COMBAT_SUSPENSION_POST_GRACE)
+        session.lastActivity = now
+    end
+end
+
+function W.CombatSuspensionActive(session, now)
+    if not session then return false end
+    now = now or GetTime()
+    local active = false
+    for guid, expiresAt in pairs(session.combatSuspensions or {}) do
+        local enemy = session.enemies and session.enemies[guid]
+        if enemy and not enemy.died and now < (tonumber(expiresAt) or 0) then
+            active = true
+        else
+            session.combatSuspensions[guid] = nil
+        end
+    end
+    return active or now < (tonumber(session.combatSuspensionGraceUntil) or 0)
+end
 
 
 -- Buff intelligence ----------------------------------------------------------
@@ -243,7 +321,7 @@ local function ScanVisibleEnemyBuffs(session, force)
     local now = GetTime()
     if not force and session.lastBuffScanAt and now - session.lastBuffScanAt < .35 then return end
     session.lastBuffScanAt = now
-    for _, unit in ipairs({"target", "mouseover", "focus", "targettarget"}) do ScanEnemyUnitBuffs(session, unit) end
+    for _, unit in ipairs({"player", "target", "mouseover", "focus", "targettarget", "mouseovertarget", "focustarget"}) do ScanEnemyUnitBuffs(session, unit) end
     if C_NamePlate and C_NamePlate.GetNamePlates then
         local ok, plates = pcall(C_NamePlate.GetNamePlates)
         if ok and type(plates) == "table" then
@@ -312,6 +390,17 @@ local function IsShortTermConsumableAura(entry)
     return not IsLongDurationConsumableName(known.name or name)
 end
 
+local function IsIgnoredEnemyBuff(entry)
+    if not entry then return false end
+    local spellID = tonumber(entry.spellID)
+    local itemID = tonumber(entry.itemID)
+    local name = tostring(entry.name or "")
+    -- This aura only means the player has world buffs stored in a Chronoboon.
+    -- It is not a combat advantage to enumerate in ENEMY BUFFS and it is not
+    -- evidence of an in-encounter Chronoboon use.
+    return spellID == 349981 or itemID == 184938 or name == "Supercharged Chronoboon Displacer"
+end
+
 local function SortedOpponentBuffs(enemy)
     local result, seen = {}, {}
     local detected = enemy and enemy.detectedBuffs or nil
@@ -375,7 +464,7 @@ local function SortedOpponentBuffs(enemy)
 
     local function Add(entry)
         entry = Enriched(entry)
-        if not entry or IsShortTermConsumableAura(entry) then return end
+        if not entry or IsIgnoredEnemyBuff(entry) or IsShortTermConsumableAura(entry) then return end
         local key = tostring(entry.spellID or entry.name or "unknown")
         if seen[key] then return end
         seen[key] = true
@@ -425,7 +514,7 @@ W.GetOpponentBuffsForDetail = SortedOpponentBuffs
 
 local function HasFlag(flags, mask)
     if type(flags) ~= "number" or type(mask) ~= "number" then return false end
-    if BAND then return BAND(flags, mask) ~= 0 end
+    if CFG.BAND then return CFG.BAND(flags, mask) ~= 0 end
     -- Test/runtime fallback. WoW Classic provides bit.band, but keeping this
     -- tiny arithmetic path makes the tracker deterministic in stripped clients.
     local a, b = flags, mask
@@ -501,6 +590,16 @@ function W.VisibleUnitForGUID(guid)
     for _, unit in ipairs({"target", "mouseover", "focus", "targettarget"}) do
         if Match(unit) then return unit end
     end
+    -- Party/raid tokens work even when friendly nameplates are disabled or
+    -- UnitTokenFromGUID cannot resolve a group member on this Classic client.
+    for index = 1, 4 do
+        local unit = "party" .. index
+        if Match(unit) then return unit end
+    end
+    for index = 1, 40 do
+        local unit = "raid" .. index
+        if Match(unit) then return unit end
+    end
     if C_NamePlate and C_NamePlate.GetNamePlates then
         local ok, plates = pcall(C_NamePlate.GetNamePlates)
         if ok and type(plates) == "table" then
@@ -523,11 +622,29 @@ local function ResolvePlayerLevel(guid)
     return nil
 end
 
+function W.RefreshFriendlyLevels(session)
+    if not session then return end
+    for guid, friendly in pairs(session.friendlies or {}) do
+        if not tonumber(friendly.level) or tonumber(friendly.level) <= 0 then
+            local level = guid == session.playerGUID and tonumber(session.playerLevel) or nil
+            if not level or level <= 0 then level = ResolvePlayerLevel(friendly.guid or guid) end
+            if level and level > 0 then friendly.level = level end
+        end
+    end
+end
+
 W._portraitSessionID = W._portraitSessionID or (tostring(time and time() or 0) .. ":" .. tostring(GetTime and GetTime() or 0))
 
 function W.CaptureOpponentPortrait(identity, unit)
     if identity and identity.portraitFrozen then return false end
     if not identity or not identity.guid or not unit or not UnitGUID or UnitGUID(unit) ~= identity.guid then return false end
+    if DP.Portraits then
+        -- Clone the actual opponent first so generic body-pool warming cannot win
+        -- the race and commit a donor face for this encounter.
+        if DP.Portraits.RetainIdentityBody then DP.Portraits.RetainIdentityBody(identity, unit) end
+        if DP.Portraits.ObserveUnit then DP.Portraits.ObserveUnit(unit) end
+        DP.Portraits.Capture(identity, unit)
+    end
     local changed = false
     -- Try to retain the exact portrait texture produced by the client first.
     -- When the client exposes that render as a reusable file/string handle this
@@ -546,20 +663,17 @@ function W.CaptureOpponentPortrait(identity, unit)
         if tex then
             local ok = pcall(SetPortraitTexture, tex, unit)
             if ok then holder.captured = true; changed = true end
-            if ok and tex.GetTexture then
-                local snapshot = tex:GetTexture()
-                if type(snapshot) == "number" or (type(snapshot) == "string" and snapshot ~= "") then
-                    local isQuestion = type(snapshot) == "string" and string.lower(snapshot):find("inv_misc_questionmark", 1, true)
-                    if not isQuestion and type(snapshot) == "number" and GetFileIDFromPath then
-                        local qok, qid = pcall(GetFileIDFromPath, "Interface\\Icons\\INV_Misc_QuestionMark")
-                        isQuestion = qok and qid and snapshot == qid
-                    end
-                    if not isQuestion and not (type(snapshot) == "string" and snapshot:match("^RTPortrait")) then
-                        identity.portraitTexture = snapshot
-                        identity.portraitSessionID = W._portraitSessionID
-                        changed = true
-                    end
-                end
+            -- SetPortraitTexture writes into a client-owned render target.  On
+            -- Classic, Texture:GetTexture() may report either an RTPortrait handle
+            -- or a numeric value that is *not* a durable fileDataID. Persisting
+            -- that numeric value caused old portraits to reopen as unrelated item/
+            -- spell icons after the render target was recycled. Keep the live
+            -- Texture object in _portraitCaptureFrames for this UI session only;
+            -- never serialize its backing handle into the encounter record.
+            if identity.portraitTexture ~= nil or identity.portraitSessionID ~= nil then
+                identity.portraitTexture = nil
+                identity.portraitSessionID = nil
+                changed = true
             end
         end
     end
@@ -611,13 +725,54 @@ local function CountUnstarredEncounters(encounters)
     return n
 end
 
+-- Return only the captured value spent by enemy player participants. The
+-- encounter snapshot also contains the local player's consumables, so using
+-- snapshot.totalCopper would overstate the new lifetime enemy-spend stat.
+local function EnemyConsumableSpend(record)
+    local snapshot = record and record.consumableCost
+    if type(snapshot) ~= "table" then return 0, false, 0, 0 end
+
+    local enemyGUIDs, enemyNames = {}, {}
+    for _, enemy in ipairs(record.enemies or {}) do
+        if enemy.guid then enemyGUIDs[enemy.guid] = true end
+        local name = ShortName(enemy.name)
+        if name and name ~= "" then enemyNames[name:lower()] = true end
+    end
+
+    local total, pricedCount, unpricedCount = 0, 0, 0
+    for _, actor in ipairs(snapshot.actors or {}) do
+        local actorName = ShortName(actor.name)
+        local isEnemy = (actor.guid and enemyGUIDs[actor.guid]) or
+            (actorName and actorName ~= "" and enemyNames[actorName:lower()])
+        if isEnemy then
+            total = total + math.max(0, tonumber(actor.totalCopper) or 0)
+            pricedCount = pricedCount + math.max(0, tonumber(actor.pricedCount) or 0)
+            unpricedCount = unpricedCount + math.max(0, tonumber(actor.unpricedCount) or 0)
+        end
+    end
+    return total, unpricedCount > 0, pricedCount, unpricedCount
+end
+
+local function ArchiveEnemyConsumableSpend(store, record)
+    if not store or not record then return end
+    local copper, partial, pricedCount, unpricedCount = EnemyConsumableSpend(record)
+    store.enemyGoldArchivedCopper = math.max(0, tonumber(store.enemyGoldArchivedCopper) or 0) + copper
+    store.enemyGoldArchivedPricedCount = math.max(0, tonumber(store.enemyGoldArchivedPricedCount) or 0) + pricedCount
+    store.enemyGoldArchivedUnpricedCount = math.max(0, tonumber(store.enemyGoldArchivedUnpricedCount) or 0) + unpricedCount
+    if partial then store.enemyGoldArchivedPartial = true end
+end
+
 local function TrimEncounterStore(store)
     local encounters = store and store.encounters
     if not encounters then return end
-    while CountUnstarredEncounters(encounters) > MAX_ENCOUNTERS do
+    while CountUnstarredEncounters(encounters) > CFG.MAX_ENCOUNTERS do
         local removed = false
         for index, record in ipairs(encounters) do
             if not record.starred then
+                -- Preserve enemy consumable spend before the encounter itself
+                -- ages out. The Overview lifetime total therefore survives the
+                -- rolling 250 unstarred-record History cap.
+                ArchiveEnemyConsumableSpend(store, record)
                 table.remove(encounters, index)
                 removed = true
                 break
@@ -821,7 +976,7 @@ local function AddParticipant(session, bucketName, guid, name, flags)
         identity.raceFile = identity.raceFile or englishRace
         identity.sex = identity.sex or playerSex
     end
-    if not identity.level then identity.level = ResolvePlayerLevel(guid) end
+    if not tonumber(identity.level) or tonumber(identity.level) <= 0 then identity.level = ResolvePlayerLevel(guid) end
     if bucketName == "enemies" then
         local unit = W.VisibleUnitForGUID(guid)
         if unit then W.CaptureOpponentPortrait(identity, unit) end
@@ -852,7 +1007,7 @@ local function UpdateEnemyPressure(session, now)
     for _, enemy in pairs(session.enemies or {}) do
         if enemy.pressuredPlayer then
             contesting = contesting + 1
-            if not enemy.died and enemy.lastPressureAt and now - enemy.lastPressureAt <= ENEMY_PRESSURE_WINDOW then
+            if not enemy.died and enemy.lastPressureAt and now - enemy.lastPressureAt <= CFG.ENEMY_PRESSURE_WINDOW then
                 active = active + 1
             end
         end
@@ -900,13 +1055,46 @@ end
 
 local function AppendWorldLog(session, info)
     session.worldCombatLog = session.worldCombatLog or {}
-    if #session.worldCombatLog >= MAX_WORLD_LOG then
+    if #session.worldCombatLog >= CFG.MAX_WORLD_LOG then
         session.worldCombatTruncated = true
         return
     end
     local event = info[2]
     local sourceName, destName = ShortName(info[5]), ShortName(info[9])
     local spellID, spellName = CombatSpellInfo(info)
+    local combatItem = DP.Usage and DP.Usage.ResolveCombatItem and DP.Usage.ResolveCombatItem(spellID, session, info[4], spellName) or nil
+    local procItem = DP.Usage and DP.Usage.ResolveProcItem and DP.Usage.ResolveProcItem(spellID, spellName, session, info[4]) or nil
+    local mindControlSignal = W.IsMindControlCapSpell(spellID, spellName) and
+        (event == "SPELL_CAST_SUCCESS" or event == "SPELL_AURA_APPLIED" or event == "SPELL_AURA_REFRESH")
+    local mindControlUserGUID, mindControlUserName, mindControlBackfire
+    if mindControlSignal then
+        if info[4] and session.participants and session.participants[info[4]] then
+            mindControlUserGUID, mindControlUserName = info[4], sourceName
+        elseif info[8] and session.participants and session.participants[info[8]] then
+            -- On a backfire the charm aura can be sourced by an NPC/temporary
+            -- controller and land on the player who actually activated the cap.
+            mindControlUserGUID, mindControlUserName = info[8], destName
+            mindControlBackfire = true
+        end
+    end
+    local logTime = math.max(0, GetTime() - session.startedElapsed)
+    if mindControlSignal and mindControlUserGUID then
+        -- Spell 13180 is the item effect while 13181 is the 20-second charm aura.
+        -- Classic may emit either or both, and the aura can duplicate. Collapse
+        -- all of those CLEU signals into one player item-use line. If the cast was
+        -- seen first and the later aura proves a backfire, upgrade that same row.
+        for index = #session.worldCombatLog, math.max(1, #session.worldCombatLog - 8), -1 do
+            local prior = session.worldCombatLog[index]
+            if prior and prior.mindControlCapUse and prior.itemUserGUID == mindControlUserGUID and
+                    math.abs(logTime - (tonumber(prior.t) or 0)) <= 1.25 then
+                if mindControlBackfire then prior.mindControlBackfire = true end
+                prior.itemUserName = prior.itemUserName or mindControlUserName
+                prior.itemID, prior.itemName, prior.itemQuality, prior.itemCategory = 10726, "Gnomish Mind Control Cap", 2, "engineering"
+                return
+            end
+        end
+        combatItem = {itemID=10726, name="Gnomish Mind Control Cap", quality=2, category="engineering"}
+    end
     local text
     if event == "SWING_DAMAGE" then
         text = string.format("%s hit %s for %s", sourceName, destName, tostring(math.floor((tonumber(info[12]) or 0) + .5)))
@@ -915,6 +1103,20 @@ local function AppendWorldLog(session, info)
     elseif event == "SPELL_DAMAGE" or event == "RANGE_DAMAGE" or event == "SPELL_PERIODIC_DAMAGE" then
         text = string.format("%s's %s hit %s for %s", sourceName, spellName or ("Spell " .. tostring(spellID)), destName,
             tostring(math.floor((tonumber(info[15]) or 0) + .5)))
+    elseif event == "SPELL_MISSED" or event == "RANGE_MISSED" then
+        local missType = tostring(info[15] or "MISS")
+        local amountMissed = tonumber(info[17])
+        if missType == "ABSORB" then
+            text = string.format("%s's %s was absorbed by %s%s", sourceName, spellName or ("Spell " .. tostring(spellID)), destName,
+                amountMissed and (" for " .. tostring(math.floor(amountMissed + .5))) or "")
+        elseif missType == "RESIST" then
+            text = string.format("%s resisted %s's %s%s", destName, sourceName, spellName or ("Spell " .. tostring(spellID)),
+                amountMissed and (" (" .. tostring(math.floor(amountMissed + .5)) .. ")") or "")
+        elseif missType == "IMMUNE" then
+            text = string.format("%s was immune to %s's %s", destName, sourceName, spellName or ("Spell " .. tostring(spellID)))
+        else
+            text = string.format("%s's %s missed %s (%s)", sourceName, spellName or ("Spell " .. tostring(spellID)), destName, missType)
+        end
     elseif event == "SPELL_HEAL" or event == "SPELL_PERIODIC_HEAL" then
         text = string.format("%s's %s healed %s for %s", sourceName, spellName or ("Spell " .. tostring(spellID)), destName,
             tostring(math.floor((tonumber(info[15]) or 0) + .5)))
@@ -924,6 +1126,8 @@ local function AppendWorldLog(session, info)
         text = string.format("%s applied %s to %s", sourceName, spellName or ("Spell " .. tostring(spellID)), destName)
     elseif event == "SPELL_AURA_REMOVED" then
         text = string.format("%s's %s faded from %s", sourceName, spellName or ("Spell " .. tostring(spellID)), destName)
+    elseif event == "SPELL_AURA_REFRESH" then
+        text = string.format("%s refreshed %s on %s", sourceName, spellName or ("Spell " .. tostring(spellID)), destName)
     elseif event == "SPELL_INTERRUPT" then
         text = string.format("%s's %s interrupted %s", sourceName, spellName or ("Spell " .. tostring(spellID)), destName)
     elseif event == "PARTY_KILL" then
@@ -959,14 +1163,27 @@ local function AppendWorldLog(session, info)
             critical = info[18] == true
         end
         session.worldCombatLog[#session.worldCombatLog + 1] = {
-            t = math.max(0, GetTime() - session.startedElapsed),
+            t = logTime,
             text = text,
             sourceGUID = info[4], sourceName = sourceName,
             destGUID = info[8], destName = destName,
             event = event, spellID = spellID, spellName = spellName,
+            unconscious = IsUnconsciousDeathEvent(info) and true or nil,
+            itemID = combatItem and combatItem.itemID or nil, itemName = combatItem and combatItem.name or nil,
+            itemQuality = combatItem and combatItem.quality or nil, itemCategory = combatItem and combatItem.category or nil,
+            procItemID = procItem and procItem.itemID or nil, procItemName = procItem and procItem.name or nil,
+            procItemQuality = procItem and procItem.quality or nil,
+            mindControlCapUse = mindControlSignal and mindControlUserGUID and true or nil,
+            mindControlBackfire = mindControlBackfire and true or nil,
+            itemUserGUID = mindControlUserGUID,
+            itemUserName = mindControlUserName,
+            spellSchool = (event:match("^SPELL_") or event:match("^RANGE_")) and tonumber(info[14]) or nil,
             amount = amount, overhealing = overhealing, effectiveAmount = effectiveAmount,
             overkill = overkill, critical = critical,
-            missType = event == "SWING_MISSED" and info[12] or nil,
+            missType = event == "SWING_MISSED" and info[12] or ((event == "SPELL_MISSED" or event == "RANGE_MISSED") and info[15] or nil),
+            amountMissed = (event == "SPELL_MISSED" or event == "RANGE_MISSED") and tonumber(info[17]) or nil,
+            killingBlow = ((event == "SWING_DAMAGE" or event == "SPELL_DAMAGE" or event == "RANGE_DAMAGE" or event == "SPELL_PERIODIC_DAMAGE") and
+                overkill ~= nil and overkill >= 0 and IsPlayer(info[6]) and IsPlayer(info[10])) and true or nil,
         }
     end
 end
@@ -1107,11 +1324,11 @@ local function DisplayHeadcount(record)
 end
 
 local function IsDivineShieldSpell(spellID, spellName)
-    return (spellID and DIVINE_SHIELD_SPELLS[tonumber(spellID)]) or spellName == "Divine Shield"
+    return (spellID and CFG.DIVINE_SHIELD_SPELLS[tonumber(spellID)]) or spellName == "Divine Shield"
 end
 
 local function IsHearthstoneSpell(spellID, spellName)
-    return (spellID and HEARTHSTONE_SPELLS[tonumber(spellID)]) or spellName == "Hearthstone"
+    return (spellID and CFG.HEARTHSTONE_SPELLS[tonumber(spellID)]) or spellName == "Hearthstone"
 end
 
 local function BubbleHearthEnemy(record)
@@ -1134,7 +1351,7 @@ local function BubbleHearthEnemy(record)
         elseif guid and entry.event == "SPELL_CAST_SUCCESS" and IsHearthstoneSpell(entry.spellID, entry.spellName) then
             local shieldAt = lastShield[guid]
             local hearthAt = tonumber(entry.t) or 0
-            if shieldAt and hearthAt - shieldAt >= 0 and hearthAt - shieldAt <= BUBBLE_HEARTH_WINDOW then
+            if shieldAt and hearthAt - shieldAt >= 0 and hearthAt - shieldAt <= CFG.BUBBLE_HEARTH_WINDOW then
                 for _, enemy in ipairs(record.enemies or {}) do
                     if enemy.guid == guid and not enemy.died then
                         record.bubbleHearthEnemyGUID = guid
@@ -1319,7 +1536,7 @@ local function RebuildPressureEvidence(record)
         local active = 0
         for guid, lastAt in pairs(lastPressure) do
             local participant = byGUID[guid]
-            if participant and t - lastAt <= ENEMY_PRESSURE_WINDOW and
+            if participant and t - lastAt <= CFG.ENEMY_PRESSURE_WINDOW and
                 (not participant.killedAt or participant.killedAt >= t) then active = active + 1 end
         end
         peak = math.max(peak, active)
@@ -1375,7 +1592,10 @@ end
 local function BuildRecord(session, reason)
     for guid, enemy in pairs(session.enemies or {}) do
         local unit = W.VisibleUnitForGUID(guid)
-        if unit then W.CaptureOpponentPortrait(enemy, unit) end
+        if unit then
+            W.CaptureOpponentPortrait(enemy, unit)
+            if DP.Portraits then DP.Portraits.Capture(enemy, unit, true) end
+        end
     end
     local enemies = OrderedParticipants(session.enemies)
     for index, enemy in ipairs(enemies) do
@@ -1384,6 +1604,7 @@ local function BuildRecord(session, reason)
         end
         enemy.portraitFrozen = true
     end
+    W.RefreshFriendlyLevels(session)
     local friendlies = OrderedParticipants(session.friendlies)
     -- Resolve market values exactly once at encounter finalization.  The
     -- resulting snapshot is saved on the record and is never repriced later.
@@ -1441,11 +1662,364 @@ local function BuildRecord(session, reason)
     return record
 end
 
+
+-- Repair historical encounter splits caused by mechanics that temporarily break
+-- WoW's combat state without ending the fight. The original migration covered
+-- Gnomish Mind Control Cap backfires; version 3 also repairs full-duration Ice
+-- Block splits where a reinforcement can be the first hostile action afterward.
+-- Keep this conservative: records must be adjacent, geographically consistent,
+-- close in time, and have retained combat-log evidence that bridges the boundary.
+function W.RepairMindControlSplitEncounters(store)
+    if not store or type(store.encounters) ~= "table" then return false end
+    local repairVersion = 3
+    if (tonumber(store.mindControlSplitRepairVersion) or 0) >= repairVersion then return false end
+
+    local function StartAt(record)
+        return tonumber(record and (record.startedAt or record.timestamp)) or 0
+    end
+
+    local function EndAt(record)
+        local started = StartAt(record)
+        return tonumber(record and record.endedAt) or (started + math.max(0, tonumber(record and record.duration) or 0))
+    end
+
+    local function SameOpponent(first, second)
+        local a, b = first and first.enemies, second and second.enemies
+        if type(a) ~= "table" or type(b) ~= "table" or #a ~= 1 or #b ~= 1 then return false end
+        local ae, be = a[1], b[1]
+        if ae.guid and be.guid then return ae.guid == be.guid end
+        local an, bn = ShortName(ae.name), ShortName(be.name)
+        return an ~= "" and an ~= "Unknown" and an == bn
+    end
+
+    local function RecordHasEnemy(record, guid, name)
+        local wantedName = ShortName(name)
+        for _, enemy in ipairs(record and record.enemies or {}) do
+            if guid and enemy.guid and guid == enemy.guid then return true end
+            local enemyName = ShortName(enemy.name)
+            if wantedName ~= "" and wantedName ~= "Unknown" and enemyName == wantedName then return true end
+        end
+        return false
+    end
+
+    local function CombatSuspensionSignalAt(first, second)
+        local active = {}
+        for _, entry in ipairs(first and first.session and first.session.worldCombatLog or {}) do
+            if W.IsCombatSuspensionSpell(entry.spellID, entry.spellName) then
+                local event = tostring(entry.event or "")
+                local guid = entry.destGUID or entry.sourceGUID
+                local name = entry.destName or entry.sourceName
+                if guid then
+                    if event == "SPELL_CAST_SUCCESS" or event == "SPELL_AURA_APPLIED" or event == "SPELL_AURA_REFRESH" then
+                        active[guid] = {t=tonumber(entry.t) or 0, name=name}
+                    elseif event == "SPELL_AURA_REMOVED" then
+                        active[guid] = nil
+                    end
+                end
+            end
+        end
+        local latest
+        for guid, signal in pairs(active) do
+            if RecordHasEnemy(first, guid, signal.name) and RecordHasEnemy(second, guid, signal.name) then
+                if not latest or signal.t > latest then latest = signal.t end
+            end
+        end
+        return latest
+    end
+
+    local function MindControlSignalAt(record)
+        local latest
+        for _, entry in ipairs(record and record.session and record.session.worldCombatLog or {}) do
+            local event = tostring(entry.event or "")
+            if W.IsMindControlCapSpell(entry.spellID, entry.spellName) and
+                    (event == "SPELL_CAST_SUCCESS" or event == "SPELL_AURA_APPLIED" or event == "SPELL_AURA_REFRESH") then
+                local at = tonumber(entry.t) or 0
+                if not latest or at > latest then latest = at end
+            end
+        end
+        return latest
+    end
+
+    local function SameArea(first, second)
+        local a, b = first and first.location or {}, second and second.location or {}
+        if a.mapID and b.mapID and tonumber(a.mapID) ~= tonumber(b.mapID) then return false end
+        local az, bz = tostring(a.zone or ""), tostring(b.zone or "")
+        if az ~= "" and bz ~= "" and az ~= bz then return false end
+        return true
+    end
+
+    local function Eligible(first, second)
+        if not first or not second or not SameArea(first, second) then return false end
+        if first.playerGUID and second.playerGUID and first.playerGUID ~= second.playerGUID then return false end
+        if first.endReason ~= "combat-ended" and first.endReason ~= "inactivity" and first.endReason ~= "new-opponent-after-combat" then return false end
+        local firstStart, firstEnd, secondStart = StartAt(first), EndAt(first), StartAt(second)
+        if firstStart <= 0 or secondStart <= 0 then return false end
+        local boundaryGap = secondStart - firstEnd
+
+        -- Original Mind Control Cap repair: both fragments were the same 1v1.
+        if SameOpponent(first, second) and boundaryGap >= -5 and boundaryGap <= CFG.MIND_CONTROL_GRACE then
+            local signalAt = MindControlSignalAt(first)
+            if signalAt ~= nil then
+                local toRestart = secondStart - (firstStart + signalAt)
+                if toRestart >= -5 and toRestart <= (CFG.MIND_CONTROL_GRACE + 10) then return "mind-control" end
+            end
+        end
+
+        -- Ice Block can leave the original opponent immune while somebody else
+        -- joins. Require that the still-blocked enemy is retained in BOTH halves;
+        -- this prevents a nearby unrelated fight from being glued on merely
+        -- because it happened soon after an Ice Block.
+        if boundaryGap >= -5 and boundaryGap <= CFG.COMBAT_SUSPENSION_MAX + CFG.COMBAT_SUSPENSION_POST_GRACE + 5 then
+            local signalAt = CombatSuspensionSignalAt(first, second)
+            if signalAt ~= nil then
+                local toRestart = secondStart - (firstStart + signalAt)
+                if toRestart >= -5 and toRestart <= CFG.COMBAT_SUSPENSION_MAX + CFG.COMBAT_SUSPENSION_POST_GRACE + 5 then
+                    return "combat-suspension"
+                end
+            end
+        end
+        return false
+    end
+
+    local function ShiftRelativeFields(value, offset)
+        if type(value) ~= "table" or offset == 0 then return end
+        for _, key in ipairs({"t", "firstSeenAt", "lastSeenAt", "appliedAt", "removedAt", "killedAt", "bubbleHearthAt", "lastDivineShieldAt"}) do
+            if tonumber(value[key]) then value[key] = tonumber(value[key]) + offset end
+        end
+    end
+
+    local function MergeBuffBucket(target, source, offset)
+        if type(source) ~= "table" then return target end
+        target = type(target) == "table" and target or {}
+        for key, incoming in pairs(source) do
+            if type(incoming) == "table" then
+                ShiftRelativeFields(incoming, offset)
+                local current = target[key]
+                if type(current) ~= "table" then
+                    target[key] = incoming
+                else
+                    for field, value in pairs(incoming) do
+                        if field == "firstSeenAt" or field == "appliedAt" then
+                            if tonumber(value) and (not tonumber(current[field]) or tonumber(value) < tonumber(current[field])) then current[field] = value end
+                        elseif field == "lastSeenAt" or field == "removedAt" then
+                            if tonumber(value) and (not tonumber(current[field]) or tonumber(value) > tonumber(current[field])) then current[field] = value end
+                        elseif type(value) == "boolean" then
+                            current[field] = current[field] or value
+                        elseif current[field] == nil then
+                            current[field] = value
+                        end
+                    end
+                end
+            elseif target[key] == nil then
+                target[key] = incoming
+            end
+        end
+        return target
+    end
+
+    local function MergeDetectedBuffs(targetEnemy, sourceEnemy, offset)
+        local source = sourceEnemy and sourceEnemy.detectedBuffs
+        if type(source) ~= "table" then return end
+        targetEnemy.detectedBuffs = type(targetEnemy.detectedBuffs) == "table" and targetEnemy.detectedBuffs or {}
+        local target = targetEnemy.detectedBuffs
+        target.world = MergeBuffBucket(target.world, source.world, offset)
+        target.consumables = MergeBuffBucket(target.consumables, source.consumables, offset)
+        target.all = MergeBuffBucket(target.all, source.all, offset)
+        target.scanned = target.scanned or source.scanned
+        local shiftedFirstScan = tonumber(source.firstScanAt) and (tonumber(source.firstScanAt) + offset) or nil
+        if shiftedFirstScan and (not tonumber(target.firstScanAt) or shiftedFirstScan < tonumber(target.firstScanAt)) then
+            target.firstScanAt = shiftedFirstScan
+        end
+    end
+
+    local function MergeIdentity(target, source, offset, isEnemy)
+        if not target or not source then return target end
+        for _, field in ipairs({"name", "class", "race", "raceFile", "sex", "level", "flags", "spec",
+                "portraitFallbackVariant", "portraitDisplayID", "portraitSex", "portraitAppearance", "portraitCapturedAt"}) do
+            if target[field] == nil and source[field] ~= nil then target[field] = source[field] end
+        end
+        target.contributedToEnemy = target.contributedToEnemy or source.contributedToEnemy
+        if isEnemy then
+            target.died = target.died or source.died
+            target.killingBlow = target.killingBlow or source.killingBlow
+            target.bubbleHearthed = target.bubbleHearthed or source.bubbleHearthed
+            target.playerInteractionCount = (tonumber(target.playerInteractionCount) or 0) + (tonumber(source.playerInteractionCount) or 0)
+            target.damageFromPlayer = (tonumber(target.damageFromPlayer) or 0) + (tonumber(source.damageFromPlayer) or 0)
+            target.pressureEventCount = (tonumber(target.pressureEventCount) or 0) + (tonumber(source.pressureEventCount) or 0)
+            if tonumber(source.killedAt) then target.killedAt = tonumber(source.killedAt) + offset end
+            if tonumber(source.bubbleHearthAt) then target.bubbleHearthAt = tonumber(source.bubbleHearthAt) + offset end
+            if type(source.killingBlowDetail) == "table" then
+                ShiftRelativeFields(source.killingBlowDetail, offset)
+                target.killingBlowDetail = source.killingBlowDetail
+            end
+            MergeDetectedBuffs(target, source, offset)
+            target.portraitFrozen = true
+        end
+        return target
+    end
+
+    local function ParticipantKey(identity)
+        if not identity then return nil end
+        return identity.guid or (identity.name and ("name:" .. ShortName(identity.name):lower())) or nil
+    end
+
+    local function MergeIdentityList(targetList, sourceList, offset, isEnemy)
+        targetList = type(targetList) == "table" and targetList or {}
+        local byKey = {}
+        for _, identity in ipairs(targetList) do
+            local key = ParticipantKey(identity)
+            if key then byKey[key] = identity end
+        end
+        for _, incoming in ipairs(sourceList or {}) do
+            local key = ParticipantKey(incoming)
+            local current = key and byKey[key] or nil
+            if current then
+                MergeIdentity(current, incoming, offset, isEnemy)
+            else
+                if isEnemy then
+                    if tonumber(incoming.killedAt) then incoming.killedAt = tonumber(incoming.killedAt) + offset end
+                    if tonumber(incoming.bubbleHearthAt) then incoming.bubbleHearthAt = tonumber(incoming.bubbleHearthAt) + offset end
+                    if type(incoming.killingBlowDetail) == "table" then ShiftRelativeFields(incoming.killingBlowDetail, offset) end
+                    MergeDetectedBuffs(incoming, {}, offset)
+                    incoming.portraitFrozen = true
+                end
+                targetList[#targetList + 1] = incoming
+                if key then byKey[key] = incoming end
+            end
+        end
+        return targetList
+    end
+
+    local function MergeLogs(first, second, offset)
+        first.session = first.session or {worldPvP=true}
+        second.session = second.session or {}
+        local target = first.session.worldCombatLog or {}
+        for _, entry in ipairs(second.session.worldCombatLog or {}) do
+            ShiftRelativeFields(entry, offset)
+            target[#target + 1] = entry
+        end
+        table.sort(target, function(a, b) return (tonumber(a.t) or 0) < (tonumber(b.t) or 0) end)
+        first.session.worldCombatLog = target
+        first.session.worldCombatTruncated = first.session.worldCombatTruncated or second.session.worldCombatTruncated
+    end
+
+    local function MergeUsage(first, second, offset)
+        first.session = first.session or {worldPvP=true}
+        second.session = second.session or {}
+        local a, b = first.session.worldUsage, second.session.worldUsage
+        if type(b) ~= "table" then return end
+        if type(a) ~= "table" then a = {version=b.version or 2, events={}}; first.session.worldUsage = a end
+        a.events = a.events or {}
+        for _, entry in ipairs(b.events or {}) do
+            ShiftRelativeFields(entry, offset)
+            a.events[#a.events + 1] = entry
+        end
+        table.sort(a.events, function(x, y) return (tonumber(x.t) or 0) < (tonumber(y.t) or 0) end)
+        a.version = math.max(tonumber(a.version) or 0, tonumber(b.version) or 0)
+        a.truncated = a.truncated or b.truncated
+    end
+
+    local function RebuildParticipants(record)
+        record.session = record.session or {worldPvP=true}
+        local merged = {}
+        for guid, identity in pairs(record.session.participants or {}) do merged[guid] = identity end
+        for _, identity in ipairs(record.friendlies or {}) do if identity.guid then merged[identity.guid] = identity end end
+        for _, identity in ipairs(record.enemies or {}) do if identity.guid then merged[identity.guid] = identity end end
+        record.session.participants = merged
+        -- Upgrade retained legacy cap signals now that the merged participant map
+        -- can correctly identify the player beneath an NPC-sourced backfire aura.
+        for _, entry in ipairs(record.session.worldCombatLog or {}) do
+            local actorGUID, actorName, backfire = W.MindControlUseInfo(entry, merged)
+            if actorGUID then
+                entry.mindControlCapUse = true
+                entry.mindControlBackfire = entry.mindControlBackfire or backfire or nil
+                entry.itemUserGUID = actorGUID
+                entry.itemUserName = actorName
+                entry.itemID, entry.itemName, entry.itemQuality, entry.itemCategory = 10726, "Gnomish Mind Control Cap", 2, "engineering"
+            end
+        end
+    end
+
+    local function MergeRecords(first, second, mergeKind)
+        local firstStart, secondStart = StartAt(first), StartAt(second)
+        local offset = math.max(0, secondStart - firstStart)
+        first.enemies = MergeIdentityList(first.enemies, second.enemies, offset, true)
+        first.friendlies = MergeIdentityList(first.friendlies, second.friendlies, offset, false)
+        MergeLogs(first, second, offset)
+        MergeUsage(first, second, offset)
+
+        if second.playerDiedAt and tonumber(second.playerDiedAt) then first.playerDiedAt = tonumber(second.playerDiedAt) + offset end
+        first.playerDied = first.playerDied or second.playerDied
+        first.killingBlows = (tonumber(first.killingBlows) or 0) + (tonumber(second.killingBlows) or 0)
+        first.honorableKills = (tonumber(first.honorableKills) or 0) + (tonumber(second.honorableKills) or 0)
+        first.npcAssistance = first.npcAssistance or second.npcAssistance
+        first.starred = first.starred or second.starred
+        first.endReason = second.endReason or first.endReason
+        first.endedAt = math.max(EndAt(first), EndAt(second))
+        first.duration = math.max(tonumber(first.duration) or 0, offset + math.max(0, tonumber(second.duration) or 0), first.endedAt - firstStart)
+        if second.location then first.location = second.location end
+        if second.bubbleHearthEnemyGUID then first.bubbleHearthEnemyGUID = second.bubbleHearthEnemyGUID end
+        first.honorMessages = first.honorMessages or second.honorMessages
+        first.session.worldPvP = true
+        if mergeKind == "mind-control" then first.retroMergedMindControl = true end
+        if mergeKind == "combat-suspension" then first.retroMergedCombatSuspension = true end
+        first.retroMergedCombatSplit = true
+        first.mergedEncounterIDs = first.mergedEncounterIDs or {first.id}
+        first.mergedEncounterIDs[#first.mergedEncounterIDs + 1] = second.id
+
+        RebuildParticipants(first)
+        first.enemyCount = math.max(tonumber(first.enemyCount) or 0, tonumber(second.enemyCount) or 0, #(first.enemies or {}))
+        first.friendlyCount = math.max(1, #(first.friendlies or {}))
+        first.enemyDeaths = 0
+        for _, enemy in ipairs(first.enemies or {}) do if enemy.died then first.enemyDeaths = first.enemyDeaths + 1 end end
+
+        -- Recompute headcount/pressure/outcome from the merged event stream.
+        first.pressureModelVersion = nil
+        first.friendlyContributionModelVersion = nil
+        RebuildPressureEvidence(first)
+        RebuildFriendlyContributionEvidence(first)
+        first.outcomeModelVersion = 5
+        first.resultLabel, first.resultKey = Outcome(first)
+        SortEnemiesByRelevance(first)
+
+        -- The two frozen snapshots represented halves of one fight. Rebuild one
+        -- snapshot from the now-combined retained evidence so duplicate/phantom
+        -- uses (including the old Chronoboon aura bug) are repaired as well.
+        first.consumableCost = nil
+    end
+
+    local changed, index = false, 1
+    while index < #store.encounters do
+        local first, second = store.encounters[index], store.encounters[index + 1]
+        local mergeKind = Eligible(first, second)
+        if mergeKind then
+            MergeRecords(first, second, mergeKind)
+            table.remove(store.encounters, index + 1)
+            changed = true
+            -- Do not advance: a pathological multi-split can now be compared to
+            -- the next adjacent fragment using the already-merged record.
+        else
+            index = index + 1
+        end
+    end
+    store.mindControlSplitRepairVersion = repairVersion
+    return changed
+end
+
 function W.Initialize(observer, db, callbacks)
     W.observer, W.db, W.callbacks = observer, db, callbacks or {}
     observer.worldPvP = observer.worldPvP or {nextSequence = 1, encounters = {}}
     observer.worldPvP.encounters = observer.worldPvP.encounters or {}
     observer.worldPvP.nextSequence = observer.worldPvP.nextSequence or 1
+    observer.worldPvP.enemyGoldArchivedCopper = math.max(0, tonumber(observer.worldPvP.enemyGoldArchivedCopper) or 0)
+    observer.worldPvP.enemyGoldArchivedPricedCount = math.max(0, tonumber(observer.worldPvP.enemyGoldArchivedPricedCount) or 0)
+    observer.worldPvP.enemyGoldArchivedUnpricedCount = math.max(0, tonumber(observer.worldPvP.enemyGoldArchivedUnpricedCount) or 0)
+
+    -- Run structural encounter repairs before any per-record migration. Version
+    -- 3 covers both the earlier Mind Control Cap split and full-duration Ice
+    -- Block combat drops, including reinforcements joining during the block.
+    W.RepairMindControlSplitEncounters(observer.worldPvP)
+
     -- Reclassify older 0.21.x encounters when their saved combat log has
     -- enough evidence to distinguish actual simultaneous opposition from a
     -- sequence of passive victims inside the long encounter timeout.
@@ -1464,6 +2038,14 @@ function W.Initialize(observer, db, callbacks)
             needsLegacyConsumableBackfill = true
         end
         for enemyIndex, enemy in ipairs(record.enemies or {}) do
+            -- portraitTexture was historically populated from SetPortraitTexture's
+            -- backing render target. Those handles are session-local (and numeric
+            -- values can later alias completely unrelated icon textures), so never
+            -- trust a persisted value after login/reload.
+            if enemy.portraitTexture ~= nil or enemy.portraitSessionID ~= nil then
+                enemy.portraitTexture = nil
+                enemy.portraitSessionID = nil
+            end
             if not enemy.portraitFallbackVariant then
                 enemy.portraitFallbackVariant = (((tonumber(record.timestamp) or 0) + enemyIndex) % 2) + 1
             end
@@ -1537,6 +2119,8 @@ function W.Initialize(observer, db, callbacks)
     -- Force legacy profiles that previously disabled it back on during initialization.
     db.worldPvPEnabled = true
     if db.worldPvPOverviewMode ~= "world" then db.worldPvPOverviewMode = "duels" end
+
+
 end
 
 function W.Enabled()
@@ -1590,6 +2174,7 @@ function W.Start(playerGUID, info)
         peakContestingEnemies = 0,
         honorableKills = 0,
         killingBlows = 0,
+        combatSuspensions = {},
     }
     local player = AddParticipant(session, "friendlies", playerGUID, playerName, COMBATLOG_OBJECT_AFFILIATION_MINE)
     session.participants[playerGUID] = player
@@ -1607,11 +2192,12 @@ function W.Start(playerGUID, info)
                 enemyCount = enemyCount + 1
                 if not enemy.died then allEnemiesDead = false end
             end
-            if active.outOfCombatAt and now - active.outOfCombatAt >= COMBAT_END_GRACE then
+            if active.outOfCombatAt and now - active.outOfCombatAt >= CFG.COMBAT_END_GRACE and
+                    now >= (tonumber(active.mindControlGraceUntil) or 0) and not W.CombatSuspensionActive(active, now) then
                 W.Finish("combat-ended")
-            elseif enemyCount > 0 and (active.playerDied or allEnemiesDead) and quiet >= ALL_ENEMIES_DEAD_GRACE then
+            elseif enemyCount > 0 and (active.playerDied or allEnemiesDead) and quiet >= CFG.ALL_ENEMIES_DEAD_GRACE then
                 W.Finish(active.playerDied and "player-death" or "all-enemies-dead")
-            elseif quiet >= INACTIVITY_TIMEOUT then
+            elseif quiet >= CFG.INACTIVITY_TIMEOUT then
                 W.Finish("inactivity")
             end
         end)
@@ -1720,7 +2306,7 @@ local function TrackSpecialEscape(session, info)
     if event == "SPELL_CAST_SUCCESS" and IsHearthstoneSpell(spellID, spellName) then
         local enemy = session.enemies and session.enemies[info[4]]
         if enemy and enemy.lastDivineShieldAt and elapsed - enemy.lastDivineShieldAt >= 0 and
-            elapsed - enemy.lastDivineShieldAt <= BUBBLE_HEARTH_WINDOW then
+            elapsed - enemy.lastDivineShieldAt <= CFG.BUBBLE_HEARTH_WINDOW then
             enemy.bubbleHearthed = true
             enemy.bubbleHearthAt = elapsed
             enemy.class = enemy.class or "PALADIN"
@@ -1788,23 +2374,32 @@ function W.Combat(playerGUID)
     local info = {CombatLogGetCurrentEventInfo()}
     local event = info[2]
     local session = W.active
+    local boundarySpellID, boundarySpellName = CombatSpellInfo(info)
+    if session and W.IsMindControlCapSpell(boundarySpellID, boundarySpellName) then
+        session.mindControlGraceUntil = math.max(tonumber(session.mindControlGraceUntil) or 0, GetTime() + CFG.MIND_CONTROL_GRACE)
+        session.lastActivity = GetTime()
+    end
+    if session then W.UpdateCombatSuspension(session, info, boundarySpellID, boundarySpellName) end
     if session and session.outOfCombatAt and PvPInteraction(info, playerGUID) then
         local now = GetTime()
         local hostileGUID = DirectHostileGUID(info, playerGUID)
-        if now - session.outOfCombatAt >= COMBAT_END_GRACE then
+        local suspended = W.CombatSuspensionActive(session, now)
+        if now - session.outOfCombatAt >= CFG.COMBAT_END_GRACE and now >= (tonumber(session.mindControlGraceUntil) or 0) and not suspended then
             -- The grace period elapsed before the next direct PvP event. Even
-            -- the same opponent is now a new encounter.
+            -- the same opponent is now a new encounter unless an explicit
+            -- suspension mechanic (for example Ice Block) still bridges it.
             W.Finish("combat-ended")
             session = nil
-        elseif hostileGUID and not session.enemies[hostileGUID] then
+        elseif hostileGUID and not session.enemies[hostileGUID] and not suspended then
             -- A different player starting the next combat after a full combat
-            -- drop is not part of the prior fight. This is the key protection
-            -- against a stream of sequential players becoming 22v38, etc.
+            -- drop is normally a new fight. During an active Ice Block, though,
+            -- that player is a reinforcement joining the encounter already in
+            -- progress, not the start of a fresh encounter.
             W.Finish("new-opponent-after-combat")
             session = nil
         else
-            -- Same opponent came back during the short Classic combat-drop
-            -- grace period. Treat it as continuity (Vanish/Feign/CC/etc.).
+            -- Same opponent returned, or a reinforcement arrived while the prior
+            -- opponent was in a tracked combat-suspension state. Keep continuity.
             session.outOfCombatAt = nil
         end
     end
@@ -1812,6 +2407,9 @@ function W.Combat(playerGUID)
         if not PvPInteraction(info, playerGUID) then return end
         session = W.Start(playerGUID, info)
         if not session then return end
+        if W.IsMindControlCapSpell(boundarySpellID, boundarySpellName) then
+            session.mindControlGraceUntil = GetTime() + CFG.MIND_CONTROL_GRACE
+        end
     end
 
     MarkInteraction(session, info)
@@ -1867,7 +2465,7 @@ function W.Combat(playerGUID)
             enemy.died = true; enemy.killedAt = GetTime() - session.startedElapsed
             session.lastKillPosition = PlayerPosition() or session.lastKillPosition
             if info[4] == playerGUID then session.killingBlows = (session.killingBlows or 0) + 1; enemy.killingBlow = true end
-            ScreenshotEnemyDeath(session, enemy, WPVP_SCREENSHOT_KILL_DELAY)
+            ScreenshotEnemyDeath(session, enemy, CFG.WPVP_SCREENSHOT_KILL_DELAY)
         end
     elseif event == "UNIT_DIED" or event == "UNIT_DESTROYED" then
         -- Feign Death and other unconscious transitions deliberately masquerade
@@ -1884,7 +2482,11 @@ function W.Combat(playerGUID)
                 enemy.died = true
                 enemy.killedAt = GetTime() - session.startedElapsed
                 session.lastKillPosition = PlayerPosition() or session.lastKillPosition
-                ScreenshotEnemyDeath(session, enemy, WPVP_SCREENSHOT_KILL_DELAY)
+                ScreenshotEnemyDeath(session, enemy, CFG.WPVP_SCREENSHOT_KILL_DELAY)
+            elseif session.friendlies[info[8]] then
+                local friendly = session.friendlies[info[8]]
+                friendly.died = true
+                friendly.killedAt = GetTime() - session.startedElapsed
             end
         end
     end
@@ -2743,9 +3345,16 @@ function W.Finish(reason)
 end
 
 function W.Event(event, ...)
-    if W.active and UnitGUID and (event == "PLAYER_TARGET_CHANGED" or event == "UPDATE_MOUSEOVER_UNIT" or event == "NAME_PLATE_UNIT_ADDED" or event == "UNIT_AURA") then
-        local unit = event == "NAME_PLATE_UNIT_ADDED" and (...) or event == "UNIT_AURA" and (...) or event == "UPDATE_MOUSEOVER_UNIT" and "mouseover" or "target"
+    if W.active and event == "GROUP_ROSTER_UPDATE" then W.RefreshFriendlyLevels(W.active) end
+    if W.active and UnitGUID and (event == "PLAYER_TARGET_CHANGED" or event == "UPDATE_MOUSEOVER_UNIT" or event == "NAME_PLATE_UNIT_ADDED" or event == "UNIT_AURA" or event == "UNIT_LEVEL") then
+        local unit = (event == "NAME_PLATE_UNIT_ADDED" or event == "UNIT_AURA" or event == "UNIT_LEVEL") and (...) or event == "UPDATE_MOUSEOVER_UNIT" and "mouseover" or "target"
         local guid = unit and UnitGUID(unit)
+        local friendly = guid and W.active.friendlies and W.active.friendlies[guid]
+        if friendly and (not tonumber(friendly.level) or tonumber(friendly.level) <= 0) then
+            -- Read the actual event token, including high-numbered nameplates.
+            local level = UnitLevel and UnitLevel(unit)
+            if type(level) == "number" and level > 0 then friendly.level = level end
+        end
         local enemy = guid and W.active.enemies and W.active.enemies[guid]
         if enemy then
             enemy.level = enemy.level or ResolvePlayerLevel(guid)
@@ -2792,14 +3401,63 @@ function W.History(duelRecords, source)
     return result
 end
 
+local function CommaOverviewNumber(value)
+    value = math.max(0, math.floor(tonumber(value) or 0))
+    local text = tostring(value)
+    local chunks = {}
+    while #text > 3 do
+        table.insert(chunks, 1, text:sub(-3))
+        text = text:sub(1, -4)
+    end
+    table.insert(chunks, 1, text)
+    return table.concat(chunks, ",")
+end
+
+local function EnemyGoldText(copper, partial, compact)
+    copper = math.max(0, math.floor(tonumber(copper) or 0))
+    local gold = math.floor(copper / 10000)
+    local silver = math.floor(copper / 100) % 100
+    local coin = copper % 100
+    local prefix = "" -- unpriced rows are disclosed in the tooltip; never put an approximation tilde on the plaque
+    local goldIcon = "|TInterface\\MoneyFrame\\UI-GoldIcon:12:12:2:0|t"
+    local silverIcon = "|TInterface\\MoneyFrame\\UI-SilverIcon:12:12:2:0|t"
+    local copperIcon = "|TInterface\\MoneyFrame\\UI-CopperIcon:12:12:2:0|t"
+    if compact then
+        if gold > 0 then
+            local text = CommaOverviewNumber(gold) .. goldIcon
+            if gold < 1000 and silver > 0 then text = text .. " " .. tostring(silver) .. silverIcon end
+            return prefix .. text
+        end
+        if silver > 0 then return prefix .. tostring(silver) .. silverIcon .. " " .. tostring(coin) .. copperIcon end
+        return prefix .. tostring(coin) .. copperIcon
+    end
+    local parts = {}
+    if gold > 0 then parts[#parts + 1] = CommaOverviewNumber(gold) .. goldIcon end
+    if gold > 0 or silver > 0 then parts[#parts + 1] = tostring(silver) .. silverIcon end
+    parts[#parts + 1] = tostring(coin) .. copperIcon
+    return prefix .. table.concat(parts, " ")
+end
+
 function W.Summary()
+    local store = W.observer and W.observer.worldPvP or nil
     local summary = {kills = 0, deaths = 0, soloWins = 0, soloLosses = 0, outnumberedVictories = 0,
         honorableKills = 0, ganks = 0, lowbieGanks = 0, longestOutnumbered = 0, encounters = 0, rivals = 0,
         currentStreak = 0, longestStreak = 0, favoriteZone = nil, favoriteZoneKills = 0,
         mostKilledName = nil, mostKilledClass = nil, mostKilledKills = 0, mostKilledDeaths = 0,
-        nemesisName = nil, nemesisClass = nil, nemesisDeaths = 0, nemesisKills = 0}
+        mostKilledSoloKills = 0, mostKilledSoloDeaths = 0, mostKilledEncounters = 0,
+        nemesisName = nil, nemesisClass = nil, nemesisDeaths = 0, nemesisKills = 0,
+        nemesisSoloKills = 0, nemesisSoloDeaths = 0, nemesisEncounters = 0,
+        enemyGoldSpentCopper = math.max(0, tonumber(store and store.enemyGoldArchivedCopper) or 0),
+        enemyGoldSpentPartial = store and store.enemyGoldArchivedPartial and true or false,
+        enemyGoldPricedCount = math.max(0, tonumber(store and store.enemyGoldArchivedPricedCount) or 0),
+        enemyGoldUnpricedCount = math.max(0, tonumber(store and store.enemyGoldArchivedUnpricedCount) or 0)}
     local streak, rivals, zones, rivalStats = 0, {}, {}, {}
     for _, record in ipairs(W.GetEncounters()) do
+        local enemyCopper, enemyPartial, enemyPriced, enemyUnpriced = EnemyConsumableSpend(record)
+        summary.enemyGoldSpentCopper = summary.enemyGoldSpentCopper + enemyCopper
+        summary.enemyGoldPricedCount = summary.enemyGoldPricedCount + enemyPriced
+        summary.enemyGoldUnpricedCount = summary.enemyGoldUnpricedCount + enemyUnpriced
+        if enemyPartial then summary.enemyGoldSpentPartial = true end
         summary.encounters = summary.encounters + 1
         local recordKills = record.enemyDeaths or 0
         summary.kills = summary.kills + recordKills
@@ -2821,7 +3479,8 @@ function W.Summary()
                 rivals[rivalKey] = true
                 local r = rivalStats[rivalKey]
                 if not r then
-                    r = {name = ShortName(enemy.name), class = enemy.class, kills = 0, deaths = 0, encounters = 0, lastAt = 0}
+                    r = {name = ShortName(enemy.name), class = enemy.class, kills = 0, deaths = 0,
+                        soloKills = 0, soloDeaths = 0, encounters = 0, lastAt = 0}
                     rivalStats[rivalKey] = r
                 end
                 r.name = r.name or ShortName(enemy.name)
@@ -2834,6 +3493,12 @@ function W.Summary()
                 -- enemy participant in an encounter where you died, consistent
                 -- with the existing World matchup record.
                 if record.playerDied then r.deaths = r.deaths + 1 end
+                local soloContested = record.friendlyCount == 1 and record.enemyCount == 1 and
+                    (record.pressureModelVersion ~= 1 or enemy.pressuredPlayer == true) and not GankKind(record, enemy)
+                if soloContested then
+                    if enemy.died then r.soloKills = r.soloKills + 1 end
+                    if record.playerDied then r.soloDeaths = r.soloDeaths + 1 end
+                end
             end
         end
         local contesting = record.contestingEnemyCount
@@ -2887,10 +3552,14 @@ function W.Summary()
     if mostKilled then
         summary.mostKilledName, summary.mostKilledClass = mostKilled.name, mostKilled.class
         summary.mostKilledKills, summary.mostKilledDeaths = mostKilled.kills, mostKilled.deaths
+        summary.mostKilledSoloKills, summary.mostKilledSoloDeaths = mostKilled.soloKills, mostKilled.soloDeaths
+        summary.mostKilledEncounters = mostKilled.encounters
     end
     if nemesis then
         summary.nemesisName, summary.nemesisClass = nemesis.name, nemesis.class
         summary.nemesisDeaths, summary.nemesisKills = nemesis.deaths, nemesis.kills
+        summary.nemesisSoloKills, summary.nemesisSoloDeaths = nemesis.soloKills, nemesis.soloDeaths
+        summary.nemesisEncounters = nemesis.encounters
     end
     return summary
 end
@@ -3076,44 +3745,62 @@ function W.SetMapRecord(map, record)
 
     -- GetMapArtLayerTextures() is intentionally only the underlying/fogged
     -- zone art. The stock World Map reveals discovered subzones by painting
-    -- C_MapExplorationInfo overlays on top. Mirror that composition here so
-    -- encounter cards look like the player's actual map instead of a permanently
-    -- unrevealed parchment. This still respects normal Classic exploration; it
-    -- does not manufacture art for areas this character has never discovered.
+    -- C_MapExplorationInfo overlays on top. Reproduce Blizzard's exploration
+    -- tiling rules here instead of assuming every overlay file is a 256x256
+    -- image. Classic exploration edge tiles are frequently stored in smaller
+    -- power-of-two files; using the logical tile size as their file size makes
+    -- those edge pieces stretch into large rectangular chunks of the wrong
+    -- terrain (the broken "map capture" look seen around Booty Bay).
     local overlayUsed = 0
     local getExplored = C_MapExplorationInfo and C_MapExplorationInfo.GetExploredMapTextures
     local explored = getExplored and getExplored(mapID) or nil
+    local overlayTileW = tonumber(layer.tileWidth) or 256
+    local overlayTileH = tonumber(layer.tileHeight) or 256
+
+    local function EdgeFileSize(pixelSize)
+        local fileSize = 16
+        while fileSize < pixelSize do fileSize = fileSize * 2 end
+        return fileSize
+    end
+
     for _, overlay in ipairs(explored or {}) do
-        local overlayWidth = tonumber(overlay.textureWidth) or 0
-        local overlayHeight = tonumber(overlay.textureHeight) or 0
-        local offsetX = tonumber(overlay.offsetX) or 0
-        local offsetY = tonumber(overlay.offsetY) or 0
-        local fileIDs = overlay.fileDataIDs or {}
-        if overlayWidth > 0 and overlayHeight > 0 and #fileIDs > 0 then
-            -- Exploration textures are authored as 256px tiles in the same map
-            -- coordinate space as the base art layer. Edge tiles are padded, so
-            -- trim their texcoords to the overlay's declared dimensions.
-            local tileSize = 256
-            local overlayColumns = math.ceil(overlayWidth / tileSize)
-            local overlayRows = math.ceil(overlayHeight / tileSize)
-            local fileIndex = 0
-            for overlayRow = 1, overlayRows do
-                for overlayColumn = 1, overlayColumns do
-                    fileIndex = fileIndex + 1
-                    local fileID = fileIDs[fileIndex]
-                    if fileID then
-                        overlayUsed = overlayUsed + 1
-                        local tile = EnsureExplorationTile(map, overlayUsed)
-                        local localX = (overlayColumn - 1) * tileSize
-                        local localY = (overlayRow - 1) * tileSize
-                        local remainingW = math.min(tileSize, overlayWidth - localX)
-                        local remainingH = math.min(tileSize, overlayHeight - localY)
-                        tile:SetTexture(fileID)
-                        tile:ClearAllPoints()
-                        tile:SetPoint("TOPLEFT", map.canvas, "TOPLEFT", (offsetX + localX) * scale, -(offsetY + localY) * scale)
-                        tile:SetSize(remainingW * scale, remainingH * scale)
-                        tile:SetTexCoord(0, remainingW / tileSize, 0, remainingH / tileSize)
-                        tile:Show()
+        -- Blizzard marks a few exploration regions as mouse-over-only. Rivals'
+        -- encounter map is a static snapshot, so drawing those permanently would
+        -- show art the stock map itself keeps hidden until hovered.
+        if not overlay.isShownByMouseOver then
+            local overlayWidth = tonumber(overlay.textureWidth) or 0
+            local overlayHeight = tonumber(overlay.textureHeight) or 0
+            local offsetX = tonumber(overlay.offsetX) or 0
+            local offsetY = tonumber(overlay.offsetY) or 0
+            local fileIDs = overlay.fileDataIDs or {}
+            if overlayWidth > 0 and overlayHeight > 0 and #fileIDs > 0 then
+                local overlayColumns = math.ceil(overlayWidth / overlayTileW)
+                local overlayRows = math.ceil(overlayHeight / overlayTileH)
+                for overlayRow = 1, overlayRows do
+                    local pixelH = overlayRow < overlayRows and overlayTileH or (overlayHeight % overlayTileH)
+                    if pixelH == 0 then pixelH = overlayTileH end
+                    local fileH = overlayRow < overlayRows and overlayTileH or EdgeFileSize(pixelH)
+
+                    for overlayColumn = 1, overlayColumns do
+                        local fileIndex = ((overlayRow - 1) * overlayColumns) + overlayColumn
+                        local fileID = fileIDs[fileIndex]
+                        if fileID then
+                            local pixelW = overlayColumn < overlayColumns and overlayTileW or (overlayWidth % overlayTileW)
+                            if pixelW == 0 then pixelW = overlayTileW end
+                            local fileW = overlayColumn < overlayColumns and overlayTileW or EdgeFileSize(pixelW)
+
+                            overlayUsed = overlayUsed + 1
+                            local tile = EnsureExplorationTile(map, overlayUsed)
+                            local localX = (overlayColumn - 1) * overlayTileW
+                            local localY = (overlayRow - 1) * overlayTileH
+                            tile:SetTexture(fileID)
+                            tile:SetDrawLayer("ARTWORK", overlay.isDrawOnTopLayer and 3 or 2)
+                            tile:ClearAllPoints()
+                            tile:SetPoint("TOPLEFT", map.canvas, "TOPLEFT", (offsetX + localX) * scale, -(offsetY + localY) * scale)
+                            tile:SetSize(pixelW * scale, pixelH * scale)
+                            tile:SetTexCoord(0, pixelW / fileW, 0, pixelH / fileH)
+                            tile:Show()
+                        end
                     end
                 end
             end
@@ -3402,16 +4089,16 @@ function W.InstallOverview(overview, duelPage)
     local hkBox, hkL, hkV = quadrant(0, 0)
     local gankBox, gankL, gankV = quadrant(148, 0)
     local mostBox, mostL, mostV = quadrant(0, -37)
-    local nemesisBox, nemesisL, nemesisV = quadrant(148, -37)
+    local goldBox, goldL, goldV = quadrant(148, -37)
     W.overviewStatLabels = {hkL=hkL, hkV=hkV, gankL=gankL, gankV=gankV,
-        mostL=mostL, mostV=mostV, nemesisL=nemesisL, nemesisV=nemesisV}
-    W.overviewStatBoxes = {hk=hkBox, gank=gankBox, most=mostBox, nemesis=nemesisBox}
+        mostL=mostL, mostV=mostV, goldL=goldL, goldV=goldV}
+    W.overviewStatBoxes = {hk=hkBox, gank=gankBox, most=mostBox, gold=goldBox}
 
-    local function StatTooltip(box, title, build)
+    local function StatTooltip(box, title, build, titleR, titleG, titleB)
         box:SetScript("OnEnter", function(self)
             local summary = W.Summary()
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetText(title)
+            if titleR then GameTooltip:SetText(title, titleR, titleG, titleB) else GameTooltip:SetText(title) end
             build(summary)
             GameTooltip:Show()
         end)
@@ -3425,24 +4112,36 @@ function W.InstallOverview(overview, duelPage)
         GameTooltip:AddLine("Kills against lower-level players.", 1, 1, 1, true)
         GameTooltip:AddLine(string.format("%d total • %d were 5+ levels below", summary.ganks or 0, summary.lowbieGanks or 0), 1, .68, .40)
     end)
-    StatTooltip(mostBox, "Most killed rival", function(summary)
-        if not summary.mostKilledName then
+    StatTooltip(mostBox, "Most Killed", function(summary)
+        if summary.mostKilledName then
+            GameTooltip:AddLine(DP.Theme.ClassName(summary.mostKilledName, summary.mostKilledClass), 1, 1, 1)
+            GameTooltip:AddLine(string.format("World PvP |cff65e6ad%d|r-|cffff8888%d|r    Solo |cff65e6ad%d|r-|cffff8888%d|r    %d %s",
+                summary.mostKilledKills or 0, summary.mostKilledDeaths or 0,
+                summary.mostKilledSoloKills or 0, summary.mostKilledSoloDeaths or 0,
+                summary.mostKilledEncounters or 0, (summary.mostKilledEncounters or 0) == 1 and "encounter" or "encounters"), .72, .76, .82)
+        else
             GameTooltip:AddLine("No rival kills recorded yet.", .72, .76, .82)
-            return
         end
-        GameTooltip:AddLine(summary.mostKilledName, 1, 1, 1)
-        GameTooltip:AddLine(string.format("Killed %d times", summary.mostKilledKills or 0), 1, .82, .42)
-        GameTooltip:AddLine(string.format("Killed you %d times", summary.mostKilledDeaths or 0), .72, .76, .82)
-    end)
-    StatTooltip(nemesisBox, "Nemesis", function(summary)
-        if not summary.nemesisName then
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddLine("Nemesis", 1, .82, 0)
+        if summary.nemesisName then
+            GameTooltip:AddLine(DP.Theme.ClassName(summary.nemesisName, summary.nemesisClass), 1, 1, 1)
+            GameTooltip:AddLine(string.format("World PvP |cff65e6ad%d|r-|cffff8888%d|r    Solo |cff65e6ad%d|r-|cffff8888%d|r    %d %s",
+                summary.nemesisKills or 0, summary.nemesisDeaths or 0,
+                summary.nemesisSoloKills or 0, summary.nemesisSoloDeaths or 0,
+                summary.nemesisEncounters or 0, (summary.nemesisEncounters or 0) == 1 and "encounter" or "encounters"), .72, .76, .82)
+            GameTooltip:AddLine("Deaths may be encounter-relative.", .62, .66, .72)
+        else
             GameTooltip:AddLine("No World PvP deaths recorded yet.", .72, .76, .82)
-            return
         end
-        GameTooltip:AddLine(summary.nemesisName, 1, 1, 1)
-        GameTooltip:AddLine(string.format("Killed you %d times", summary.nemesisDeaths or 0), 1, .45, .45)
-        GameTooltip:AddLine(string.format("You killed them %d times", summary.nemesisKills or 0), .72, .76, .82)
-        GameTooltip:AddLine("Deaths are encounter-relative when an exact killing blow is unavailable.", .62, .66, .72, true)
+    end, 1, .82, 0)
+    StatTooltip(goldBox, "Enemy gold spent", function(summary)
+        GameTooltip:AddLine("Estimated value of tracked consumables used by enemy Rivals against you.", 1, 1, 1, true)
+        GameTooltip:AddLine(string.format("Lifetime total: %s", EnemyGoldText(summary.enemyGoldSpentCopper, summary.enemyGoldSpentPartial, false)), 1, .82, .42)
+        if (summary.enemyGoldUnpricedCount or 0) > 0 then
+            GameTooltip:AddLine(string.format("%d tracked consumable%s had no captured price and are not included in the value.",
+                summary.enemyGoldUnpricedCount or 0, (summary.enemyGoldUnpricedCount or 0) == 1 and "" or "s"), .62, .66, .72, true)
+        end
     end)
     W.overviewLowerCard = lowerCard
 
@@ -3626,10 +4325,9 @@ function W.RefreshOverview()
         local value = s.mostKilledName and string.format("%s |cffadb5c2×%d|r", DP.Theme.ClassName(s.mostKilledName, s.mostKilledClass), s.mostKilledKills or 0) or "—"
         L.mostV:SetText(value)
     end
-    if L.nemesisL then L.nemesisL:SetText("NEMESIS") end
-    if L.nemesisV then
-        local value = s.nemesisName and DP.Theme.ClassName(s.nemesisName, s.nemesisClass) or "—"
-        L.nemesisV:SetText(value)
+    if L.goldL then L.goldL:SetText("ENEMY GOLD SPENT") end
+    if L.goldV then
+        L.goldV:SetText(string.format("|cffffce70%s|r", EnemyGoldText(s.enemyGoldSpentCopper, s.enemyGoldSpentPartial, true)))
     end
 end
 
@@ -3692,9 +4390,17 @@ local function ConfigureSmoothWheelScroll(scroll, body, step, topHint, bottomHin
         end)
     end
     function scroll:ScrollByWheel(delta)
-        local base = self.smoothTarget
+        -- Only accumulate against a destination while its animation is active.
+        -- A direct reset/scrollbar move may have changed the visible position.
+        local base = self.smoothScrolling and self.smoothTarget or nil
         if base == nil then base = self:GetVerticalScroll() or 0 end
         self:ScrollTo(base - delta * step)
+    end
+    function scroll:ResetScroll(value)
+        self.smoothScrolling = false
+        self:SetScript("OnUpdate", nil)
+        self.smoothTarget = Clamp(tonumber(value) or 0, 0, Range(self))
+        self:SetVerticalScroll(self.smoothTarget)
     end
     scroll:EnableMouseWheel(true)
     scroll:SetScript("OnMouseWheel", function(self, delta) self:ScrollByWheel(delta) end)
@@ -3924,6 +4630,40 @@ local function LedgerItemName(item)
     return name
 end
 
+local function ConsumableCostValue(item)
+    if not item or item.unpriced then return -1 end
+    return tonumber(item.totalCopper) or 0
+end
+
+local function SortedConsumableItems(actor)
+    local items = {}
+    for _, item in ipairs(actor and actor.items or {}) do items[#items + 1] = item end
+    table.sort(items, function(a, b)
+        local av, bv = ConsumableCostValue(a), ConsumableCostValue(b)
+        if av ~= bv then return av > bv end
+        local ac, bc = tonumber(a.count) or 0, tonumber(b.count) or 0
+        if ac ~= bc then return ac > bc end
+        return LedgerItemName(a) < LedgerItemName(b)
+    end)
+    return items
+end
+
+local function SortedConsumableActors(snapshot, record)
+    local actors = {}
+    for _, actor in ipairs(snapshot and snapshot.actors or {}) do actors[#actors + 1] = actor end
+    table.sort(actors, function(a, b)
+        local av, bv = tonumber(a.totalCopper) or 0, tonumber(b.totalCopper) or 0
+        if av ~= bv then return av > bv end
+        local au, bu = tonumber(a.unpricedCount) or 0, tonumber(b.unpricedCount) or 0
+        if au ~= bu then return au < bu end
+        -- Cost is the hierarchy. Stable identity ordering only breaks exact ties.
+        local an = a.guid == (record and record.playerGUID) and "You" or ShortName(a.name)
+        local bn = b.guid == (record and record.playerGUID) and "You" or ShortName(b.name)
+        return tostring(an or "") < tostring(bn or "")
+    end)
+    return actors
+end
+
 local function PopulateConsumableCostTooltip(window, owner, record)
     local tip = EnsureConsumableCostTooltip(window)
     local snapshot = record and record.consumableCost
@@ -3944,6 +4684,7 @@ local function PopulateConsumableCostTooltip(window, owner, record)
     local estimateText = unavailableLegacy and "|cff888f99—|r" or
         ((snapshot.pricedCount or 0) == 0 and (snapshot.unpricedCount or 0) > 0 and "|cff888f99—|r" or FormatMoneyIcons(total, partial))
     local actorCount = #(snapshot.actors or {})
+    local sortedActors = SortedConsumableActors(snapshot, record)
     if actorCount == 0 then
         tip.subtitle:Show()
         ResizeConsumableTooltip(tip, 245)
@@ -3972,12 +4713,12 @@ local function PopulateConsumableCostTooltip(window, owner, record)
     -- of being ellipsized.
     local maxLeft = MeasureTextWidth(tip.measureLeft, "Total consumable cost")
     local maxCost = MeasureTextWidth(tip.measureCost, estimateText)
-    for _, actor in ipairs(snapshot.actors or {}) do
+    for _, actor in ipairs(sortedActors) do
         local actorName = actor.guid == record.playerGUID and "You" or ShortName(actor.name)
         maxLeft = math.max(maxLeft, MeasureTextWidth(tip.measureLeft, actorName))
         maxCost = math.max(maxCost, MeasureTextWidth(tip.measureCost,
             FormatMoneyIcons(actor.totalCopper or 0, (actor.unpricedCount or 0) > 0)))
-        for _, item in ipairs(actor.items or {}) do
+        for _, item in ipairs(SortedConsumableItems(actor)) do
             local inline = LedgerItemName(item) .. " x" .. tostring(item.count or 1)
             maxLeft = math.max(maxLeft, MeasureTextWidth(tip.measureLeft, inline))
             local costText = item.unpriced and "unpriced" or PlainMoney(item.totalCopper or 0)
@@ -3990,7 +4731,7 @@ local function PopulateConsumableCostTooltip(window, owner, record)
     local _, inner = ResizeConsumableTooltip(tip, desired, maxCost + 2)
 
     local y, rowIndex, stripe = 31, 0, 0
-    for _, actor in ipairs(snapshot.actors or {}) do
+    for _, actor in ipairs(sortedActors) do
         rowIndex = rowIndex + 1
         local header = EnsureCostRow(tip, rowIndex)
         ResizeConsumableTooltip(tip, tip.GetWidth and tip:GetWidth() or desired, maxCost + 2)
@@ -4002,7 +4743,7 @@ local function PopulateConsumableCostTooltip(window, owner, record)
         header.qty:SetText("")
         header.cost:SetText(FormatMoneyIcons(actor.totalCopper or 0, (actor.unpricedCount or 0) > 0))
         header:Show(); y = y + 20
-        for _, item in ipairs(actor.items or {}) do
+        for _, item in ipairs(SortedConsumableItems(actor)) do
             rowIndex = rowIndex + 1; stripe = stripe + 1
             local row = EnsureCostRow(tip, rowIndex)
             ResizeConsumableTooltip(tip, tip.GetWidth and tip:GetWidth() or desired, maxCost + 2)
@@ -4700,6 +5441,73 @@ local function DetailEncounterLabel(record)
     return tostring(friendly) .. "v" .. tostring(hostile)
 end
 
+function W.EncounterCombatantLevel(level, playerLevel)
+    level, playerLevel = tonumber(level), tonumber(playerLevel)
+    if not level or level <= 0 then return "|cffadb5c2Lv ??|r" end
+    local color = "ffadb5c2"
+    if playerLevel and playerLevel > 0 then
+        local delta = level - playerLevel
+        -- Classic gray-level boundary, using the encounter's recorded player
+        -- level so leveling later cannot change the meaning of old encounters.
+        local gray = playerLevel <= 5 and 0 or playerLevel <= 39 and
+            (playerLevel - math.floor(playerLevel / 10) - 5) or
+            (playerLevel - math.floor(playerLevel / 5) - 1)
+        color = delta >= 5 and "ffff2020" or delta >= 3 and "ffff8040" or
+            delta >= -2 and "ffffff00" or level > gray and "ff40c040" or "ff808080"
+    end
+    return "|c" .. color .. "Lv " .. tostring(level) .. "|r"
+end
+
+function W.AddEncounterCombatantsTooltip(record)
+    local evidence, deaths = {}, {}
+    for _, entry in ipairs(record.session and record.session.worldCombatLog or {}) do
+        local key = entry.destGUID or entry.destName
+        if key and (entry.event == "UNIT_DIED" or entry.event == "UNIT_DESTROYED" or entry.event == "PARTY_KILL") and
+                not entry.unconscious and not (entry.text and entry.text:find("became unconscious", 1, true)) then
+            deaths[key] = true
+        end
+        if entry.sourceGUID and type(entry.spellName) == "string" then
+            local seen = evidence[entry.sourceGUID] or {}
+            evidence[entry.sourceGUID] = seen
+            seen[string.lower(entry.spellName)] = true
+        end
+    end
+    local player
+    for _, friendly in ipairs(record.friendlies or {}) do
+        if SameCombatant(friendly.guid, friendly.name, record.playerGUID, record.playerName) then player = friendly; break end
+    end
+    player = player or {guid=record.playerGUID, name=record.playerName or "You", class=record.playerClass}
+    local function Add(combatant, isPlayer)
+        local class = combatant.class or (isPlayer and record.playerClass)
+        local spec = type(combatant.spec) == "table" and combatant.spec.label or
+            type(combatant.spec) == "string" and combatant.spec or nil
+        if not spec and DP.Specs and DP.Specs.InferCombat and evidence[combatant.guid] then
+            spec = DP.Specs.InferCombat(class, evidence[combatant.guid])
+        end
+        local name = DP.Theme.ClassName(ShortName(combatant.name or "Unknown"), class)
+        local died = combatant.died or deaths[combatant.guid or combatant.name] or (isPlayer and record.playerDied)
+        local status = died and "|cffff8888Died|r" or "|cff65e6adSurvived|r"
+        local specText = type(spec) == "string" and spec ~= "" and ("|cffadb5c2" .. spec .. "|r  ") or ""
+        -- Put the inferred/known spec before the outcome so every green/red
+        -- Survived/Died label terminates at the same right edge.
+        GameTooltip:AddDoubleLine(name, specText .. status, 1, 1, 1, 1, 1, 1)
+    end
+    Add(player, true)
+    local seen = {}
+    if player.guid then seen[player.guid] = true end
+    for _, friendly in ipairs(record.friendlies or {}) do
+        if friendly ~= player and not SameCombatant(friendly.guid, friendly.name, record.playerGUID, record.playerName) and
+                not seen[friendly.guid or friendly.name] then
+            Add(friendly, false)
+            if friendly.guid or friendly.name then seen[friendly.guid or friendly.name] = true end
+        end
+    end
+    GameTooltip:AddLine("vs.", .65, .7, .76)
+    GameTooltip:AddLine(#(record.enemies or {}) == 1 and "OPPONENT" or "OPPONENTS", 1, .45, .45)
+    for _, enemy in ipairs(record.enemies or {}) do Add(enemy, false) end
+    if not record.enemies or #record.enemies == 0 then GameTooltip:AddLine("No combatant details retained", .65, .7, .76) end
+end
+
 local function FriendlyEndReason(reason)
     local labels = {
         ["combat-ended"] = "Combat ended",
@@ -4915,6 +5723,13 @@ local function EnsureDetails()
     -- but closing the pane starts the next detail view back on Summary.
     window:SetScript("OnHide", function(self)
         self.activeTab = "summary"
+        self._portraitRecord = nil
+        for _, card in ipairs(self.summaryRivalCards or {}) do
+            if DP.Portraits and DP.Portraits.ReleaseBody then DP.Portraits.ReleaseBody(card) end
+            card._portraitViewportActive = false
+            card._portraitCommittedKey = nil
+            card._portraitCommittedEnemy = nil
+        end
     end)
     window.starButton = CreateFrame("Button", nil, window)
     window.starButton:SetSize(12, 12)
@@ -4962,6 +5777,13 @@ local function EnsureDetails()
     window.outcome:SetWidth(144); window.outcome:SetHeight(30); window.outcome:SetJustifyH("LEFT"); window.outcome:SetJustifyV("TOP"); window.outcome:SetWordWrap(true)
     window.result = window.resultBox:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall"); window.result:Hide()
     window.locationHover = CreateFrame("Frame", nil, window.resultBox); window.locationHover:SetPoint("TOPLEFT", 7, -21); window.locationHover:SetSize(150, 58)
+    window.encounterHover = CreateFrame("Frame", nil, window.resultBox)
+    DetailTooltip(window.encounterHover, "Encounter combatants", function(_, record)
+        W.AddEncounterCombatantsTooltip(record)
+    end)
+    window.encounterHover:SetScript("OnHide", function(self)
+        if GameTooltip:GetOwner() == self then GameTooltip:Hide() end
+    end)
 
     -- Opponent buffs replace the redundant top-right opponent list. The card is
     -- permanently aligned with ENCOUNTER. A compact selector lives in the BUFFS
@@ -5506,6 +6328,7 @@ local function EnsureDetails()
         token:SetValue(current)
         token._syncing = false
         token:SetShown(needsScroll)
+        if W.RefreshVisibleOpponentPortraits then W.RefreshVisibleOpponentPortraits(window) end
     end
     window.summaryRivalsScrollbar:SetOnValueChanged(function(self, value)
         if self._syncing then return end
@@ -5513,6 +6336,7 @@ local function EnsureDetails()
         value = Clamp(value or 0, 0, range)
         window.summaryRivalsScroll.smoothTarget = value
         window.summaryRivalsScroll:SetVerticalScroll(value)
+        if window.summaryRivalsScroll.UpdateScrollHints then window.summaryRivalsScroll:UpdateScrollHints() end
     end)
     window.summaryRivalsEmpty = window.summaryRivalsBody:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     window.summaryRivalsEmpty:SetPoint("TOPLEFT", 5, -5); window.summaryRivalsEmpty:SetWidth(324); window.summaryRivalsEmpty:SetJustifyH("LEFT"); window.summaryRivalsEmpty:SetJustifyV("TOP"); window.summaryRivalsEmpty:Hide()
@@ -5606,7 +6430,22 @@ local function EnsureDetails()
     window.logScroll = CreateFrame("ScrollFrame", nil, window.logBox)
     window.logScroll:SetPoint("TOPLEFT", 10, -10); window.logScroll:SetPoint("BOTTOMRIGHT", -17, 10)
     window.logBody = CreateFrame("Frame", nil, window.logScroll); window.logBody:SetSize(583, 1); window.logScroll:SetScrollChild(window.logBody)
-    window.logText = window.logBody:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall"); window.logText:SetPoint("TOPLEFT", 4, -4); window.logText:SetWidth(575); window.logText:SetJustifyH("LEFT"); window.logText:SetJustifyV("TOP"); window.logText:SetWordWrap(true)
+    -- Use a multiline EditBox instead of a FontString so combat-log text can be
+    -- mouse-selected and copied with the normal Ctrl+A / Ctrl+C shortcuts.
+    -- Edits are display-only and are replaced whenever the log is refreshed.
+    window.logText = CreateFrame("EditBox", nil, window.logBody)
+    window.logText:SetPoint("TOPLEFT", 4, -4); window.logText:SetWidth(575); window.logText:SetHeight(1)
+    window.logText:SetMultiLine(true); window.logText:SetAutoFocus(false); window.logText:SetFontObject(GameFontHighlightSmall)
+    window.logText:SetJustifyH("LEFT"); window.logText:SetJustifyV("TOP"); window.logText:SetTextInsets(0, 0, 0, 0)
+    window.logText:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    if DP.Theme.ConfigureReadOnlyCombatLog then DP.Theme.ConfigureReadOnlyCombatLog(window.logText) end
+    if DP.Theme.CreateCombatLogCopyButton then
+        window.logCopyButton = DP.Theme.CreateCombatLogCopyButton(window.logBox, window.logText, function()
+            return window.logPlainText or (DP.Theme.PlainCombatLogText and DP.Theme.PlainCombatLogText(window.logText._rivalsLockedText or "")) or ""
+        end)
+    end
+    window.logMeasure = window.logBody:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    window.logMeasure:SetPoint("TOPLEFT", 4, -4); window.logMeasure:SetWidth(575); window.logMeasure:SetJustifyH("LEFT"); window.logMeasure:SetJustifyV("TOP"); window.logMeasure:SetWordWrap(true); window.logMeasure:SetAlpha(0)
     window.logScrollbar = DP.Theme.ScrollBar(window.logBox, 30)
     window.logScrollbar:SetPoint("TOPRIGHT", window.logBox, "TOPRIGHT", -4, -8)
     window.logScrollbar:SetPoint("BOTTOMRIGHT", window.logBox, "BOTTOMRIGHT", -4, 8)
@@ -5664,6 +6503,11 @@ local function UsageEvents(record, filter)
     local result, normalKeys, lastItemUse = {}, {}, {}
     local function Push(entry)
         if not entry or not (filter == "all" or entry.guid == filter) then return false end
+        -- 349981 is the persistent Supercharged Chronoboon aura, not an item-use
+        -- event. Older builds saved it as a fake Chronoboon row; hide that stale
+        -- evidence from Items & Abilities even before the record migration runs.
+        local usageSpellID = tonumber(entry.spellID or entry.sourceSpellID)
+        if usageSpellID == 349981 then return false end
         if entry.itemID and entry.guid then
             local key = tostring(entry.guid) .. ":" .. tostring(entry.itemID)
             local at = tonumber(entry.t) or 0
@@ -5676,6 +6520,25 @@ local function UsageEvents(record, filter)
         return true
     end
     for _, entry in ipairs(events) do Push(entry) end
+
+    -- Older records can contain only the NPC-sourced 13181 charm aura from a
+    -- Mind Control Cap backfire. Recover the gadget row directly from the saved
+    -- combat log and attribute it to the tracked participant the aura landed on.
+    local participants = record.session and record.session.participants or {}
+    for _, logEntry in ipairs(record.session and record.session.worldCombatLog or {}) do
+        local logEvent = tostring(logEntry.event or "")
+        if W.IsMindControlCapSpell(logEntry.spellID, logEntry.spellName) and
+                (logEvent == "SPELL_CAST_SUCCESS" or logEvent == "SPELL_AURA_APPLIED" or logEvent == "SPELL_AURA_REFRESH") then
+            local actorGUID, actorName, backfire = W.MindControlUseInfo(logEntry, participants)
+            if actorGUID then
+                Push({t=logEntry.t, guid=actorGUID, actorName=actorName, sourceName=actorName,
+                    targetGUID=backfire and nil or logEntry.destGUID, targetName=backfire and nil or logEntry.destName,
+                    spellID=tonumber(logEntry.spellID) or 13180, name="Gnomish Mind Control Cap",
+                    itemID=10726, itemName="Gnomish Mind Control Cap", quality=2, kind="item", category="engineering",
+                    backfire=backfire and true or nil, legacySource="worldCombatLog"})
+            end
+        end
+    end
 
     -- Older encounters often retained a useful CLEU cast/aura but not the
     -- corresponding worldUsage row. Reuse the consumable reconstruction pass to
@@ -5710,8 +6573,17 @@ local function UsageEvents(record, filter)
     return result
 end
 
-local CATEGORY_ORDER = {worldbuffs = 0, consumablebuffs = 1, potions = 2, engineering = 3, reagents = 4, equipment = 5, cooldowns = 6, racials = 7}
-local CATEGORY_LABEL = {worldbuffs = "WORLD BUFFS", consumablebuffs = "CONSUMABLE BUFFS", potions = "POTIONS/CONSUMABLES", engineering = "ENGINEERING GADGETS", reagents = "REAGENTS", equipment = "EQUIPMENT", cooldowns = "COOLDOWNS (≥3 MIN)", racials = "RACIALS"}
+local CATEGORY_ORDER = {worldbuffs = 0, consumablebuffs = 1, potions = 2, engineering = 3, equipment = 4, cooldowns = 5, racials = 6}
+local CATEGORY_LABEL = {worldbuffs = "WORLD BUFFS", consumablebuffs = "CONSUMABLE BUFFS", potions = "POTIONS/CONSUMABLES", engineering = "ENGINEERING GADGETS", equipment = "EQUIPMENT", cooldowns = "COOLDOWNS (≥3 MIN)", racials = "RACIALS"}
+local CATEGORY_TOOLTIP = {
+    worldbuffs = "World buffs observed on an opponent during the encounter.",
+    consumablebuffs = "Short-duration consumable effects observed on an opponent, including potion-style buffs that may not have a separate retained use event.",
+    potions = "Potions, bandages, healthstones, Chronoboon activations, and other directly used consumables. Reagent costs are kept only in Consumable Cost.",
+    engineering = "Engineering devices and gadgets used during the encounter, such as grenades, reflectors, nets, and Mind Control Cap.",
+    equipment = "Activated gear and item procs attributable to equipped weapons, armor, trinkets, or other equipment.",
+    cooldowns = "Class abilities with cooldowns of at least three minutes.",
+    racials = "Racial abilities used during the encounter.",
+}
 
 local function DescribeWorldUsage(entry, record)
     if entry.buffCategory then
@@ -5764,6 +6636,16 @@ local function EnsureUsageRow(window, index, kind)
         local fontPath, fontSize = row.label:GetFont()
         if fontPath and fontSize then row.label:SetFont(fontPath, fontSize, "OUTLINE") end
         row.label:SetShadowColor(0, 0, 0, 1); row.label:SetShadowOffset(1, -2)
+        row:SetScript("OnEnter", function(self)
+            local category = self.categoryKey
+            local description = category and CATEGORY_TOOLTIP[category]
+            if not description then return end
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText(CATEGORY_LABEL[category] or category, 1, .82, .36)
+            GameTooltip:AddLine(description, .9, .9, .9, true)
+            GameTooltip:Show()
+        end)
+        row:SetScript("OnLeave", function() GameTooltip:Hide() end)
     else
         row.time = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall"); row.time:SetPoint("TOPLEFT", 6, -5); row.time:SetWidth(48); row.time:SetJustifyH("LEFT")
         row.player = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall"); row.player:SetPoint("TOPLEFT", 60, -5); row.player:SetWidth(106); row.player:SetJustifyH("LEFT"); row.player:SetWordWrap(false)
@@ -5892,8 +6774,144 @@ function W.PortraitDisplayChoices(enemy, choices)
     return #filtered > 0 and filtered or all
 end
 
+local function HidePortraitSpinner(card, keepWanted)
+    if card and card.portraitSpinnerFrame then
+        card.portraitSpinnerFrame:Hide()
+        card.portraitSpinnerFrame._phase = 0
+    end
+    if card then
+        card._portraitLoading = nil
+        if not keepWanted and DP.Portraits and DP.Portraits.ReleaseWanted then DP.Portraits.ReleaseWanted(card) end
+    end
+end
+
+local function ShowPortraitSpinner(card)
+    if not card then return false end
+    if card.portrait then card.portrait:Hide() end
+    if card.portraitModel then card.portraitModel:Hide() end
+    if card.portraitSpinnerFrame then
+        card.portraitSpinnerFrame._phase = 0
+        card.portraitSpinnerFrame:Show()
+        card._portraitLoading = true
+        return true
+    end
+    return false
+end
+
+
+function W.QueuePortraitLoadRetry(card, enemy, commitKey)
+    if not (card and enemy and C_Timer and C_Timer.After and DP.Portraits) then return end
+    card._portraitLoadRetryGeneration = (tonumber(card._portraitLoadRetryGeneration) or 0) + 1
+    local generation = card._portraitLoadRetryGeneration
+    local startedAt = GetTime and GetTime() or 0
+    local function Retry()
+        if card._portraitLoadRetryGeneration ~= generation or not card._portraitViewportActive or
+                card.enemy ~= enemy or card._portraitCommittedKey ~= commitKey or
+                not (card._portraitLoading or card._portraitTemporaryFallback) then return end
+        local elapsed = (GetTime and GetTime() or 0) - startedAt
+        card._portraitHideStaticOnReveal = card._portraitTemporaryFallback and true or nil
+        if DP.Portraits.IsPrepared and DP.Portraits.IsPrepared(enemy) and DP.Portraits.ApplyPrepared and
+                DP.Portraits.ApplyPrepared(card, enemy) then
+            card._portraitFallback = false
+            card._portraitTemporaryFallback = nil
+            return
+        end
+        if DP.Portraits.WantPrepared then DP.Portraits.WantPrepared(card, enemy) end
+        if DP.Portraits.PrepareImmediate then DP.Portraits.PrepareImmediate(enemy, true)
+        elseif DP.Portraits.PreloadIdentities then DP.Portraits.PreloadIdentities({enemy}, 1, true) end
+        C_Timer.After(elapsed < 3 and .10 or .5, Retry)
+    end
+    if DP.Portraits.WantPrepared then DP.Portraits.WantPrepared(card, enemy) end
+    if DP.Portraits.PrepareImmediate then DP.Portraits.PrepareImmediate(enemy, true)
+    elseif DP.Portraits.PreloadIdentities then DP.Portraits.PreloadIdentities({enemy}, 1, true) end
+    C_Timer.After(.01, Retry)
+end
+
+local function ShowRaceClassPortraitFallback(card, enemy, temporary)
+    if not (card and card.portrait and enemy) then return false end
+    if SetPortraitTextureFromCreatureDisplayID then
+        local raceKey = enemy.raceFile or W.RACE_KEY_BY_NAME[tostring(enemy.race or "")]
+        local choices = raceKey and enemy.class and W.CLASS_RACE_PORTRAIT_DISPLAY_IDS[raceKey .. ":" .. tostring(enemy.class)]
+        choices = W.PortraitDisplayChoices(enemy, choices)
+        if choices and #choices > 0 then
+            local displayID = choices[W.PortraitChoiceIndex(enemy, #choices)]
+            local ok = pcall(SetPortraitTextureFromCreatureDisplayID, card.portrait, displayID)
+            if ok then
+                card.portrait:SetTexCoord(0, 1, 0, 1)
+                card.portrait:Show()
+                card._portraitFallback = true
+                card._portraitTemporaryFallback = temporary and true or nil
+                return true
+            end
+        end
+    end
+    return false
+end
+
+function W.RecordPortraitsReady(record)
+    if not record then return true end
+    for _, enemy in ipairs(record.enemies or {}) do
+        local snapshot = enemy and enemy.portraitAppearance
+        if snapshot and snapshot.slotCount and snapshot.slotCount > 0 then
+            local holder = W._portraitCaptureFrames and W._portraitCaptureFrames[enemy]
+            if not (holder and holder.captured) then
+                if not (DP.Portraits and DP.Portraits.IsPrepared and DP.Portraits.IsPrepared(enemy)) then
+                    return false
+                end
+            end
+        end
+    end
+    return true
+end
+
 function W.ApplyOpponentPortrait(card, enemy)
     if not card or not card.portrait then return end
+    local commitKey = DP.Portraits and DP.Portraits.CacheKey and DP.Portraits.CacheKey(enemy) or
+        tostring(enemy and (enemy.guid or enemy.name) or "?")
+
+    -- Re-clicking the same History encounter, switching away from Summary and
+    -- back, or refreshing surrounding text must not rebuild a portrait that is
+    -- already committed to this plaque. Reassert the pause and leave every
+    -- render object exactly where it is.
+    local committedVisualStillResident = card._portraitBodyEntry or card._snapshotHolder or
+        (card.portrait.IsShown and card.portrait:IsShown()) or
+        (card.portraitSpinnerFrame and card.portraitSpinnerFrame.IsShown and card.portraitSpinnerFrame:IsShown())
+    if card._portraitCommittedKey == commitKey and card._portraitCommittedEnemy == enemy and committedVisualStillResident then
+        card._portraitViewportActive = true
+        -- A prepared 3D portrait is a true no-op on repeated encounter clicks.
+        -- A fallback, however, may have been committed only because the hidden
+        -- preloader lost the startup race. Upgrade it in place once preparation
+        -- finishes instead of requiring the user to close/reopen Rivals.
+        if (card._portraitFallback or card._portraitLoading) and DP.Portraits and DP.Portraits.IsPrepared and
+                DP.Portraits.IsPrepared(enemy) and DP.Portraits.ApplyPrepared then
+            card._portraitHideStaticOnReveal = card._portraitFallback and true or nil
+            if DP.Portraits.ApplyPrepared(card, enemy) then
+                card._portraitFallback = false
+                card._portraitTemporaryFallback = nil
+                return
+            end
+            card._portraitHideStaticOnReveal = nil
+        end
+        -- Deliberately touch nothing else. Even calling SetAnimation again on an
+        -- already-paused actor can expose a one-frame pose reset on Classic.
+        return
+    end
+
+    card._portraitViewportActive = true
+    card._portraitLoadRetryGeneration = (tonumber(card._portraitLoadRetryGeneration) or 0) + 1
+    card._rivalsPortraitReady = nil
+    card._portraitTemporaryFallback = nil
+    HidePortraitSpinner(card)
+    -- Real opponent cards borrow retained session race/sex bodies, but visible
+    -- cards only attach actors that were already dressed and frozen off-screen.
+    card._rivalsUsePortraitBodyPool = true
+    if DP.Portraits then
+        if DP.Portraits.ResetCard then DP.Portraits.ResetCard(card)
+        else DP.Portraits.Reset(card.portraitModel) end
+    end
+    card._portraitCommittedKey = nil
+    card._portraitCommittedEnemy = nil
+    card._portraitReconstructed = false
     if card._snapshotHolder then
         local holder = card._snapshotHolder
         holder.tex:Hide()
@@ -5919,61 +6937,135 @@ function W.ApplyOpponentPortrait(card, enemy)
         if card.portraitMask and holder.tex.AddMaskTexture then holder.tex:AddMaskTexture(card.portraitMask) end
         holder.tex:Show()
         card._snapshotHolder = holder
-        applied = true
-    elseif enemy and enemy.portraitTexture and
-            not (type(enemy.portraitTexture) == "string" and enemy.portraitTexture:match("^RTPortrait")) then
-        card.portrait:SetTexture(enemy.portraitTexture)
-        card.portrait:Show()
+        HidePortraitSpinner(card)
         applied = true
     end
 
-    -- Once the unit token is gone, a retained display ID still gives Blizzard a
-    -- real character portrait instead of an empty DressUpModel/race-sheet guess.
-    if not applied and enemy and tonumber(enemy.portraitDisplayID) and SetPortraitTextureFromCreatureDisplayID then
+    -- Persisted SetPortraitTexture backing handles are intentionally ignored.
+    -- Current-session exact portraits live in _portraitCaptureFrames above;
+    -- saved encounters reconstruct from their serialized appearance below.
+
+    local reconstructable = enemy and enemy.portraitAppearance and enemy.portraitAppearance.slotCount and
+        enemy.portraitAppearance.slotCount > 0
+    -- After reload, never construct a ModelScene on a visible plaque. Only a
+    -- portrait that was fully dressed, framed, and frozen off-screen is eligible
+    -- to attach here. A cache miss starts only this visible opponent's work and
+    -- upgrades the medallion as soon as the hidden preparation finishes.
+    if not applied and enemy and DP.Portraits and card.portraitModel then
+        local reconstructed = DP.Portraits.ApplyPrepared and DP.Portraits.ApplyPrepared(card, enemy) and true or false
+        if reconstructed then
+            applied = true
+            card._portraitFallback = false
+            card._portraitTemporaryFallback = nil
+        elseif DP.Portraits.PrepareImmediate then
+            DP.Portraits.PrepareImmediate(enemy, true)
+        elseif DP.Portraits.PreloadIdentities then
+            DP.Portraits.PreloadIdentities({enemy}, 1, true)
+        end
+    end
+
+
+    -- Saved portraits show only the spinner until their reconstructed actor
+    -- is ready. There is no timed class-icon replacement.
+    if not applied and reconstructable then
+        if DP.Portraits and DP.Portraits.WantPrepared then DP.Portraits.WantPrepared(card, enemy) end
+        applied = ShowPortraitSpinner(card) and true or false
+    end
+
+    -- Records with no reconstructable outfit can still use Blizzard's display-ID
+    -- portrait or the stable race/class legacy backfill.
+    if not applied and not reconstructable and enemy and tonumber(enemy.portraitDisplayID) and SetPortraitTextureFromCreatureDisplayID then
         local ok = pcall(SetPortraitTextureFromCreatureDisplayID, card.portrait, tonumber(enemy.portraitDisplayID))
         if ok then
             card.portrait:SetTexCoord(0, 1, 0, 1)
             card.portrait:Show()
+            HidePortraitSpinner(card)
             applied = true
         end
     end
-
-    -- Legacy records: use an actual race+class Classic character. This is a
-    -- synthetic backfill, but it reads as the opponent's class rather than a
-    -- generic race painting. Selection is stable per rival/encounter.
-    if not applied and enemy and SetPortraitTextureFromCreatureDisplayID then
-        local raceKey = enemy.raceFile or W.RACE_KEY_BY_NAME[tostring(enemy.race or "")]
-        local choices = raceKey and enemy.class and W.CLASS_RACE_PORTRAIT_DISPLAY_IDS[raceKey .. ":" .. tostring(enemy.class)]
-        choices = W.PortraitDisplayChoices(enemy, choices)
-        if choices and #choices > 0 then
-            local displayID = choices[W.PortraitChoiceIndex(enemy, #choices)]
-            local ok = pcall(SetPortraitTextureFromCreatureDisplayID, card.portrait, displayID)
-            if ok then
-                card.portrait:SetTexCoord(0, 1, 0, 1)
-                card.portrait:Show()
-                card._portraitFallback = true
-                applied = true
-            end
-        end
-    end
-
-    -- If a race/class pair has no curated Classic model yet, use its class icon;
-    -- do not fall back to misleading generic race artwork.
-    if not applied and enemy and CLASS_ICON_TCOORDS then
-        local coords = CLASS_ICON_TCOORDS[tostring(enemy.class or "")]
-        if coords then
-            card.portrait:SetTexture("Interface\\GLUES\\CHARACTERCREATE\\UI-CHARACTERCREATE-CLASSES")
-            card.portrait:SetTexCoord(coords[1], coords[2], coords[3], coords[4])
-            card.portrait:Show()
-            card._portraitFallback = true
-            applied = true
-        end
+    if not applied and not reconstructable and enemy then
+        applied = ShowRaceClassPortraitFallback(card, enemy, false) and true or false
+        if applied then HidePortraitSpinner(card) end
     end
     if not applied then
         card.portrait:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
         card.portrait:SetTexCoord(.08, .92, .08, .92)
         card.portrait:Show()
         card._portraitFallback = true
+    end
+    card._portraitCommittedKey = commitKey
+    card._portraitCommittedEnemy = enemy
+    if card._portraitLoading then W.QueuePortraitLoadRetry(card, enemy, commitKey) end
+end
+
+-- Hidden preparation can finish while a detail pane is already open (mainly
+-- during the first second after /reload). Upgrade only the matching fallback
+-- card, with the old static texture left visible until the frozen ModelScene is
+-- ready to reveal. This is a seamless swap: no blank medallion, no pane reload,
+-- and no user click is required.
+function W.OnOpponentPortraitPrepared(enemy, preparedKey)
+    local detail = window
+    if not (enemy and detail and detail.IsShown and detail:IsShown()) then return end
+    local expectedKey = DP.Portraits and DP.Portraits.CacheKey and DP.Portraits.CacheKey(enemy) or nil
+    if preparedKey and expectedKey and preparedKey ~= expectedKey then return end
+    if DP.Portraits and DP.Portraits.TraceLoad then DP.Portraits.TraceLoad("callback", expectedKey) end
+    for _, card in ipairs(detail.summaryRivalCards or {}) do
+        local cardKey = card._portraitCommittedKey or
+            (card.enemy and DP.Portraits and DP.Portraits.CacheKey and DP.Portraits.CacheKey(card.enemy))
+        if card._portraitViewportActive and (card._portraitFallback or card._portraitLoading) and
+                cardKey and expectedKey and cardKey == expectedKey and
+                card.enemy and DP.Portraits and DP.Portraits.ApplyPrepared then
+            card._portraitHideStaticOnReveal = card._portraitFallback and true or nil
+            if DP.Portraits.ApplyPrepared(card, card.enemy) then
+                card._portraitFallback = false
+                card._portraitTemporaryFallback = nil
+                card._portraitCommittedKey = expectedKey
+                card._portraitCommittedEnemy = card.enemy
+            else
+                card._portraitHideStaticOnReveal = nil
+            end
+        end
+    end
+end
+
+-- Only rows that are materially visible in the clipped OPPONENTS viewport keep a
+-- borrowed 3D body. The ScrollFrame creates every encounter row at once, so
+-- without this a long encounter can strand pooled bodies on cards the player
+-- cannot even see and exhaust a race/sex cache unnecessarily.
+function W.RefreshVisibleOpponentPortraits(detailWindow)
+    local win = detailWindow or window
+    if not (win and win.summaryRivalsScroll and win.summaryRivalCards) then return end
+    local scroll = win.summaryRivalsScroll
+    local viewTop = scroll:GetVerticalScroll() or 0
+    local viewHeight = scroll:GetHeight() or 0
+    local viewBottom = viewTop + viewHeight
+    local minimumVisible = 10 -- avoids leasing both edge rows for a 1px overlap
+
+    local visible = {}
+    -- Release every outgoing lease before requesting incoming rows, including
+    -- when scrolling upward. Otherwise the earlier rows can see a full pool.
+    for _, card in ipairs(win.summaryRivalCards) do
+        local shouldLease = false
+        if card.kind == "player" and card.enemy and card:IsShown() then
+            local rowTop = tonumber(card.summaryRowTop) or 0
+            local rowBottom = rowTop + (card:GetHeight() or 47)
+            local overlap = math.max(0, math.min(rowBottom, viewBottom) - math.max(rowTop, viewTop))
+            shouldLease = (not win.activeTab or win.activeTab == "summary") and
+                (not win.IsShown or win:IsShown()) and overlap >= minimumVisible
+        end
+        if shouldLease then
+            visible[#visible + 1] = card
+        elseif card._portraitViewportActive then
+            if DP.Portraits and DP.Portraits.ReleaseBody then DP.Portraits.ReleaseBody(card) end
+            if card.portraitScene then card.portraitScene:Hide() end
+            card._portraitViewportActive = false
+        end
+    end
+    for _, card in ipairs(visible) do
+        local key = DP.Portraits and DP.Portraits.CacheKey and DP.Portraits.CacheKey(card.enemy)
+        if not card._portraitViewportActive or (key and card._portraitCommittedKey ~= key) then
+            W.ApplyOpponentPortrait(card, card.enemy)
+        end
     end
 end
 
@@ -6037,12 +7129,24 @@ function W.SetSummaryCardPortraitMode(card, enabled, contentWidth)
         card.hoverWash:SetPoint("BOTTOMRIGHT", anchor, "BOTTOMRIGHT", -3, 3)
         card.hoverWash:SetAlpha(.72 * progress)
     end
-    if card.portraitBorderMatte then
-        card.portraitBorderMatte:ClearAllPoints()
-        card.portraitBorderMatte:SetPoint("TOPLEFT", anchor, "TOPLEFT", 0, 0)
-        card.portraitBorderMatte:SetPoint("BOTTOMLEFT", anchor, "BOTTOMLEFT", 0, 0)
-        card.portraitBorderMatte:SetWidth(Pixel(16))
-        card.portraitBorderMatte:SetShown(enabled)
+    if card.portraitBorderMatteTop and card.portraitBorderMatteBottom then
+        -- Only hide the exposed TOP/BOTTOM rail segments to the left of the
+        -- circular medallion.  A full-height matte fixed the rail escape but also
+        -- sat over the 46px portrait opening and visibly shaved off its left side.
+        -- These two shallow occluders cover the tooltip border only; the portrait
+        -- viewport/camera/mask remain completely untouched.
+        local railMatteWidth = Pixel(16)
+        local railMatteHeight = Pixel(6)
+
+        card.portraitBorderMatteTop:ClearAllPoints()
+        card.portraitBorderMatteTop:SetPoint("TOPLEFT", anchor, "TOPLEFT", 0, 0)
+        card.portraitBorderMatteTop:SetSize(railMatteWidth, railMatteHeight)
+        card.portraitBorderMatteTop:SetShown(enabled)
+
+        card.portraitBorderMatteBottom:ClearAllPoints()
+        card.portraitBorderMatteBottom:SetPoint("BOTTOMLEFT", anchor, "BOTTOMLEFT", 0, 0)
+        card.portraitBorderMatteBottom:SetSize(railMatteWidth, railMatteHeight)
+        card.portraitBorderMatteBottom:SetShown(enabled)
     end
 
     -- Hover feedback stays on the portrait/copy. The circular occluder is a child
@@ -6149,13 +7253,31 @@ local function EnsureSummaryRivalCard(window, index)
     card.portraitBorderMatteFrame = CreateFrame("Frame", nil, card.visual)
     card.portraitBorderMatteFrame:SetFrameLevel(card.border:GetFrameLevel() + 1)
     card.portraitBorderMatteFrame:SetAllPoints(card.visual)
-    card.portraitBorderMatte = card.portraitBorderMatteFrame:CreateTexture(nil, "BACKGROUND")
-    card.portraitBorderMatte:SetColorTexture(.045, .055, .07, 1)
-    card.portraitBorderMatte:Hide()
+
+    -- Two shallow rail mattes instead of one full-height left strip.  The native
+    -- rounded border is extended left so its actual corners remain outside the
+    -- row clip; these mattes hide only the short horizontal rails that would be
+    -- visible in the crescent outside the medallion.  Because neither matte spans
+    -- the portrait's vertical opening, they cannot crop the 3D portrait.
+    card.portraitBorderMatteTop = card.portraitBorderMatteFrame:CreateTexture(nil, "BACKGROUND")
+    card.portraitBorderMatteTop:SetColorTexture(.045, .055, .07, 1)
+    card.portraitBorderMatteTop:Hide()
+    card.portraitBorderMatteBottom = card.portraitBorderMatteFrame:CreateTexture(nil, "BACKGROUND")
+    card.portraitBorderMatteBottom:SetColorTexture(.045, .055, .07, 1)
+    card.portraitBorderMatteBottom:Hide()
 
     card.portraitFrame = CreateFrame("Frame", nil, card.content)
     card.portraitFrame:SetSize(56, 56); card.portraitFrame:SetPoint("LEFT", card.content, "LEFT", 0, 0)
     card.portraitFrame:SetFrameLevel(card.content:GetFrameLevel() + 1)
+
+    -- ModelScene actors cannot use a Texture mask directly. The 46px viewport
+    -- fills the medallion opening; the opaque cover above the model hides its
+    -- square corners. Camera FOV compensates for viewport size so calibration
+    -- retains the same face magnification while exposing more around its edges.
+    card.portraitViewport = CreateFrame("Frame", nil, card.portraitFrame)
+    card.portraitViewport:SetSize(46, 46); card.portraitViewport:SetPoint("CENTER", 0, 0)
+    card.portraitViewport:SetFrameLevel(card.portraitFrame:GetFrameLevel() + 1)
+    if card.portraitViewport.SetClipsChildren then card.portraitViewport:SetClipsChildren(true) end
 
     -- Opaque circular matte behind the *inner* portrait, not the whole 56px ring.
     -- Leaving the outer 4px of the medallion unoccluded lets the plaque's top and
@@ -6178,8 +7300,8 @@ local function EnsureSummaryRivalCard(window, index)
         card.portraitMask:SetSize(46, 46); card.portraitMask:SetPoint("CENTER")
         card.portrait:AddMaskTexture(card.portraitMask)
     end
-    card.portraitModel = CreateFrame("DressUpModel", nil, card.portraitFrame)
-    card.portraitModel:SetPoint("CENTER", 0, -1); card.portraitModel:SetSize(44, 44)
+    card.portraitModel = CreateFrame("DressUpModel", nil, card.portraitViewport)
+    card.portraitModel:SetPoint("CENTER", 0, 0); card.portraitModel:SetSize(46, 46)
     card.portraitModel:SetFrameLevel(card.portraitFrame:GetFrameLevel() + 1)
     if card.portraitModel.SetKeepModelOnHide then card.portraitModel:SetKeepModelOnHide(true) end
     card.portraitModel:SetScript("OnModelLoaded", function(self)
@@ -6191,9 +7313,74 @@ local function EnsureSummaryRivalCard(window, index)
         end
     end)
     card.portraitModel:Hide()
+
+    -- Loading indicator: keep its own 46px coordinate system explicitly centered
+    -- on the 56px medallion, rather than inheriting any viewport offsets. The dots
+    -- use a circular alpha texture and a continuously interpolated tail so there
+    -- are no square blocks or stepwise size jumps.
+    card.portraitSpinnerFrame = CreateFrame("Frame", nil, card.portraitFrame)
+    card.portraitSpinnerFrame:SetSize(46, 46)
+    card.portraitSpinnerFrame:SetPoint("CENTER", card.portraitFrame, "CENTER", -1, 1)
+    card.portraitSpinnerFrame:SetFrameLevel(card.portraitFrame:GetFrameLevel() + 19)
+    card.portraitSpinnerFrame.dots = {}
+    local spinnerRadius = 7.1
+    local spinnerDots = 10
+    for i = 1, spinnerDots do
+        local dot = card.portraitSpinnerFrame:CreateTexture(nil, "OVERLAY")
+        dot:SetTexture("Interface\\CharacterFrame\\TempPortraitAlphaMask")
+        dot:SetTexCoord(0, 1, 0, 1)
+        local angle = (math.pi / 2) - ((i - 1) / spinnerDots) * (math.pi * 2)
+        dot:SetPoint("CENTER", card.portraitSpinnerFrame, "CENTER", math.cos(angle) * spinnerRadius, math.sin(angle) * spinnerRadius)
+        dot:SetSize(2.6, 2.6)
+        dot:SetVertexColor(1, .82, .42, 1)
+        dot:SetAlpha(.09)
+        card.portraitSpinnerFrame.dots[i] = dot
+    end
+    card.portraitSpinnerFrame:SetScript("OnShow", function(self)
+        self._phase = 0
+    end)
+    card.portraitSpinnerFrame:SetScript("OnUpdate", function(self, elapsed)
+        self._phase = ((self._phase or 0) + elapsed * 6.5) % spinnerDots
+        for idx, dot in ipairs(self.dots or {}) do
+            local behind = (self._phase - (idx - 1)) % spinnerDots
+            local strength = math.exp(-behind * 1.2)
+            local size = 1.1 + strength * 2.7
+            dot:SetSize(size, size)
+            dot:SetAlpha(.06 + strength * .42)
+        end
+    end)
+    card.portraitSpinnerFrame:Hide()
+
+    -- Keep the circular ModelScene occluder on its own layer.  The cover exists
+    -- only to hide the square 3D render target outside the medallion opening; it
+    -- must not also erase the plaque rails that visually continue underneath the
+    -- gold ring.  The previous build parented this cover to portraitRingFrame,
+    -- putting it above the plaque border and recreating the detached-border gap.
+    card.portraitCoverFrame = CreateFrame("Frame", nil, card.portraitFrame)
+    card.portraitCoverFrame:SetAllPoints(card.portraitFrame)
+    card.portraitCoverFrame:SetFrameLevel(card.portraitFrame:GetFrameLevel() + 10)
+    if DP.Portraits and DP.Portraits.AddPortraitCover then
+        card.portraitRoundCover = DP.Portraits.AddPortraitCover(card.portraitCoverFrame)
+    end
+
+    -- Layer the plaque edge between the portrait cover and the visible gold ring.
+    -- This preserves the working portrait crop, lets the top/bottom rails pass
+    -- beneath the medallion, and keeps the shifted/clipped left tooltip corners
+    -- hidden exactly as SetSummaryCardPortraitMode already intends.
+    local plaqueBridgeLevel = card.portraitCoverFrame:GetFrameLevel() + 1
+    if card.borderClip and card.borderClip.SetFrameLevel then
+        card.borderClip:SetFrameLevel(plaqueBridgeLevel)
+    end
+    if card.border and card.border.SetFrameLevel then
+        card.border:SetFrameLevel(plaqueBridgeLevel)
+    end
+    if card.portraitBorderMatteFrame and card.portraitBorderMatteFrame.SetFrameLevel then
+        card.portraitBorderMatteFrame:SetFrameLevel(plaqueBridgeLevel + 1)
+    end
+
     card.portraitRingFrame = CreateFrame("Frame", nil, card.portraitFrame)
     card.portraitRingFrame:SetAllPoints(card.portraitFrame)
-    card.portraitRingFrame:SetFrameLevel(card.portraitFrame:GetFrameLevel() + 2)
+    card.portraitRingFrame:SetFrameLevel(card.portraitFrame:GetFrameLevel() + 20)
     card.portraitRing = card.portraitRingFrame:CreateTexture(nil, "OVERLAY")
     card.portraitRing:SetPoint("CENTER"); card.portraitRing:SetSize(56, 56)
     local ringOK = card.portraitRing.SetAtlas and pcall(card.portraitRing.SetAtlas, card.portraitRing, "AdventureMap-combatally-ring", false)
@@ -6299,6 +7486,12 @@ function W.RefreshDetailContent()
     window.summaryRivalsTitle:SetShown(tab == "summary")
     window.summaryRivalsBox:SetShown(tab == "summary")
     window.summaryRivalsScroll:SetShown(tab == "summary")
+    if tab ~= "summary" then
+        for _, card in ipairs(window.summaryRivalCards or {}) do
+            if DP.Portraits and DP.Portraits.ReleaseBody then DP.Portraits.ReleaseBody(card) end
+            card._portraitViewportActive = false
+        end
+    end
     if tab ~= "summary" and window.summaryRivalsScrollbar then window.summaryRivalsScrollbar:Hide() end
     window.filter:SetShown(tab == "usage")
     window.usageHeader:SetShown(tab == "usage")
@@ -6327,7 +7520,14 @@ function W.RefreshDetailContent()
         local enemies = record.enemies or {}
         local npcs = EncounterNPCs(record)
         local totalCards = #enemies + #npcs
+        local preservePortraits = window._portraitRecord == record
         for _, card in ipairs(window.summaryRivalCards or {}) do
+            if not preservePortraits then
+                if DP.Portraits and DP.Portraits.ReleaseBody then DP.Portraits.ReleaseBody(card) end
+                card._portraitViewportActive = false
+                card._portraitCommittedKey = nil
+                card._portraitCommittedEnemy = nil
+            end
             if card.visual and card.visual:GetParent() ~= card then
                 card._hoverTarget, card._hoverProgress = 0, 0
                 card:SetScript("OnUpdate", nil)
@@ -6336,7 +7536,7 @@ function W.RefreshDetailContent()
                 card.visual:ClearAllPoints(); card.visual:SetAllPoints(card)
                 card.visual:SetFrameLevel(card:GetFrameLevel())
             end
-            card:Hide()
+            if not preservePortraits then card:Hide() end
         end
         if window.summaryRivalsEmpty then window.summaryRivalsEmpty:Hide() end
         window.summaryRivalsScroll.smoothTarget = 0
@@ -6358,7 +7558,7 @@ function W.RefreshDetailContent()
             card.enemy, card.stats = enemy, stats
             card.bg:SetColorTexture(.045, .055, .07, .92)
             W.SetSummaryCardPortraitMode(card, true, card._plaqueBaseWidth or card:GetWidth())
-            W.ApplyOpponentPortrait(card, enemy)
+            -- Portraits are requested by RefreshVisibleOpponentPortraits after layout.
             card.name:SetText(DP.Theme.ClassName(ShortName(enemy.name), enemy.class))
             local gank = enemy.died and GankKind(record, enemy)
             local bubbleHearth = enemy.bubbleHearthed or (record.bubbleHearthEnemyGUID and record.bubbleHearthEnemyGUID == enemy.guid)
@@ -6379,6 +7579,7 @@ function W.RefreshDetailContent()
             card:ClearAllPoints(); card:SetPoint("TOPRIGHT", window.summaryRivalsBody, "TOPRIGHT", -5, -card.summaryRowTop)
             card.kind, card.npc = "npc", npc
             card.enemy, card.stats = nil, nil
+            card._portraitViewportActive = false
             W.SetSummaryCardPortraitMode(card, false, card._plaqueBaseWidth or card:GetWidth())
             card.bg:SetColorTexture(.075, .055, .035, .94)
             local npcName = tostring(npc.name or "NPC") .. (((npc.count or 0) > 1) and (" ×" .. tostring(npc.count)) or "")
@@ -6405,11 +7606,20 @@ function W.RefreshDetailContent()
             window.summaryRivalsEmpty:SetText("|cffadb5c2No opponent or NPC identity was retained for this encounter.|r")
             window.summaryRivalsEmpty:Show()
         end
+        for index = totalCards + 1, #window.summaryRivalCards do
+            local card = window.summaryRivalCards[index]
+            if DP.Portraits and DP.Portraits.ReleaseBody then DP.Portraits.ReleaseBody(card) end
+            card._portraitViewportActive = false
+            card._portraitCommittedKey = nil
+            card._portraitCommittedEnemy = nil
+            card:Hide()
+        end
         window.summaryRivalsBody:SetHeight(math.max(196, 16 + totalCards * SUMMARY_RIVAL_ROW_STEP))
         window.summaryRivalsScroll.smoothTarget = 0
         window.summaryRivalsScroll:SetVerticalScroll(0)
         if window.summaryRivalsScroll.UpdateScrollHints then window.summaryRivalsScroll:UpdateScrollHints() end
-        for index = totalCards + 1, #window.summaryRivalCards do window.summaryRivalCards[index]:Hide() end
+        W.RefreshVisibleOpponentPortraits(window)
+        window._portraitRecord = record
     elseif tab == "usage" then
         local filter = window.participantFilter or "all"
         -- Let the dropdown resolve its own display text so participant names keep
@@ -6426,11 +7636,17 @@ function W.RefreshDetailContent()
         local renderedEvents = {}
         for _, entry in ipairs(events) do
             local display = DescribeWorldUsage(entry, record)
-            renderedEvents[#renderedEvents + 1] = {
-                entry = entry,
-                display = display,
-                category = display.category or entry.category or "cooldowns",
-            }
+            local category = display.category or entry.category or "cooldowns"
+            -- Reagents are cost inputs, not encounter actions. Keep their gold
+            -- contribution in Consumable Cost without duplicating them as rows in
+            -- Items & Abilities.
+            if category ~= "reagents" then
+                renderedEvents[#renderedEvents + 1] = {
+                    entry = entry,
+                    display = display,
+                    category = category,
+                }
+            end
         end
         table.sort(renderedEvents, function(a, b)
             local ao, bo = CATEGORY_ORDER[a.category] or 99, CATEGORY_ORDER[b.category] or 99
@@ -6447,6 +7663,7 @@ function W.RefreshDetailContent()
             if category ~= lastCategory then
                 rowIndex = rowIndex + 1
                 local header = EnsureUsageRow(window, rowIndex, "category")
+                header.categoryKey = category
                 header:ClearAllPoints(); header:SetPoint("TOPLEFT", 0, -y); header.bg:SetColorTexture(.09, .07, .035, .92)
                 header.label:SetText("|cffffd86a" .. (CATEGORY_LABEL[category] or category) .. "|r"); header:Show(); y = y + 26
                 lastCategory = category
@@ -6469,6 +7686,7 @@ function W.RefreshDetailContent()
         if #renderedEvents == 0 then
             rowIndex = 1
             local row = EnsureUsageRow(window, rowIndex, "category")
+            row.categoryKey = nil
             row:ClearAllPoints(); row:SetPoint("TOPLEFT", 0, 0)
             row.bg:SetColorTexture(.045, .055, .07, .6)
             row.label:SetText("|cffadb5c2No tracked item, engineering, racial, or ≥3 minute cooldown use for this filter.|r")
@@ -6486,7 +7704,10 @@ function W.RefreshDetailContent()
         if window.usageScroll.UpdateScrollHints then window.usageScroll:UpdateScrollHints() end
     elseif tab == "log" then
         local participants = record.session and record.session.participants or {}
+        local logEntries = record.session and record.session.worldCombatLog or {}
         local inferredClassByGUID, inferredClassByName = {}, {}
+        if record.playerGUID and record.playerClass then inferredClassByGUID[record.playerGUID] = record.playerClass end
+        if record.session and record.session.playerGUID and record.playerClass then inferredClassByGUID[record.session.playerGUID] = record.playerClass end
         for guid, identity in pairs(participants) do
             if identity and identity.class then
                 inferredClassByGUID[guid] = identity.class
@@ -6498,7 +7719,7 @@ function W.RefreshDetailContent()
         -- the fight was happening. Scan the retained log for class-exclusive
         -- abilities and recover the class before rendering any names.
         if DP.Specs and DP.Specs.InferClassFromAbility then
-            for _, logEntry in ipairs(record.session and record.session.worldCombatLog or {}) do
+            for _, logEntry in ipairs(logEntries) do
                 local class = logEntry.sourceGUID and inferredClassByGUID[logEntry.sourceGUID] or nil
                 if not class and type(logEntry.event) == "string" and
                     (logEntry.event:match("^SPELL_") or logEntry.event:match("^RANGE_")) then
@@ -6517,7 +7738,10 @@ function W.RefreshDetailContent()
         end
         local function ParticipantText(guid, fallback)
             local identity = participants[guid]
-            local name = ShortName(fallback or (identity and identity.name) or "Unknown")
+            local name = ShortName(fallback or (identity and identity.name) or "")
+            if not name or name == "" or name == "Unknown" then
+                name = guid and "Unidentified" or "target"
+            end
             local class = (identity and identity.class) or inferredClassByGUID[guid] or inferredClassByName[name]
             return class and DP.Theme.ClassName(name, class) or name
         end
@@ -6525,15 +7749,259 @@ function W.RefreshDetailContent()
             if not amount then return "" end
             return heal and ("|cff65e6ad" .. tostring(math.floor(amount + .5)) .. "|r") or ("|cffff8888" .. tostring(math.floor(amount + .5)) .. "|r")
         end
-        local function SpellText(name)
-            if type(name) ~= "string" or name == "" then return "" end
-            return "|cffffffff" .. name .. "|r"
+        local function SpellKey(entry)
+            if not entry then return nil end
+            local name = type(entry.spellName) == "string" and entry.spellName:lower() or nil
+            if name and name ~= "" then return "name:" .. name end
+            local id = tonumber(entry.spellID)
+            return id and ("id:" .. tostring(id)) or nil
+        end
+        local castBySourceSpell = {}
+        local recentOwnerBySpell = {}
+        local resolvedSourceByEntry = setmetatable({}, {__mode = "k"})
+        local reflectedCastByEntry = setmetatable({}, {__mode = "k"})
+        local reflectedMissByEntry = setmetatable({}, {__mode = "k"})
+        local recentCastEntryBySourceSpell = {}
+        local activeReflectionBySourceSpell = {}
+        local activeReflectorByGUID = {}
+        local castReflectorByEntry = setmetatable({}, {__mode = "k"})
+        local reflectedAuraOwnerByKey = {}
+        local selfAuraTimesBySourceSpell = {}
+        local selfCastByEntry = setmetatable({}, {__mode = "k"})
+
+        local function IsReflectorAuraName(name)
+            name = type(name) == "string" and name:lower() or ""
+            return name:find("reflector", 1, true) ~= nil
+        end
+        local function IsPhysicalSchool(school)
+            school = tonumber(school)
+            return school ~= nil and HasFlag(school, 0x1) and not HasFlag(school, 0x7E)
+        end
+
+        -- Build a tiny self-aura index first. CLEU often gives item/stance/self-buff
+        -- casts an opaque destination GUID even though the effect immediately
+        -- applies to the caster. This lets the renderer show "on <self>" instead
+        -- of inventing an Unidentified target.
+        for _, auraEntry in ipairs(logEntries) do
+            local auraEvent = tostring(auraEntry.event or "")
+            if (auraEvent == "SPELL_AURA_APPLIED" or auraEvent == "SPELL_AURA_REFRESH") and
+                    auraEntry.sourceGUID and auraEntry.destGUID == auraEntry.sourceGUID then
+                local auraKey = SpellKey(auraEntry)
+                if auraKey then
+                    local sourceAuraKey = tostring(auraEntry.sourceGUID) .. "|" .. auraKey
+                    local rows = selfAuraTimesBySourceSpell[sourceAuraKey]
+                    if not rows then rows = {}; selfAuraTimesBySourceSpell[sourceAuraKey] = rows end
+                    rows[#rows + 1] = tonumber(auraEntry.t) or 0
+                end
+            end
+        end
+
+        for _, logEntry in ipairs(logEntries) do
+            local key = SpellKey(logEntry)
+            local event = tostring(logEntry.event or "")
+            local sourceClass = inferredClassByGUID[logEntry.sourceGUID] or inferredClassByName[ShortName(logEntry.sourceName)]
+            local abilityClass = DP.Specs and DP.Specs.InferClassFromAbility and
+                DP.Specs.InferClassFromAbility(tonumber(logEntry.spellID), logEntry.spellName) or nil
+            local sourceSpellKey = key and logEntry.sourceGUID and (tostring(logEntry.sourceGUID) .. "|" .. key) or nil
+            if sourceSpellKey and event == "SPELL_CAST_SUCCESS" then
+                castBySourceSpell[sourceSpellKey] = true
+                recentCastEntryBySourceSpell[sourceSpellKey] = logEntry
+                if logEntry.destGUID and logEntry.destGUID ~= logEntry.sourceGUID and activeReflectorByGUID[logEntry.destGUID] then
+                    castReflectorByEntry[logEntry] = activeReflectorByGUID[logEntry.destGUID]
+                end
+                local selfAuraTimes = selfAuraTimesBySourceSpell[sourceSpellKey]
+                if selfAuraTimes then
+                    local castTime = tonumber(logEntry.t) or 0
+                    for _, auraTime in ipairs(selfAuraTimes) do
+                        if math.abs(auraTime - castTime) <= .75 then selfCastByEntry[logEntry] = true; break end
+                    end
+                end
+            end
+
+            -- Track engineering reflector uptime separately from reflected spell
+            -- ownership. Inferred reflection is only allowed when the intended
+            -- target actually had a reflector aura active at cast time.
+            if IsReflectorAuraName(logEntry.spellName) and logEntry.destGUID then
+                if event == "SPELL_AURA_APPLIED" or event == "SPELL_AURA_REFRESH" then
+                    activeReflectorByGUID[logEntry.destGUID] = {name = logEntry.spellName, t = tonumber(logEntry.t) or 0}
+                elseif event == "SPELL_AURA_REMOVED" then
+                    activeReflectorByGUID[logEntry.destGUID] = nil
+                end
+            end
+
+            -- Blizzard usually reports a reflected spell as a REFLECT miss against
+            -- the intended victim, then may attribute the returned damage/aura to the
+            -- original caster in later CLEU rows. Preserve the cast itself but mark
+            -- it REFLECTED and display the reflector as the owner of the returned
+            -- hostile effect.
+            if sourceSpellKey and (event == "SPELL_MISSED" or event == "RANGE_MISSED") and
+                    tostring(logEntry.missType or ""):upper() == "REFLECT" then
+                local castEntry = recentCastEntryBySourceSpell[sourceSpellKey]
+                if castEntry and math.abs((tonumber(logEntry.t) or 0) - (tonumber(castEntry.t) or 0)) <= 2.0 then
+                    reflectedCastByEntry[castEntry] = true
+                    reflectedMissByEntry[logEntry] = true
+                end
+                activeReflectionBySourceSpell[sourceSpellKey] = {
+                    t = tonumber(logEntry.t) or 0,
+                    casterGUID = logEntry.sourceGUID,
+                    casterName = logEntry.sourceName,
+                    reflectorGUID = logEntry.destGUID,
+                    reflectorName = logEntry.destName,
+                }
+            elseif sourceSpellKey and event ~= "SPELL_CAST_SUCCESS" then
+                local reflection = activeReflectionBySourceSpell[sourceSpellKey]
+
+                -- Some Classic combat-log sequences omit the SPELL_MISSED/REFLECT
+                -- row entirely. Infer the reflection when an offensive spell was
+                -- just cast at another player but its harmful result immediately
+                -- lands back on the original caster. This matches cases such as a
+                -- Shadow Reflector returning Death Coil: cast at Zurker, then the
+                -- damage/aura is logged as Cpayne -> Cpayne. The cast destination
+                -- is the reflector, so use that player as the returned spell owner.
+                local harmfulReturnedEvent = event == "SPELL_DAMAGE" or event == "RANGE_DAMAGE" or
+                    event == "SPELL_PERIODIC_DAMAGE" or event == "SPELL_AURA_APPLIED" or event == "SPELL_AURA_REFRESH"
+                if not reflection and harmfulReturnedEvent and logEntry.sourceGUID and
+                        logEntry.destGUID == logEntry.sourceGUID then
+                    local castEntry = recentCastEntryBySourceSpell[sourceSpellKey]
+                    local activeReflector = castEntry and castReflectorByEntry[castEntry] or nil
+                    if castEntry and activeReflector and castEntry.destGUID and castEntry.destGUID ~= castEntry.sourceGUID and
+                            not IsPhysicalSchool(castEntry.spellSchool) and
+                            math.abs((tonumber(logEntry.t) or 0) - (tonumber(castEntry.t) or 0)) <= 2.0 then
+                        reflectedCastByEntry[castEntry] = true
+                        reflection = {
+                            t = tonumber(castEntry.t) or 0,
+                            casterGUID = castEntry.sourceGUID,
+                            casterName = castEntry.sourceName,
+                            reflectorGUID = castEntry.destGUID,
+                            reflectorName = castEntry.destName,
+                            inferred = true,
+                        }
+                        activeReflectionBySourceSpell[sourceSpellKey] = reflection
+                    end
+                end
+
+                local reflectedAuraKey = sourceSpellKey and logEntry.destGUID and
+                    (sourceSpellKey .. "|" .. tostring(logEntry.destGUID)) or nil
+                local persistentOwner = reflectedAuraKey and reflectedAuraOwnerByKey[reflectedAuraKey] or nil
+                if persistentOwner and (event == "SPELL_PERIODIC_DAMAGE" or event == "SPELL_AURA_REMOVED" or event == "SPELL_AURA_REFRESH") then
+                    resolvedSourceByEntry[logEntry] = persistentOwner
+                    if event == "SPELL_AURA_REMOVED" then reflectedAuraOwnerByKey[reflectedAuraKey] = nil end
+                elseif reflection and (tonumber(logEntry.t) or 0) - reflection.t <= 3.0 and
+                        logEntry.destGUID == reflection.casterGUID and
+                        (event == "SPELL_DAMAGE" or event == "RANGE_DAMAGE" or event == "SPELL_PERIODIC_DAMAGE" or
+                         event == "SPELL_AURA_APPLIED" or event == "SPELL_AURA_REFRESH" or event == "SPELL_AURA_REMOVED") then
+                    local owner = {
+                        guid = reflection.reflectorGUID,
+                        name = reflection.reflectorName,
+                        class = inferredClassByGUID[reflection.reflectorGUID] or inferredClassByName[ShortName(reflection.reflectorName)],
+                        t = logEntry.t,
+                        reflected = true,
+                    }
+                    resolvedSourceByEntry[logEntry] = owner
+                    if reflectedAuraKey and (event == "SPELL_AURA_APPLIED" or event == "SPELL_AURA_REFRESH") then
+                        reflectedAuraOwnerByKey[reflectedAuraKey] = owner
+                    elseif reflectedAuraKey and event == "SPELL_AURA_REMOVED" then
+                        reflectedAuraOwnerByKey[reflectedAuraKey] = nil
+                    end
+                end
+            end
+
+            if key and abilityClass and sourceClass and sourceClass ~= abilityClass and
+                    (event == "SPELL_PERIODIC_DAMAGE" or event == "SPELL_AURA_REMOVED" or event == "SPELL_AURA_REFRESH") and
+                    not resolvedSourceByEntry[logEntry] then
+                local owner = recentOwnerBySpell[key]
+                if owner and owner.class == abilityClass and
+                        math.abs((tonumber(logEntry.t) or 0) - (tonumber(owner.t) or 0)) <= 30 then
+                    resolvedSourceByEntry[logEntry] = owner
+                end
+            end
+            if key and logEntry.sourceGUID and
+                    (event == "SPELL_CAST_SUCCESS" or event == "SPELL_AURA_APPLIED" or event == "SPELL_DAMAGE" or event == "RANGE_DAMAGE") and
+                    (not abilityClass or not sourceClass or sourceClass == abilityClass) then
+                recentOwnerBySpell[key] = {
+                    guid = logEntry.sourceGUID,
+                    name = logEntry.sourceName,
+                    class = sourceClass or abilityClass,
+                    t = logEntry.t,
+                }
+            end
+        end
+        local function IsSpecialProcEffect(entry)
+            if not entry or type(entry.sourceGUID) ~= "string" or not entry.sourceGUID:match("^Player%-") then return false end
+            -- Classification is evidence-based for every class. Missing casts,
+            -- incomplete class inference, and shared names do not imply a proc.
+            if DP.Usage and DP.Usage.IsKnownProcEffect and
+                    DP.Usage.IsKnownProcEffect(entry.spellID, entry.spellName, entry.sourceGUID) then return true end
+            return tonumber(entry.spellID) == 20007 -- Crusader's Holy Strength
+        end
+        local function SpellText(entry)
+            local name = entry and entry.spellName
+            local spellID = entry and tonumber(entry.spellID)
+            if (type(name) ~= "string" or name == "") and spellID then name = "Spell " .. tostring(spellID) end
+            if type(name) ~= "string" or name == "" then name = "Ability" end
+            -- Normal abilities stay white. Item/weapon-style proc effects use the
+            -- same lavender accent as before, but the bracketed ability itself is
+            -- colored rather than adding a redundant PROC label.
+            local color = IsSpecialProcEffect(entry) and "|cffc7a0ff" or "|cffffffff"
+            if DP.Theme.SpellTextLink then return DP.Theme.SpellTextLink(spellID, name, color) end
+            return color .. "[" .. name .. "]|r"
+        end
+        local function ItemUseInfo(entry)
+            if not entry then return nil end
+            local itemID = tonumber(entry.itemID)
+            local known = tonumber(entry.spellID) and DP.UsageCatalog and DP.UsageCatalog[tonumber(entry.spellID)] or nil
+            if not itemID and known and tonumber(known.itemID) then itemID = tonumber(known.itemID) end
+            if not itemID then return nil end
+            return {
+                itemID = itemID,
+                name = entry.itemName or (known and known.name),
+                quality = entry.itemQuality or (known and known.quality),
+            }
+        end
+        local function ProcItemInfo(entry)
+            if not entry or not (DP.Usage and DP.Usage.ResolveProcItem) then return nil end
+            -- Revalidate old metadata as well: previous builds could persist a
+            -- name-based item attribution on ordinary spells or NPC attacks.
+            local resolved = DP.Usage.ResolveProcItem(entry.spellID, entry.spellName, nil, entry.sourceGUID, record)
+            if not resolved then return nil end
+            return {itemID=resolved.itemID, name=resolved.name, quality=resolved.quality}
+        end
+        local function ItemText(item)
+            if not item then return nil end
+            if DP.Theme.ItemTextLink then return DP.Theme.ItemTextLink(item.itemID, item.name, item.quality) end
+            return "[" .. tostring(item.name or ("Item " .. tostring(item.itemID))) .. "]"
+        end
+
+        local function SourceText(entry)
+            local corrected = resolvedSourceByEntry[entry]
+            if corrected then return ParticipantText(corrected.guid, corrected.name) end
+            return ParticipantText(entry.sourceGUID, entry.sourceName)
+        end
+        local function IsSelfOnlyReflectorCast(entry)
+            if not entry or tostring(entry.event or "") ~= "SPELL_CAST_SUCCESS" then return false end
+            local name = type(entry.spellName) == "string" and entry.spellName:lower() or ""
+            -- Classic engineering reflectors are self-use activations. CLEU can
+            -- provide an unrelated/opaque destination GUID for the item-use cast,
+            -- which previously rendered as "Unidentified". The associated aura
+            -- correctly lands on the user, so normalize the cast target as self.
+            return name:find("reflector", 1, true) ~= nil
+        end
+        local function IsPlayerKillingBlow(entry)
+            if not entry then return false end
+            if entry.killingBlow then return true end
+            local overkill = tonumber(entry.overkill)
+            if overkill == nil or overkill < 0 then return false end
+            local playerGUID = record.session and record.session.playerGUID
+            local sourceIsPlayer = entry.sourceGUID == playerGUID or participants[entry.sourceGUID] ~= nil
+            local destIsPlayer = entry.destGUID == playerGUID or participants[entry.destGUID] ~= nil
+            return sourceIsPlayer and destIsPlayer and entry.sourceGUID ~= entry.destGUID
         end
         local function EscapePattern(text)
             return (tostring(text or ""):gsub("([%(%)%.%%%+%-%*%?%[%]%^%$])", "%%%1"))
         end
         local function ColorLegacyText(entry)
             local text = entry.text or ""
+            text = text:gsub(" on Unknown", ""):gsub(" to Unknown", ""):gsub(" from Unknown", ""):gsub(" Unknown", " target")
             for guid, identity in pairs(participants) do
                 local name = ShortName(identity and identity.name)
                 local class = (identity and identity.class) or inferredClassByGUID[guid] or inferredClassByName[name]
@@ -6550,12 +8018,12 @@ function W.RefreshDetailContent()
                 text = text:gsub(" healed ", " |cff65e6adhealed|r ", 1)
                 text = text:gsub(" for (%d+)", " for |cff65e6ad%1|r", 1)
             elseif entry.event == "SWING_DAMAGE" or entry.event == "SPELL_DAMAGE" or entry.event == "RANGE_DAMAGE" or entry.event == "SPELL_PERIODIC_DAMAGE" then
-                text = text:gsub(" hit ", " |cffff8888hit|r ", 1)
+                text = text:gsub(" hit ", " hit ", 1)
                 text = text:gsub(" for (%d+)", " for |cffff8888%1|r", 1)
             elseif entry.event == "SPELL_CAST_SUCCESS" then
-                text = text:gsub(" cast ", " |cffffce70cast|r ", 1)
+                text = text:gsub(" cast ", " cast ", 1)
             elseif entry.event == "SPELL_INTERRUPT" then
-                text = text:gsub(" interrupted ", " |cffffce70interrupted|r ", 1)
+                text = text:gsub(" interrupted ", " interrupted ", 1)
             elseif entry.event == "PARTY_KILL" or entry.event == "UNIT_DIED" then
                 text = "|cffff8888" .. text .. "|r"
             end
@@ -6567,8 +8035,9 @@ function W.RefreshDetailContent()
             -- Do not manufacture blank spells/amounts for them; colorize that
             -- original text instead.
             local needsSpell = event == "SPELL_DAMAGE" or event == "RANGE_DAMAGE" or event == "SPELL_PERIODIC_DAMAGE" or
-                event == "SPELL_HEAL" or event == "SPELL_PERIODIC_HEAL" or event == "SPELL_CAST_SUCCESS" or
-                event == "SPELL_AURA_APPLIED" or event == "SPELL_AURA_REMOVED" or event == "SPELL_INTERRUPT"
+                event == "SPELL_MISSED" or event == "RANGE_MISSED" or event == "SPELL_HEAL" or event == "SPELL_PERIODIC_HEAL" or
+                event == "SPELL_CAST_SUCCESS" or event == "SPELL_AURA_APPLIED" or event == "SPELL_AURA_REMOVED" or
+                event == "SPELL_AURA_REFRESH" or event == "SPELL_INTERRUPT"
             local needsAmount = event == "SWING_DAMAGE" or event == "SPELL_DAMAGE" or event == "RANGE_DAMAGE" or
                 event == "SPELL_PERIODIC_DAMAGE" or event == "SPELL_HEAL" or event == "SPELL_PERIODIC_HEAL"
             local hasSpellName = type(entry.spellName) == "string" and entry.spellName ~= ""
@@ -6576,25 +8045,92 @@ function W.RefreshDetailContent()
             if (needsSpell and not hasSpellName and not numericSpellID) or (needsAmount and not entry.amount) then
                 return ColorLegacyText(entry)
             end
-            local source = ParticipantText(entry.sourceGUID, entry.sourceName)
+            local source = SourceText(entry)
             local dest = ParticipantText(entry.destGUID, entry.destName)
-            local spell = needsSpell and SpellText(hasSpellName and entry.spellName or (numericSpellID and ("Spell " .. tostring(numericSpellID)))) or ""
-            if event == "SWING_DAMAGE" then
-                return string.format("%s |cffff8888hit|r %s for %s", source, dest, AmountText(entry.amount, false))
+            local spell = needsSpell and SpellText(entry) or ""
+            local mindControlUserGUID, mindControlUserName, inferredMindControlBackfire = W.MindControlUseInfo(entry, participants)
+            if mindControlUserGUID then
+                local item = ItemUseInfo(entry) or {itemID=10726, name="Gnomish Mind Control Cap", quality=2}
+                if tonumber(item.itemID) ~= 10726 then item = {itemID=10726, name="Gnomish Mind Control Cap", quality=2} end
+                local user = ParticipantText(mindControlUserGUID, mindControlUserName)
+                local suffix = (entry.mindControlBackfire or inferredMindControlBackfire) and "  |cffffad66(BACKFIRED)|r" or ""
+                return string.format("%s used %s%s", user, ItemText(item), suffix)
+            elseif event == "SWING_DAMAGE" then
+                local kb = IsPlayerKillingBlow(entry) and "  |cffffce70KILLING BLOW|r" or ""
+                return string.format("%s hit %s for %s%s", source, dest, AmountText(entry.amount, false), kb)
             elseif event == "SWING_MISSED" then
                 return string.format("%s missed %s |cffadb5c2(%s)|r", source, dest, tostring(entry.missType or "miss"))
             elseif event == "SPELL_DAMAGE" or event == "RANGE_DAMAGE" or event == "SPELL_PERIODIC_DAMAGE" then
-                return string.format("%s's %s |cffff8888hit|r %s for %s", source, spell, dest, AmountText(entry.amount, false))
+                local kb = IsPlayerKillingBlow(entry) and "  |cffffce70KILLING BLOW|r" or ""
+                local procItem = ProcItemInfo(entry)
+                if procItem then
+                    return string.format("%s's %s hit %s with %s for %s%s", source, ItemText(procItem), dest, spell, AmountText(entry.amount, false), kb)
+                end
+                return string.format("%s's %s hit %s for %s%s", source, spell, dest, AmountText(entry.amount, false), kb)
+            elseif event == "SPELL_MISSED" or event == "RANGE_MISSED" then
+                local missType = tostring(entry.missType or "MISS")
+                local missed = tonumber(entry.amountMissed)
+                local procItem = ProcItemInfo(entry)
+                local owner = procItem and (source .. "'s " .. ItemText(procItem) .. " " .. spell) or (source .. "'s " .. spell)
+                if missType == "ABSORB" then
+                    return string.format("%s was |cff9dc7ffabsorbed|r by %s%s", owner, dest,
+                        missed and (" for |cff9dc7ff" .. tostring(math.floor(missed + .5)) .. "|r") or "")
+                elseif missType == "RESIST" then
+                    return string.format("%s |cffadb5c2resisted|r %s%s", dest, owner,
+                        missed and (" |cffadb5c2(" .. tostring(math.floor(missed + .5)) .. ")|r") or "")
+                elseif missType == "IMMUNE" then
+                    return string.format("%s was |cffadb5c2immune|r to %s", dest, owner)
+                end
+                return string.format("%s missed %s |cffadb5c2(%s)|r", owner, dest, missType)
             elseif event == "SPELL_HEAL" or event == "SPELL_PERIODIC_HEAL" then
+                local procItem = ProcItemInfo(entry)
+                if procItem then
+                    return string.format("%s's %s |cff65e6adhealed|r %s with %s for %s", source, ItemText(procItem), dest, spell, AmountText(entry.amount, true))
+                end
                 return string.format("%s's %s |cff65e6adhealed|r %s for %s", source, spell, dest, AmountText(entry.amount, true))
             elseif event == "SPELL_CAST_SUCCESS" then
-                return string.format("%s |cffffce70cast|r %s%s", source, spell, entry.destGUID and entry.destGUID ~= entry.sourceGUID and (" on " .. dest) or "")
+                local item = ItemUseInfo(entry)
+                if item then
+                    local targetText = ""
+                    if entry.destGUID and entry.destGUID ~= entry.sourceGUID and dest ~= "Unidentified" and dest ~= "target" then
+                        targetText = " on " .. dest
+                    end
+                    return string.format("%s used %s%s", source, ItemText(item), targetText)
+                end
+                local reflected = reflectedCastByEntry[entry] and "  |cffc7a0ff(REFLECTED)|r" or ""
+                local targetText = ""
+                if IsSelfOnlyReflectorCast(entry) or selfCastByEntry[entry] then
+                    targetText = " on " .. source
+                elseif entry.destGUID and entry.destGUID ~= entry.sourceGUID and dest ~= "Unidentified" and dest ~= "target" then
+                    targetText = " on " .. dest
+                end
+                return string.format("%s cast %s%s%s", source, spell, targetText, reflected)
             elseif event == "SPELL_AURA_APPLIED" then
+                if entry.mindControlBackfire then
+                    local item = ItemUseInfo(entry)
+                    local user = ParticipantText(entry.itemUserGUID or entry.destGUID, entry.itemUserName or entry.destName)
+                    return string.format("%s used %s  |cffffad66(BACKFIRED)|r", user, item and ItemText(item) or spell)
+                end
+                local procItem = ProcItemInfo(entry)
+                if procItem then
+                    return string.format("%s's %s applied %s to %s", source, ItemText(procItem), spell, dest)
+                end
                 return string.format("%s applied %s to %s", source, spell, dest)
             elseif event == "SPELL_AURA_REMOVED" then
                 return string.format("%s's %s faded from %s", source, spell, dest)
+            elseif event == "SPELL_AURA_REFRESH" then
+                if entry.mindControlBackfire then
+                    local item = ItemUseInfo(entry)
+                    local user = ParticipantText(entry.itemUserGUID or entry.destGUID, entry.itemUserName or entry.destName)
+                    return string.format("%s used %s  |cffffad66(BACKFIRED)|r", user, item and ItemText(item) or spell)
+                end
+                local procItem = ProcItemInfo(entry)
+                if procItem then
+                    return string.format("%s's %s refreshed %s on %s", source, ItemText(procItem), spell, dest)
+                end
+                return string.format("%s refreshed %s on %s", source, spell, dest)
             elseif event == "SPELL_INTERRUPT" then
-                return string.format("%s's %s |cffffce70interrupted|r %s", source, spell, dest)
+                return string.format("%s's %s interrupted %s", source, spell, dest)
             elseif event == "PARTY_KILL" then
                 return string.format("|cffff8888%s killed %s|r", source, dest)
             elseif event == "UNIT_DIED" then
@@ -6602,14 +8138,112 @@ function W.RefreshDetailContent()
             end
             return ColorLegacyText(entry)
         end
+        -- CLEU may report an item's result before SPELL_CAST_SUCCESS: reflectors
+        -- can apply their aura first, and Healthstones can report the heal first.
+        -- Render the causal order (used item -> resulting effect) without mutating
+        -- the saved event stream. Match by catalog item identity first, then by
+        -- spell ID/name for clients whose item-use spell aliases differ.
+        local displayEntries = {}
+        local recentMindControlByUser = {}
+        for _, entry in ipairs(logEntries) do
+            local actorGUID, _, backfire = W.MindControlUseInfo(entry, participants)
+            if actorGUID then
+                local prior = recentMindControlByUser[actorGUID]
+                local at = tonumber(entry.t) or 0
+                if prior and math.abs(at - prior.t) <= 1.25 then
+                    -- Prefer the NPC-sourced aura when it proves the activation
+                    -- backfired; otherwise keep whichever signal arrived first.
+                    if backfire and not prior.backfire then
+                        displayEntries[prior.index] = entry
+                        prior.t, prior.backfire = at, true
+                    end
+                else
+                    displayEntries[#displayEntries + 1] = entry
+                    recentMindControlByUser[actorGUID] = {index=#displayEntries, t=at, backfire=backfire and true or false}
+                end
+            else
+                displayEntries[#displayEntries + 1] = entry
+            end
+        end
+        local function SameItemActivation(useEntry, effectEntry)
+            if not (useEntry and effectEntry and useEntry.sourceGUID == effectEntry.sourceGUID) then return false end
+            local used = ItemUseInfo(useEntry)
+            local effect = ItemUseInfo(effectEntry)
+            if used and effect and tonumber(used.itemID) and tonumber(effect.itemID) and
+                    tonumber(used.itemID) == tonumber(effect.itemID) then return true end
+            local useSpellID, effectSpellID = tonumber(useEntry.spellID), tonumber(effectEntry.spellID)
+            if useSpellID and effectSpellID and useSpellID == effectSpellID then return true end
+            local useName = type(useEntry.spellName) == "string" and useEntry.spellName:lower() or nil
+            local effectName = type(effectEntry.spellName) == "string" and effectEntry.spellName:lower() or nil
+            return useName and effectName and useName ~= "" and useName == effectName
+        end
+        local itemResultEvents = {
+            SPELL_AURA_APPLIED = true, SPELL_AURA_REFRESH = true,
+            SPELL_HEAL = true, SPELL_DAMAGE = true, SPELL_PERIODIC_HEAL = true,
+            SPELL_PERIODIC_DAMAGE = true, SPELL_MISSED = true,
+        }
+        for index = 2, #displayEntries do
+            local entry = displayEntries[index]
+            if entry and entry.event == "SPELL_CAST_SUCCESS" and ItemUseInfo(entry) then
+                local insertAt = index
+                local itemTime = tonumber(entry.t) or 0
+                for priorIndex = index - 1, 1, -1 do
+                    local prior = displayEntries[priorIndex]
+                    local priorTime = tonumber(prior and prior.t) or itemTime
+                    local delta = itemTime - priorTime
+                    if delta > .20 then break end
+                    if delta >= 0 and prior and itemResultEvents[tostring(prior.event or "")] and
+                            SameItemActivation(entry, prior) then
+                        insertAt = priorIndex
+                    end
+                end
+                if insertAt < index then
+                    table.remove(displayEntries, index)
+                    table.insert(displayEntries, insertAt, entry)
+                end
+            end
+        end
+
         local lines = {}
-        for _, entry in ipairs(record.session and record.session.worldCombatLog or {}) do
-            lines[#lines + 1] = string.format("|cff8f98a6+%05.1fs|r  %s", entry.t or 0, FormatLogEntry(entry))
+        local synthesizedDeathAt = {}
+        for index, entry in ipairs(displayEntries) do
+            local suppressDeath = false
+            if (entry.event == "UNIT_DIED" or entry.event == "PARTY_KILL") and entry.destGUID then
+                local synthesizedAt = synthesizedDeathAt[entry.destGUID]
+                if synthesizedAt and math.abs((tonumber(entry.t) or 0) - synthesizedAt) <= 1.0 then suppressDeath = true end
+            end
+            local suppressReflectedMiss = reflectedMissByEntry[entry] and true or false
+            if not suppressDeath and not suppressReflectedMiss then
+                lines[#lines + 1] = string.format("|cff8f98a6+%05.1fs|r  %s", entry.t or 0, FormatLogEntry(entry))
+                if IsPlayerKillingBlow(entry) and entry.destGUID then
+                    local nextEntry = displayEntries[index + 1]
+                    local nextIsDeath = nextEntry and nextEntry.event == "UNIT_DIED" and nextEntry.destGUID == entry.destGUID
+                    if not nextIsDeath then
+                        local died = string.format("|cffff8888%s died|r", ParticipantText(entry.destGUID, entry.destName))
+                        lines[#lines + 1] = string.format("|cff8f98a6+%05.1fs|r  %s", entry.t or 0, died)
+                        synthesizedDeathAt[entry.destGUID] = tonumber(entry.t) or 0
+                    end
+                end
+            end
         end
         if record.session and record.session.worldCombatTruncated then lines[#lines + 1] = "|cff8f98a6… additional events were omitted.|r" end
         if #lines == 0 then lines[1] = "|cffadb5c2No combat events recorded.|r" end
-        window.logText:SetText(table.concat(lines, "\n"))
-        window.logBody:SetHeight(math.max(1, (window.logText:GetStringHeight() or 0) + 12))
+        local logText = table.concat(lines, "\n")
+        window.logPlainText = DP.Theme.PlainCombatLogText and DP.Theme.PlainCombatLogText(logText) or logText
+        local changedRecord = window._combatLogCursorRecord ~= record
+        if DP.Theme.SetLockedEditBoxText then DP.Theme.SetLockedEditBoxText(window.logText, logText) else window.logText:SetText(logText) end
+        if changedRecord then
+            window._combatLogCursorRecord = record
+            if window.logText.HighlightText then window.logText:HighlightText(0, 0) end
+            if window.logText.SetCursorPosition then window.logText:SetCursorPosition(0) end
+            -- Clear the prior encounter's animation destination as well as the
+            -- visible offset; otherwise one wheel tick resumes near its bottom.
+            if window.logScroll and window.logScroll.ResetScroll then window.logScroll:ResetScroll(0) end
+        end
+        window.logMeasure:SetText(logText)
+        local logHeight = math.max(1, (window.logMeasure:GetStringHeight() or 0) + 12)
+        window.logText:SetHeight(logHeight)
+        window.logBody:SetHeight(logHeight)
         window:SetHeight(DETAIL_PAGE_HEIGHT)
         if window.logScroll.UpdateScrollHints then window.logScroll:UpdateScrollHints() end
     end
@@ -6652,7 +8286,11 @@ function W.EnsureHeaderBuffIcon(window, index)
         button.icon:AddMaskTexture(button.mask)
     end
     button.chrome = CreateFrame("Frame", nil, button, BackdropTemplateMixin and "BackdropTemplate" or nil)
-    button.chrome:SetAllPoints(button)
+    -- Give the ENEMY BUFFS chrome a 1px outside rail so the tooltip-style
+    -- border does not visually crowd or clip the icon artwork. The clickable
+    -- icon/grid footprint stays unchanged; only the decorative box grows.
+    button.chrome:SetPoint("TOPLEFT", button, "TOPLEFT", -1, 1)
+    button.chrome:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", 1, -1)
     if button.chrome.SetFrameLevel then button.chrome:SetFrameLevel(button:GetFrameLevel() + 4) end
     if button.chrome.SetBackdrop then
         button.chrome:SetBackdrop({edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", edgeSize = 6,
@@ -6835,25 +8473,74 @@ function W.LayoutEncounterHeader(window, record)
     W.FitWrappedHeaderText(window.outcome, GameFontHighlightSmall, 144, math.max(16, encounterHeight - 25), 10, 8)
 
     window.locationHover:ClearAllPoints(); window.locationHover:SetPoint("TOPLEFT", 7, -21); window.locationHover:SetSize(150, math.min(58, locationHeight + 10))
+    window.encounterHover:ClearAllPoints()
+    window.encounterHover:SetPoint("TOPLEFT", 7, -(ruleY + 4))
+    window.encounterHover:SetPoint("BOTTOMRIGHT", window.resultBox, "BOTTOMRIGHT", -7, 5)
 end
 
 function W.OpenDetails(record)
     if DP.Usage and DP.Usage.window and DP.Usage.window:IsShown() then
         DP.Usage.window:Hide()
     end
-    local window = EnsureDetails()
-    local selectedTab = window.activeTab or "summary"
-    window.record = record; window.participantFilter = "all"
+    local detail = EnsureDetails()
+    if detail.record == record and detail:IsShown() then
+        -- Repeated clicks on the selected History tile are a complete no-op for
+        -- portrait widgets. Do not reparent, redress, Show(), or restart anything.
+        if detail.Raise then detail:Raise() end
+        return
+    end
+
+    local selectedTab = detail.activeTab or "summary"
+    detail._portraitOpenGeneration = (tonumber(detail._portraitOpenGeneration) or 0) + 1
+    detail._portraitPendingRecord = nil
+
+    -- Release the previous encounter's leased bodies before asking the pool for
+    -- the newly selected record. Otherwise an off-screen Rival can occupy one of
+    -- the four race/sex actors while the portrait the user actually clicked waits.
+    if DP.Portraits then
+        for _, card in ipairs(detail.summaryRivalCards or {}) do
+            if DP.Portraits.ReleaseWanted then DP.Portraits.ReleaseWanted(card) end
+            if card._portraitViewportActive and DP.Portraits.ReleaseBody then DP.Portraits.ReleaseBody(card) end
+            card._portraitViewportActive = false
+        end
+    end
+
+    -- Visible cards request their portraits after layout. Off-screen opponents
+    -- and other History records never enter the foreground queue.
     SortEnemiesByRelevance(record)
+
+    detail.record = record
+    detail.participantFilter = "all"
     local primary = PrimaryOpponent(record)
     local buffDefault = DefaultHeaderBuffEnemy(record)
-    window.buffOpponentGUID = buffDefault and (buffDefault.guid or buffDefault.name) or (primary and (primary.guid or primary.name) or nil)
-    W.SetMapRecord(window.map, record)
-    W.LayoutEncounterHeader(window, record)
-    window.result:SetText("")
+    detail.buffOpponentGUID = buffDefault and (buffDefault.guid or buffDefault.name) or
+        (primary and (primary.guid or primary.name) or nil)
+    W.SetMapRecord(detail.map, record)
+    W.LayoutEncounterHeader(detail, record)
+    detail.result:SetText("")
     W.RefreshHeaderBuffs()
     W.RefreshDetailStar()
-    window:Show(); W.SelectDetailTab(selectedTab)
+
+    -- No encounter-level fade/blanking. Prepared portraits now carry actor-level
+    -- pause across reparenting, so the selected record can update synchronously.
+    if detail.SetAlpha then detail:SetAlpha(1) end
+    detail:Show()
+    W.SelectDetailTab(selectedTab)
+
+    -- Catch any client-side pause-state wobble after SetParent without touching
+    -- animation state. These are invisible no-op holds when the actor stayed paused.
+    if C_Timer and C_Timer.After and DP.Portraits and DP.Portraits.ReassertFrozen then
+        local generation = detail._portraitOpenGeneration
+        local function Reassert()
+            if detail._portraitOpenGeneration ~= generation or detail.record ~= record then return end
+            for _, card in ipairs(detail.summaryRivalCards or {}) do
+                if card:IsShown() and card._portraitBodyEntry then DP.Portraits.ReassertFrozen(card) end
+            end
+        end
+        C_Timer.After(.03, Reassert)
+        C_Timer.After(.10, Reassert)
+        C_Timer.After(.22, Reassert)
+    end
 end
 
 function W.ClassLabel(class)

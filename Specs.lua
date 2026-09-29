@@ -82,7 +82,8 @@ local SIGNATURE_CLASS_BY_NAME = {
 -- when the combat log gives us strong class evidence.
 local CLASS_ABILITY_BY_NAME = {
     -- Warrior
-    ["heroic strike"]="WARRIOR", ["hamstring"]="WARRIOR", ["rend"]="WARRIOR",
+    ["heroic strike"]="WARRIOR", ["hamstring"]="WARRIOR", ["rend"]="WARRIOR", ["charge"]="WARRIOR",
+    ["whirlwind"]="WARRIOR", ["deep wound"]="WARRIOR", ["deep wounds"]="WARRIOR",
     ["overpower"]="WARRIOR", ["execute"]="WARRIOR", ["thunder clap"]="WARRIOR", ["demoralizing shout"]="WARRIOR",
     ["battle shout"]="WARRIOR", ["intimidating shout"]="WARRIOR", ["bloodrage"]="WARRIOR", ["retaliation"]="WARRIOR",
     ["recklessness"]="WARRIOR", ["shield bash"]="WARRIOR", ["pummel"]="WARRIOR", ["intercept"]="WARRIOR",

@@ -3,33 +3,25 @@ local P = {url = "https://www.curseforge.com/wow/addons/rivals"}
 DP.Promos = P
 
 P.messages = {
-    "World PvP finally gets a match history. Rivals records who you fought, where it happened, who participated, the result, and your history against every opponent.",
+    "World PvP finally gets a history. Rivals records the players you fight, the result, the location, the map position, and your record against every repeat opponent.",
 
-    "Was it really a 1v3? Rivals remembers. Track solo fights, outnumbered victories, streaks, ganks, repeat opponents, and the wins that were worth more than one HK.",
+    "Every realm has names you remember. Rivals keeps the score: your record against each player, Most Killed, Nemesis, streaks, solo fights, ganks, and repeat encounters.",
 
-    "The corpse is gone. The fight isn’t. Rivals saves World PvP combat logs, opponents, items, consumables, engineering, long cooldowns, racials, and other fight details for later.",
+    "Was it really a 1v3? Rivals remembers. World PvP encounters keep the actual headcount, kills, deaths, escapes, trades, and outnumbered victories instead of reducing the fight to an HK.",
 
-    "Know what they actually used against you. Rivals records observed gear activations, PvP trinkets, potions, engineering gadgets, major cooldowns, racials, and enemy buffs in World PvP encounters.",
+    "Check the receipts. Rivals tracks enemy buffs, consumables, engineering, major cooldowns, and an estimated gold value for what enemy players used against you in World PvP.",
 
-    "Every realm has names you remember. Rivals remembers the record. See your kills, encounters, solo results, Most Killed rivals, Nemesis, and complete history against repeat opponents.",
+    "Remember where the fight happened. Rivals saves the zone, map capture, fight marker, opponents, and result for World PvP encounters, with favorites that can stay in your history permanently.",
 
-    "Put a face to the rivalry. Rivals builds World PvP opponent records with character details, encounter portraits, class information, and your history against that player.",
+    "Put a face to the rivalry. Rivals builds opponent plaques with reconstructed character portraits, class details, and your World PvP history against that player.",
 
-    "Remember where it happened. Rivals keeps the zone, encounter location, map marker, opponents, and result for your World PvP fights instead of reducing them to another HK.",
+    "For both World PvP and duels, Rivals keeps the details people forget: items, consumables, engineering, major cooldowns, combat events, and opponent history.",
 
-    "Someone used everything they had to kill you. Check the receipts. Rivals keeps detailed Items & Abilities and combat-log records for both World PvP and duels.",
+    "Classic dueling with an actual rating. Rivals adds Rated and Casual duels, Elo-style progression, placements, personal bests, rating history, and opponent and class matchups.",
 
-    "Watch them spend gold to lose. Rivals estimates the value of consumables your opponent—or an entire enemy group—burned during the fight, so you can see exactly how much gold they spent just to end up dead.",
+    "If both players run Rivals, Rated duels can be Rivals Verified. Inspect another Rivals player to see their shared duel profile, rating, record, and your matchup history.",
 
-    "Classic dueling with an actual record. Rivals adds Elo-style rating, placements, personal bests, Rated and Casual duels, detailed match history, and class and opponent matchups.",
-
-    "“I’m up on you” doesn’t have to be a debate. Rivals tracks your duel record against individual players, rating changes, matchup history, and the details of every recorded duel.",
-
-    "When both players run Rivals, Rated duels can be Rivals Verified. Build a duel rating backed by recorded matches instead of screenshots and memory.",
-
-    "Inspect another Rivals player and see the record. Shared duel profiles bring rating, record, and matchup history into the normal WoW Inspect window.",
-
-    "Classic PvP creates rivalries. Rivals keeps them. World PvP encounters, duels, opponent histories, combat logs, items, cooldowns, matchups, and the fights you actually want to remember.",
+    "Classic PvP creates rivalries. Rivals gives them a record: World PvP encounters, duels, opponent histories, map captures, portraits, combat logs, cooldowns, and the fights you actually want to remember.",
 }
 function P.Click(_, button)
     if button ~= "LeftButton" or not IsControlKeyDown or not IsShiftKeyDown or

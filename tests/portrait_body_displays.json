@@ -1,0 +1,1926 @@
+{
+  "source": "https://raw.githubusercontent.com/ArtaDBM/DBC/master/",
+  "note": "Joined display row field3 to extra ID. Source is a client-table mirror, not proof of Era rendering or dressability.",
+  "bodies": [
+    {
+      "race": 1,
+      "sex": 2,
+      "displayID": 1294,
+      "modelID": 49,
+      "extraID": 64,
+      "texture": "CreatureDisplayExtra-00064.blp",
+      "features": [
+        0,
+        10,
+        11,
+        9,
+        3
+      ]
+    },
+    {
+      "race": 1,
+      "sex": 2,
+      "displayID": 1289,
+      "modelID": 49,
+      "extraID": 60,
+      "texture": "CreatureDisplayExtra-00060.blp",
+      "features": [
+        2,
+        0,
+        1,
+        3,
+        6
+      ]
+    },
+    {
+      "race": 1,
+      "sex": 2,
+      "displayID": 1408,
+      "modelID": 49,
+      "extraID": 155,
+      "texture": "CreatureDisplayExtra-00155.blp",
+      "features": [
+        7,
+        8,
+        8,
+        4,
+        1
+      ]
+    },
+    {
+      "race": 1,
+      "sex": 2,
+      "displayID": 1426,
+      "modelID": 49,
+      "extraID": 168,
+      "texture": "CreatureDisplayExtra-00168.blp",
+      "features": [
+        3,
+        4,
+        4,
+        0,
+        0
+      ]
+    },
+    {
+      "race": 1,
+      "sex": 2,
+      "displayID": 1437,
+      "modelID": 49,
+      "extraID": 165,
+      "texture": "CreatureDisplayExtra-00165.blp",
+      "features": [
+        1,
+        9,
+        3,
+        1,
+        2
+      ]
+    },
+    {
+      "race": 1,
+      "sex": 2,
+      "displayID": 1516,
+      "modelID": 49,
+      "extraID": 237,
+      "texture": "CreatureDisplayExtra-00237.blp",
+      "features": [
+        4,
+        7,
+        5,
+        8,
+        5
+      ]
+    },
+    {
+      "race": 1,
+      "sex": 2,
+      "displayID": 3703,
+      "modelID": 49,
+      "extraID": 1892,
+      "texture": "6b3867757fa76a5d4d878fdb1fa968d9.blp",
+      "features": [
+        5,
+        11,
+        9,
+        2,
+        7
+      ]
+    },
+    {
+      "race": 1,
+      "sex": 2,
+      "displayID": 1276,
+      "modelID": 49,
+      "extraID": 45,
+      "texture": "CreatureDisplayExtra-00045.blp",
+      "features": [
+        0,
+        8,
+        0,
+        0,
+        2
+      ]
+    },
+    {
+      "race": 1,
+      "sex": 3,
+      "displayID": 3292,
+      "modelID": 50,
+      "extraID": 1487,
+      "texture": "e7fb1eec2eee52dfddacb240306359c9.blp",
+      "features": [
+        4,
+        4,
+        5,
+        4,
+        4
+      ]
+    },
+    {
+      "race": 1,
+      "sex": 3,
+      "displayID": 1287,
+      "modelID": 50,
+      "extraID": 56,
+      "texture": "CreatureDisplayExtra-00056.blp",
+      "features": [
+        3,
+        2,
+        14,
+        0,
+        0
+      ]
+    },
+    {
+      "race": 1,
+      "sex": 3,
+      "displayID": 1444,
+      "modelID": 50,
+      "extraID": 173,
+      "texture": "CreatureDisplayExtra-00173.blp",
+      "features": [
+        2,
+        0,
+        3,
+        5,
+        1
+      ]
+    },
+    {
+      "race": 1,
+      "sex": 3,
+      "displayID": 3485,
+      "modelID": 50,
+      "extraID": 1742,
+      "texture": "fa0c577cb8b0a7908a0ee27c6c647149.blp",
+      "features": [
+        1,
+        5,
+        15,
+        7,
+        2
+      ]
+    },
+    {
+      "race": 1,
+      "sex": 3,
+      "displayID": 4140,
+      "modelID": 50,
+      "extraID": 2404,
+      "texture": "c55252c516e9a80380e752f813a21e63.blp",
+      "features": [
+        6,
+        6,
+        8,
+        1,
+        3
+      ]
+    },
+    {
+      "race": 1,
+      "sex": 3,
+      "displayID": 1295,
+      "modelID": 50,
+      "extraID": 65,
+      "texture": "CreatureDisplayExtra-00065.blp",
+      "features": [
+        1,
+        3,
+        17,
+        2,
+        0
+      ]
+    },
+    {
+      "race": 1,
+      "sex": 3,
+      "displayID": 1439,
+      "modelID": 50,
+      "extraID": 180,
+      "texture": "CreatureDisplayExtra-00180.blp",
+      "features": [
+        2,
+        8,
+        5,
+        3,
+        0
+      ]
+    },
+    {
+      "race": 1,
+      "sex": 3,
+      "displayID": 1441,
+      "modelID": 50,
+      "extraID": 187,
+      "texture": "CreatureDisplayExtra-00187.blp",
+      "features": [
+        3,
+        5,
+        7,
+        2,
+        3
+      ]
+    },
+    {
+      "race": 2,
+      "sex": 2,
+      "displayID": 1374,
+      "modelID": 51,
+      "extraID": 113,
+      "texture": "CreatureDisplayExtra-00113.blp",
+      "features": [
+        3,
+        5,
+        1,
+        0,
+        3
+      ]
+    },
+    {
+      "race": 2,
+      "sex": 2,
+      "displayID": 1275,
+      "modelID": 51,
+      "extraID": 2139,
+      "texture": "6d0fb150bf720d69a41e019e2440b408.blp",
+      "features": [
+        4,
+        2,
+        4,
+        6,
+        2
+      ]
+    },
+    {
+      "race": 2,
+      "sex": 2,
+      "displayID": 1314,
+      "modelID": 51,
+      "extraID": 75,
+      "texture": "CreatureDisplayExtra-00075.blp",
+      "features": [
+        1,
+        0,
+        3,
+        3,
+        0
+      ]
+    },
+    {
+      "race": 2,
+      "sex": 2,
+      "displayID": 1323,
+      "modelID": 51,
+      "extraID": 85,
+      "texture": "CreatureDisplayExtra-00085.blp",
+      "features": [
+        6,
+        6,
+        5,
+        2,
+        6
+      ]
+    },
+    {
+      "race": 2,
+      "sex": 2,
+      "displayID": 1382,
+      "modelID": 51,
+      "extraID": 119,
+      "texture": "CreatureDisplayExtra-00119.blp",
+      "features": [
+        0,
+        7,
+        2,
+        1,
+        1
+      ]
+    },
+    {
+      "race": 2,
+      "sex": 2,
+      "displayID": 3890,
+      "modelID": 51,
+      "extraID": 2141,
+      "texture": "2299d800a0b635ed5d755e3fcd75f0c2.blp",
+      "features": [
+        7,
+        4,
+        0,
+        5,
+        9
+      ]
+    },
+    {
+      "race": 2,
+      "sex": 2,
+      "displayID": 1320,
+      "modelID": 51,
+      "extraID": 5244,
+      "texture": "CreatureDisplayExtra-05244.blp",
+      "features": [
+        0,
+        1,
+        4,
+        0,
+        0
+      ]
+    },
+    {
+      "race": 2,
+      "sex": 2,
+      "displayID": 1375,
+      "modelID": 51,
+      "extraID": 112,
+      "texture": "CreatureDisplayExtra-00112.blp",
+      "features": [
+        2,
+        1,
+        3,
+        1,
+        6
+      ]
+    },
+    {
+      "race": 2,
+      "sex": 3,
+      "displayID": 1360,
+      "modelID": 52,
+      "extraID": 102,
+      "texture": "CreatureDisplayExtra-00102.blp",
+      "features": [
+        0,
+        5,
+        1,
+        0,
+        6
+      ]
+    },
+    {
+      "race": 2,
+      "sex": 3,
+      "displayID": 1325,
+      "modelID": 52,
+      "extraID": 90,
+      "texture": "CreatureDisplayExtra-00090.blp",
+      "features": [
+        5,
+        3,
+        7,
+        5,
+        5
+      ]
+    },
+    {
+      "race": 2,
+      "sex": 3,
+      "displayID": 1358,
+      "modelID": 52,
+      "extraID": 100,
+      "texture": "CreatureDisplayExtra-00100.blp",
+      "features": [
+        2,
+        2,
+        4,
+        4,
+        4
+      ]
+    },
+    {
+      "race": 2,
+      "sex": 3,
+      "displayID": 1878,
+      "modelID": 52,
+      "extraID": 570,
+      "texture": "CreatureDisplayExtra-00570.blp",
+      "features": [
+        3,
+        4,
+        5,
+        1,
+        1
+      ]
+    },
+    {
+      "race": 2,
+      "sex": 3,
+      "displayID": 1333,
+      "modelID": 52,
+      "extraID": 97,
+      "texture": "CreatureDisplayExtra-00097.blp",
+      "features": [
+        5,
+        8,
+        0,
+        0,
+        1
+      ]
+    },
+    {
+      "race": 2,
+      "sex": 3,
+      "displayID": 1380,
+      "modelID": 52,
+      "extraID": 117,
+      "texture": "CreatureDisplayExtra-00117.blp",
+      "features": [
+        4,
+        0,
+        1,
+        1,
+        4
+      ]
+    },
+    {
+      "race": 2,
+      "sex": 3,
+      "displayID": 1381,
+      "modelID": 52,
+      "extraID": 118,
+      "texture": "CreatureDisplayExtra-00118.blp",
+      "features": [
+        0,
+        3,
+        4,
+        7,
+        0
+      ]
+    },
+    {
+      "race": 2,
+      "sex": 3,
+      "displayID": 1874,
+      "modelID": 52,
+      "extraID": 10065,
+      "texture": "79616109cb1fc822bdbb06931ffd25dc.blp",
+      "features": [
+        6,
+        7,
+        6,
+        1,
+        5
+      ]
+    },
+    {
+      "race": 3,
+      "sex": 2,
+      "displayID": 3053,
+      "modelID": 53,
+      "extraID": 1328,
+      "texture": "CreatureDisplayExtra-01328.blp",
+      "features": [
+        5,
+        4,
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "race": 3,
+      "sex": 2,
+      "displayID": 1282,
+      "modelID": 53,
+      "extraID": 50,
+      "texture": "CreatureDisplayExtra-00050.blp",
+      "features": [
+        0,
+        3,
+        8,
+        1,
+        1
+      ]
+    },
+    {
+      "race": 3,
+      "sex": 2,
+      "displayID": 1354,
+      "modelID": 53,
+      "extraID": 135,
+      "texture": "CreatureDisplayExtra-00135.blp",
+      "features": [
+        1,
+        2,
+        5,
+        7,
+        7
+      ]
+    },
+    {
+      "race": 3,
+      "sex": 2,
+      "displayID": 1406,
+      "modelID": 53,
+      "extraID": 153,
+      "texture": "CreatureDisplayExtra-00153.blp",
+      "features": [
+        6,
+        8,
+        7,
+        4,
+        6
+      ]
+    },
+    {
+      "race": 3,
+      "sex": 2,
+      "displayID": 1847,
+      "modelID": 53,
+      "extraID": 523,
+      "texture": "CreatureDisplayExtra-00523.blp",
+      "features": [
+        3,
+        1,
+        9,
+        8,
+        10
+      ]
+    },
+    {
+      "race": 3,
+      "sex": 2,
+      "displayID": 3044,
+      "modelID": 53,
+      "extraID": 1300,
+      "texture": "CreatureDisplayExtra-01300.blp",
+      "features": [
+        4,
+        5,
+        4,
+        3,
+        8
+      ]
+    },
+    {
+      "race": 3,
+      "sex": 2,
+      "displayID": 3046,
+      "modelID": 53,
+      "extraID": 1304,
+      "texture": "CreatureDisplayExtra-01304.blp",
+      "features": [
+        2,
+        6,
+        3,
+        6,
+        4
+      ]
+    },
+    {
+      "race": 3,
+      "sex": 2,
+      "displayID": 3488,
+      "modelID": 53,
+      "extraID": 1746,
+      "texture": "c430ae22f6f90603846f9acf2a166f35.blp",
+      "features": [
+        9,
+        11,
+        1,
+        5,
+        0
+      ]
+    },
+    {
+      "race": 3,
+      "sex": 3,
+      "displayID": 1286,
+      "modelID": 54,
+      "extraID": 53,
+      "texture": "CreatureDisplayExtra-00053.blp",
+      "features": [
+        2,
+        1,
+        3,
+        3,
+        0
+      ]
+    },
+    {
+      "race": 3,
+      "sex": 3,
+      "displayID": 2286,
+      "modelID": 54,
+      "extraID": 841,
+      "texture": "CreatureDisplayExtra-00841.blp",
+      "features": [
+        4,
+        7,
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "race": 3,
+      "sex": 3,
+      "displayID": 1401,
+      "modelID": 54,
+      "extraID": 149,
+      "texture": "CreatureDisplayExtra-00149.blp",
+      "features": [
+        1,
+        6,
+        10,
+        8,
+        0
+      ]
+    },
+    {
+      "race": 3,
+      "sex": 3,
+      "displayID": 1620,
+      "modelID": 54,
+      "extraID": 327,
+      "texture": "CreatureDisplayExtra-00327.blp",
+      "features": [
+        5,
+        4,
+        1,
+        5,
+        0
+      ]
+    },
+    {
+      "race": 3,
+      "sex": 3,
+      "displayID": 1766,
+      "modelID": 54,
+      "extraID": 463,
+      "texture": "CreatureDisplayExtra-00463.blp",
+      "features": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "race": 3,
+      "sex": 3,
+      "displayID": 3062,
+      "modelID": 54,
+      "extraID": 10244,
+      "texture": "d210a936af8c1eb6f8197c2e29868f8b.blp",
+      "features": [
+        3,
+        2,
+        13,
+        2,
+        1
+      ]
+    },
+    {
+      "race": 3,
+      "sex": 3,
+      "displayID": 3063,
+      "modelID": 54,
+      "extraID": 1357,
+      "texture": "CreatureDisplayExtra-01357.blp",
+      "features": [
+        3,
+        3,
+        4,
+        4,
+        0
+      ]
+    },
+    {
+      "race": 3,
+      "sex": 3,
+      "displayID": 1404,
+      "modelID": 54,
+      "extraID": 152,
+      "texture": "CreatureDisplayExtra-00152.blp",
+      "features": [
+        1,
+        0,
+        1,
+        1,
+        0
+      ]
+    },
+    {
+      "race": 4,
+      "sex": 2,
+      "displayID": 1706,
+      "modelID": 55,
+      "extraID": 392,
+      "texture": "CreatureDisplayExtra-00392.blp",
+      "features": [
+        2,
+        2,
+        4,
+        4,
+        2
+      ]
+    },
+    {
+      "race": 4,
+      "sex": 2,
+      "displayID": 1703,
+      "modelID": 55,
+      "extraID": 395,
+      "texture": "CreatureDisplayExtra-00395.blp",
+      "features": [
+        1,
+        1,
+        6,
+        2,
+        3
+      ]
+    },
+    {
+      "race": 4,
+      "sex": 2,
+      "displayID": 1709,
+      "modelID": 55,
+      "extraID": 403,
+      "texture": "CreatureDisplayExtra-00403.blp",
+      "features": [
+        3,
+        3,
+        3,
+        5,
+        4
+      ]
+    },
+    {
+      "race": 4,
+      "sex": 2,
+      "displayID": 1770,
+      "modelID": 55,
+      "extraID": 458,
+      "texture": "CreatureDisplayExtra-00458.blp",
+      "features": [
+        5,
+        7,
+        5,
+        3,
+        1
+      ]
+    },
+    {
+      "race": 4,
+      "sex": 2,
+      "displayID": 2270,
+      "modelID": 55,
+      "extraID": 816,
+      "texture": "CreatureDisplayExtra-00816.blp",
+      "features": [
+        0,
+        8,
+        0,
+        0,
+        5
+      ]
+    },
+    {
+      "race": 4,
+      "sex": 2,
+      "displayID": 1729,
+      "modelID": 55,
+      "extraID": 410,
+      "texture": "CreatureDisplayExtra-00410.blp",
+      "features": [
+        1,
+        4,
+        4,
+        0,
+        1
+      ]
+    },
+    {
+      "race": 4,
+      "sex": 2,
+      "displayID": 1854,
+      "modelID": 55,
+      "extraID": 543,
+      "texture": "CreatureDisplayExtra-00543.blp",
+      "features": [
+        6,
+        4,
+        3,
+        4,
+        3
+      ]
+    },
+    {
+      "race": 4,
+      "sex": 2,
+      "displayID": 1896,
+      "modelID": 55,
+      "extraID": 583,
+      "texture": "CreatureDisplayExtra-00583.blp",
+      "features": [
+        0,
+        6,
+        5,
+        5,
+        3
+      ]
+    },
+    {
+      "race": 4,
+      "sex": 3,
+      "displayID": 1937,
+      "modelID": 56,
+      "extraID": 613,
+      "texture": "CreatureDisplayExtra-00613.blp",
+      "features": [
+        2,
+        5,
+        2,
+        2,
+        5
+      ]
+    },
+    {
+      "race": 4,
+      "sex": 3,
+      "displayID": 1682,
+      "modelID": 56,
+      "extraID": 391,
+      "texture": "CreatureDisplayExtra-00391.blp",
+      "features": [
+        8,
+        6,
+        4,
+        3,
+        3
+      ]
+    },
+    {
+      "race": 4,
+      "sex": 3,
+      "displayID": 1710,
+      "modelID": 56,
+      "extraID": 428,
+      "texture": "CreatureDisplayExtra-00428.blp",
+      "features": [
+        5,
+        4,
+        0,
+        7,
+        2
+      ]
+    },
+    {
+      "race": 4,
+      "sex": 3,
+      "displayID": 1716,
+      "modelID": 56,
+      "extraID": 438,
+      "texture": "CreatureDisplayExtra-00438.blp",
+      "features": [
+        6,
+        7,
+        6,
+        6,
+        6
+      ]
+    },
+    {
+      "race": 4,
+      "sex": 3,
+      "displayID": 1719,
+      "modelID": 56,
+      "extraID": 406,
+      "texture": "CreatureDisplayExtra-00406.blp",
+      "features": [
+        1,
+        1,
+        5,
+        5,
+        0
+      ]
+    },
+    {
+      "race": 4,
+      "sex": 3,
+      "displayID": 1727,
+      "modelID": 56,
+      "extraID": 413,
+      "texture": "CreatureDisplayExtra-00413.blp",
+      "features": [
+        4,
+        2,
+        1,
+        1,
+        9
+      ]
+    },
+    {
+      "race": 4,
+      "sex": 3,
+      "displayID": 1702,
+      "modelID": 56,
+      "extraID": 400,
+      "texture": "CreatureDisplayExtra-00400.blp",
+      "features": [
+        6,
+        5,
+        1,
+        4,
+        3
+      ]
+    },
+    {
+      "race": 4,
+      "sex": 3,
+      "displayID": 1714,
+      "modelID": 56,
+      "extraID": 427,
+      "texture": "CreatureDisplayExtra-00427.blp",
+      "features": [
+        1,
+        0,
+        6,
+        4,
+        5
+      ]
+    },
+    {
+      "race": 5,
+      "sex": 2,
+      "displayID": 1599,
+      "modelID": 57,
+      "extraID": 278,
+      "texture": "CreatureDisplayExtra-00278.blp",
+      "features": [
+        4,
+        0,
+        8,
+        8,
+        16
+      ]
+    },
+    {
+      "race": 5,
+      "sex": 2,
+      "displayID": 1576,
+      "modelID": 57,
+      "extraID": 281,
+      "texture": "CreatureDisplayExtra-00281.blp",
+      "features": [
+        5,
+        4,
+        2,
+        4,
+        0
+      ]
+    },
+    {
+      "race": 5,
+      "sex": 2,
+      "displayID": 1583,
+      "modelID": 57,
+      "extraID": 295,
+      "texture": "CreatureDisplayExtra-00295.blp",
+      "features": [
+        0,
+        8,
+        1,
+        1,
+        10
+      ]
+    },
+    {
+      "race": 5,
+      "sex": 2,
+      "displayID": 1589,
+      "modelID": 57,
+      "extraID": 273,
+      "texture": "CreatureDisplayExtra-00273.blp",
+      "features": [
+        3,
+        3,
+        4,
+        3,
+        13
+      ]
+    },
+    {
+      "race": 5,
+      "sex": 2,
+      "displayID": 1606,
+      "modelID": 57,
+      "extraID": 311,
+      "texture": "CreatureDisplayExtra-00311.blp",
+      "features": [
+        2,
+        2,
+        6,
+        7,
+        9
+      ]
+    },
+    {
+      "race": 5,
+      "sex": 2,
+      "displayID": 2046,
+      "modelID": 57,
+      "extraID": 659,
+      "texture": "CreatureDisplayExtra-00659.blp",
+      "features": [
+        1,
+        6,
+        0,
+        2,
+        7
+      ]
+    },
+    {
+      "race": 5,
+      "sex": 2,
+      "displayID": 1027,
+      "modelID": 57,
+      "extraID": 467,
+      "texture": "CreatureDisplayExtra-00467.blp",
+      "features": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "race": 5,
+      "sex": 2,
+      "displayID": 1565,
+      "modelID": 57,
+      "extraID": 261,
+      "texture": "CreatureDisplayExtra-00261.blp",
+      "features": [
+        4,
+        7,
+        5,
+        3,
+        12
+      ]
+    },
+    {
+      "race": 5,
+      "sex": 3,
+      "displayID": 1592,
+      "modelID": 58,
+      "extraID": 300,
+      "texture": "CreatureDisplayExtra-00300.blp",
+      "features": [
+        2,
+        0,
+        7,
+        1,
+        5
+      ]
+    },
+    {
+      "race": 5,
+      "sex": 3,
+      "displayID": 1415,
+      "modelID": 58,
+      "extraID": 335,
+      "texture": "CreatureDisplayExtra-00335.blp",
+      "features": [
+        4,
+        8,
+        8,
+        6,
+        1
+      ]
+    },
+    {
+      "race": 5,
+      "sex": 3,
+      "displayID": 1603,
+      "modelID": 58,
+      "extraID": 264,
+      "texture": "CreatureDisplayExtra-00264.blp",
+      "features": [
+        5,
+        2,
+        3,
+        5,
+        7
+      ]
+    },
+    {
+      "race": 5,
+      "sex": 3,
+      "displayID": 3130,
+      "modelID": 58,
+      "extraID": 1433,
+      "texture": "CreatureDisplayExtra-01433.blp",
+      "features": [
+        3,
+        5,
+        1,
+        2,
+        0
+      ]
+    },
+    {
+      "race": 5,
+      "sex": 3,
+      "displayID": 1029,
+      "modelID": 58,
+      "extraID": 262,
+      "texture": "CreatureDisplayExtra-00262.blp",
+      "features": [
+        4,
+        0,
+        4,
+        9,
+        0
+      ]
+    },
+    {
+      "race": 5,
+      "sex": 3,
+      "displayID": 1593,
+      "modelID": 58,
+      "extraID": 301,
+      "texture": "CreatureDisplayExtra-00301.blp",
+      "features": [
+        0,
+        4,
+        4,
+        5,
+        5
+      ]
+    },
+    {
+      "race": 5,
+      "sex": 3,
+      "displayID": 1594,
+      "modelID": 58,
+      "extraID": 302,
+      "texture": "CreatureDisplayExtra-00302.blp",
+      "features": [
+        3,
+        8,
+        2,
+        4,
+        4
+      ]
+    },
+    {
+      "race": 5,
+      "sex": 3,
+      "displayID": 1601,
+      "modelID": 58,
+      "extraID": 265,
+      "texture": "CreatureDisplayExtra-00265.blp",
+      "features": [
+        2,
+        5,
+        2,
+        7,
+        3
+      ]
+    },
+    {
+      "race": 6,
+      "sex": 2,
+      "displayID": 2103,
+      "modelID": 59,
+      "extraID": 717,
+      "texture": "CreatureDisplayExtra-00717.blp",
+      "features": [
+        7,
+        1,
+        2,
+        0,
+        2
+      ]
+    },
+    {
+      "race": 6,
+      "sex": 2,
+      "displayID": 1904,
+      "modelID": 59,
+      "extraID": 593,
+      "texture": "CreatureDisplayExtra-00593.blp",
+      "features": [
+        1,
+        4,
+        1,
+        1,
+        0
+      ]
+    },
+    {
+      "race": 6,
+      "sex": 2,
+      "displayID": 3794,
+      "modelID": 59,
+      "extraID": 2048,
+      "texture": "6b68a75d8368669364d6035e7cdfc42a.blp",
+      "features": [
+        5,
+        2,
+        6,
+        2,
+        7
+      ]
+    },
+    {
+      "race": 6,
+      "sex": 2,
+      "displayID": 2026,
+      "modelID": 59,
+      "extraID": 638,
+      "texture": "CreatureDisplayExtra-00638.blp",
+      "features": [
+        0,
+        3,
+        4,
+        0,
+        0
+      ]
+    },
+    {
+      "race": 6,
+      "sex": 2,
+      "displayID": 2083,
+      "modelID": 59,
+      "extraID": 684,
+      "texture": "CreatureDisplayExtra-00684.blp",
+      "features": [
+        3,
+        0,
+        3,
+        0,
+        3
+      ]
+    },
+    {
+      "race": 6,
+      "sex": 2,
+      "displayID": 2084,
+      "modelID": 59,
+      "extraID": 701,
+      "texture": "CreatureDisplayExtra-00701.blp",
+      "features": [
+        1,
+        2,
+        0,
+        0,
+        6
+      ]
+    },
+    {
+      "race": 6,
+      "sex": 2,
+      "displayID": 2105,
+      "modelID": 59,
+      "extraID": 720,
+      "texture": "CreatureDisplayExtra-00720.blp",
+      "features": [
+        4,
+        2,
+        2,
+        1,
+        1
+      ]
+    },
+    {
+      "race": 6,
+      "sex": 2,
+      "displayID": 2106,
+      "modelID": 59,
+      "extraID": 725,
+      "texture": "CreatureDisplayExtra-00725.blp",
+      "features": [
+        4,
+        4,
+        5,
+        0,
+        5
+      ]
+    },
+    {
+      "race": 6,
+      "sex": 3,
+      "displayID": 3820,
+      "modelID": 60,
+      "extraID": 2075,
+      "texture": "83c4673a62d8b7adbda95d0bfa129b5.blp",
+      "features": [
+        9,
+        3,
+        0,
+        1,
+        3
+      ]
+    },
+    {
+      "race": 6,
+      "sex": 3,
+      "displayID": 2107,
+      "modelID": 60,
+      "extraID": 708,
+      "texture": "CreatureDisplayExtra-00708.blp",
+      "features": [
+        7,
+        1,
+        4,
+        0,
+        1
+      ]
+    },
+    {
+      "race": 6,
+      "sex": 3,
+      "displayID": 1905,
+      "modelID": 60,
+      "extraID": 597,
+      "texture": "CreatureDisplayExtra-00597.blp",
+      "features": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "race": 6,
+      "sex": 3,
+      "displayID": 2109,
+      "modelID": 60,
+      "extraID": 686,
+      "texture": "CreatureDisplayExtra-00686.blp",
+      "features": [
+        9,
+        2,
+        3,
+        0,
+        4
+      ]
+    },
+    {
+      "race": 6,
+      "sex": 3,
+      "displayID": 2579,
+      "modelID": 60,
+      "extraID": 1600,
+      "texture": "46dd3a6cc056da65761fd520c4bb16a3.blp",
+      "features": [
+        4,
+        2,
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "race": 6,
+      "sex": 3,
+      "displayID": 3781,
+      "modelID": 60,
+      "extraID": 2030,
+      "texture": "9c81fbcdc4d171f0a15e97b3978c2409.blp",
+      "features": [
+        5,
+        1,
+        2,
+        1,
+        0
+      ]
+    },
+    {
+      "race": 6,
+      "sex": 3,
+      "displayID": 3797,
+      "modelID": 60,
+      "extraID": 2051,
+      "texture": "da5fd05d7f9ba3dabaaaaabb63423df.blp",
+      "features": [
+        1,
+        0,
+        3,
+        2,
+        1
+      ]
+    },
+    {
+      "race": 6,
+      "sex": 3,
+      "displayID": 3807,
+      "modelID": 60,
+      "extraID": 2061,
+      "texture": "bc817f834b97eaa1519dca8635de1be2.blp",
+      "features": [
+        6,
+        2,
+        4,
+        2,
+        3
+      ]
+    },
+    {
+      "race": 7,
+      "sex": 2,
+      "displayID": 3055,
+      "modelID": 182,
+      "extraID": 1327,
+      "texture": "CreatureDisplayExtra-01327.blp",
+      "features": [
+        1,
+        2,
+        2,
+        7,
+        1
+      ]
+    },
+    {
+      "race": 7,
+      "sex": 2,
+      "displayID": 1832,
+      "modelID": 182,
+      "extraID": 510,
+      "texture": "CreatureDisplayExtra-00510.blp",
+      "features": [
+        0,
+        0,
+        4,
+        8,
+        0
+      ]
+    },
+    {
+      "race": 7,
+      "sex": 2,
+      "displayID": 3110,
+      "modelID": 182,
+      "extraID": 1373,
+      "texture": "CreatureDisplayExtra-01373.blp",
+      "features": [
+        3,
+        1,
+        6,
+        1,
+        4
+      ]
+    },
+    {
+      "race": 7,
+      "sex": 2,
+      "displayID": 4895,
+      "modelID": 182,
+      "extraID": 3110,
+      "texture": "4ae70d0246f99793a1248e839539d58a.blp",
+      "features": [
+        4,
+        6,
+        3,
+        3,
+        6
+      ]
+    },
+    {
+      "race": 7,
+      "sex": 2,
+      "displayID": 1930,
+      "modelID": 182,
+      "extraID": 609,
+      "texture": "CreatureDisplayExtra-00609.blp",
+      "features": [
+        2,
+        2,
+        3,
+        4,
+        5
+      ]
+    },
+    {
+      "race": 7,
+      "sex": 2,
+      "displayID": 2180,
+      "modelID": 182,
+      "extraID": 751,
+      "texture": "CreatureDisplayExtra-00751.blp",
+      "features": [
+        0,
+        3,
+        2,
+        4,
+        3
+      ]
+    },
+    {
+      "race": 7,
+      "sex": 2,
+      "displayID": 3040,
+      "modelID": 182,
+      "extraID": 1294,
+      "texture": "CreatureDisplayExtra-01294.blp",
+      "features": [
+        0,
+        1,
+        0,
+        0,
+        2
+      ]
+    },
+    {
+      "race": 7,
+      "sex": 2,
+      "displayID": 3109,
+      "modelID": 182,
+      "extraID": 1366,
+      "texture": "CreatureDisplayExtra-01366.blp",
+      "features": [
+        0,
+        4,
+        5,
+        7,
+        6
+      ]
+    },
+    {
+      "race": 7,
+      "sex": 3,
+      "displayID": 3108,
+      "modelID": 183,
+      "extraID": 1364,
+      "texture": "CreatureDisplayExtra-01364.blp",
+      "features": [
+        3,
+        1,
+        1,
+        6,
+        0
+      ]
+    },
+    {
+      "race": 7,
+      "sex": 3,
+      "displayID": 3119,
+      "modelID": 183,
+      "extraID": 1372,
+      "texture": "CreatureDisplayExtra-01372.blp",
+      "features": [
+        1,
+        4,
+        0,
+        7,
+        1
+      ]
+    },
+    {
+      "race": 7,
+      "sex": 3,
+      "displayID": 3106,
+      "modelID": 183,
+      "extraID": 1348,
+      "texture": "CreatureDisplayExtra-01348.blp",
+      "features": [
+        3,
+        5,
+        2,
+        0,
+        2
+      ]
+    },
+    {
+      "race": 7,
+      "sex": 3,
+      "displayID": 3121,
+      "modelID": 183,
+      "extraID": 1385,
+      "texture": "CreatureDisplayExtra-01385.blp",
+      "features": [
+        0,
+        4,
+        4,
+        5,
+        5
+      ]
+    },
+    {
+      "race": 7,
+      "sex": 3,
+      "displayID": 3588,
+      "modelID": 183,
+      "extraID": 1828,
+      "texture": "84b2126914fc2183fbf3d3adc6ccced8.blp",
+      "features": [
+        4,
+        6,
+        0,
+        4,
+        0
+      ]
+    },
+    {
+      "race": 7,
+      "sex": 3,
+      "displayID": 3120,
+      "modelID": 183,
+      "extraID": 1379,
+      "texture": "CreatureDisplayExtra-01379.blp",
+      "features": [
+        2,
+        3,
+        1,
+        8,
+        0
+      ]
+    },
+    {
+      "race": 7,
+      "sex": 3,
+      "displayID": 3124,
+      "modelID": 183,
+      "extraID": 1401,
+      "texture": "75481ae05fa56d44f02f7ad0ab4b3a24.blp",
+      "features": [
+        1,
+        0,
+        2,
+        7,
+        4
+      ]
+    },
+    {
+      "race": 7,
+      "sex": 3,
+      "displayID": 3125,
+      "modelID": 183,
+      "extraID": 1402,
+      "texture": "46340fe426fde71e1e72f4fa658df0f.blp",
+      "features": [
+        0,
+        4,
+        5,
+        3,
+        3
+      ]
+    },
+    {
+      "race": 8,
+      "sex": 2,
+      "displayID": 4242,
+      "modelID": 185,
+      "extraID": 2501,
+      "texture": "3c4756893052d04717da811c283d3117.blp",
+      "features": [
+        1,
+        0,
+        4,
+        8,
+        1
+      ]
+    },
+    {
+      "race": 8,
+      "sex": 2,
+      "displayID": 2025,
+      "modelID": 185,
+      "extraID": 637,
+      "texture": "CreatureDisplayExtra-00637.blp",
+      "features": [
+        3,
+        4,
+        3,
+        2,
+        0
+      ]
+    },
+    {
+      "race": 8,
+      "sex": 2,
+      "displayID": 4711,
+      "modelID": 185,
+      "extraID": 2935,
+      "texture": "5b779286a5043d929ea85e4d987d0f03.blp",
+      "features": [
+        0,
+        2,
+        2,
+        3,
+        2
+      ]
+    },
+    {
+      "race": 8,
+      "sex": 2,
+      "displayID": 2588,
+      "modelID": 185,
+      "extraID": 2981,
+      "texture": "ee1c130c80aec2edd16c1846d7758ed4.blp",
+      "features": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "race": 8,
+      "sex": 2,
+      "displayID": 4013,
+      "modelID": 185,
+      "extraID": 2270,
+      "texture": "69904e46ace89d5fdf3df4dd32fbcf81.blp",
+      "features": [
+        5,
+        0,
+        2,
+        1,
+        4
+      ]
+    },
+    {
+      "race": 8,
+      "sex": 2,
+      "displayID": 4047,
+      "modelID": 185,
+      "extraID": 2302,
+      "texture": "6210c7523de3aa47c1cb9a235af6c94c.blp",
+      "features": [
+        4,
+        4,
+        0,
+        1,
+        10
+      ]
+    },
+    {
+      "race": 8,
+      "sex": 2,
+      "displayID": 4099,
+      "modelID": 185,
+      "extraID": 2349,
+      "texture": "bb8db7b652df3ea12883b00181773d4.blp",
+      "features": [
+        2,
+        1,
+        3,
+        1,
+        3
+      ]
+    },
+    {
+      "race": 8,
+      "sex": 2,
+      "displayID": 4228,
+      "modelID": 185,
+      "extraID": 2480,
+      "texture": "d96db202320c396350320c726a53bee.blp",
+      "features": [
+        6,
+        4,
+        5,
+        7,
+        3
+      ]
+    },
+    {
+      "race": 8,
+      "sex": 3,
+      "displayID": 4231,
+      "modelID": 186,
+      "extraID": 2488,
+      "texture": "21a632417540ba58f69b7fea174bb42.blp",
+      "features": [
+        3,
+        3,
+        3,
+        1,
+        3
+      ]
+    },
+    {
+      "race": 8,
+      "sex": 3,
+      "displayID": 1897,
+      "modelID": 186,
+      "extraID": 2341,
+      "texture": "ca7856064c8d2f26591a7b8a44b8f13.blp",
+      "features": [
+        0,
+        2,
+        1,
+        6,
+        5
+      ]
+    },
+    {
+      "race": 8,
+      "sex": 3,
+      "displayID": 4087,
+      "modelID": 186,
+      "extraID": 2339,
+      "texture": "3a4338a7d12bbabc70d83e9afae815e4.blp",
+      "features": [
+        1,
+        1,
+        2,
+        5,
+        4
+      ]
+    },
+    {
+      "race": 8,
+      "sex": 3,
+      "displayID": 2589,
+      "modelID": 186,
+      "extraID": 1511,
+      "texture": "6d0e645a8dd668d742f7febbc1ed841.blp",
+      "features": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "race": 8,
+      "sex": 3,
+      "displayID": 4089,
+      "modelID": 186,
+      "extraID": 2340,
+      "texture": "b45ccf0ecffab128dc6871411b6a7bba.blp",
+      "features": [
+        5,
+        2,
+        3,
+        5,
+        2
+      ]
+    },
+    {
+      "race": 8,
+      "sex": 3,
+      "displayID": 4241,
+      "modelID": 186,
+      "extraID": 2499,
+      "texture": "6f6f7f5ca1ea25d3229e71e7b40de9ed.blp",
+      "features": [
+        2,
+        4,
+        1,
+        2,
+        4
+      ]
+    },
+    {
+      "race": 8,
+      "sex": 3,
+      "displayID": 4357,
+      "modelID": 186,
+      "extraID": 2512,
+      "texture": "bf3d69ceaa2ab39d985e573165f52145.blp",
+      "features": [
+        2,
+        3,
+        4,
+        3,
+        1
+      ]
+    },
+    {
+      "race": 8,
+      "sex": 3,
+      "displayID": 4358,
+      "modelID": 186,
+      "extraID": 2490,
+      "texture": "CreatureDisplayExtra-02490.blp",
+      "features": [
+        4,
+        1,
+        0,
+        4,
+        6
+      ]
+    }
+  ]
+}

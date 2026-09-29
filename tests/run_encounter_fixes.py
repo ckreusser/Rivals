@@ -5,8 +5,8 @@ from lupa.lua51 import LuaRuntime
 root = Path(__file__).resolve().parents[1]
 lua = LuaRuntime(unpack_returned_tuples=True)
 lua.execute('DP={}; function loadAddon(s) assert(loadstring(s))("Rivals",DP) end')
-for name in ("Parser", "Tracker", "UsageCatalog", "Specs", "Usage", "Rating",
-             "Verification", "Recovery", "Periods", "Theme", "WorldPvP", "Views",
+for name in ("Parser", "Tracker", "UsageCatalog", "ProcCatalog", "Specs", "Usage", "Rating",
+             "Verification", "Recovery", "Periods", "Theme", "Portraits", "WorldPvP", "Views",
              "Promos", "CharacterTab", "Inspect", "Tooltip"):
     lua.globals().loadAddon((root / (name + ".lua")).read_text(encoding="utf-8"))
 for name in ("spec", "specs", "usage", "wow_mock"):

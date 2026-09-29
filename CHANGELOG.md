@@ -1,3 +1,693 @@
+## Rivals 1.0.101
+
+Changes since 1.0.0.
+
+### History portraits
+
+- Added reconstructed 3D opponent portraits using captured race, sex, and equipment, with saved outfits available after reloads.
+- Rebuilt loading around the selected encounter: only visible portraits load, completed portraits are reused, and switching encounters cancels abandoned work.
+- Removed the dependency on finding a nearby player of the same sex, fixing prolonged waits affecting male Dwarves and other portraits.
+- Improved framing, circular clipping, equipment verification, and animation freezing. A spinner remains visible while a portrait prepares.
+- Added eight stable face, hair, and skin variants per race/sex. Reconstructed features are approximations; exact live appearances are preferred when available.
+
+### Combat Log
+
+- Added selectable, read-only logs and a Copy button that selects the log for Ctrl+C.
+- Added spell tooltips, quality-colored item links, clearer proc highlighting, killing-blow markers, and additional missed/absorbed/resisted attack results.
+- Expanded equipped-item proc recognition and corrected false attribution, including NPC Dazed and normal class abilities such as Disarm.
+- Improved reflected-spell attribution and periodic-effect ownership.
+- Item activations now appear before their resulting effects. Diamond Flask is correctly shown as an item use while retaining its applied-buff entry.
+- Fixed large mousewheel jumps after switching encounters and an error when opening details containing equipped-item procs.
+
+### Encounter tracking
+
+- Keep fights together through Ice Block and Gnomish Mind Control Cap interruptions, including cap backfires.
+- Repair eligible adjacent saved encounter fragments when retained evidence identifies one continuous fight, rebuilding their logs, results, and consumable totals.
+- Added an encounter mouseover roster with class-colored names, known or inferred specs, and Survived/Died status.
+- Improved friendly participant capture and death tracking without treating Feign Death as a real death.
+- Fixed stretched or misplaced exploration overlays on encounter maps.
+
+### Spending and encounter details
+
+- Added lifetime Enemy Gold Spent to the World PvP overview, preserving accumulated spending as older encounters leave rolling History. Nemesis remains available in the Most Killed tooltip.
+- Sort the consumable ledger by spending, with the largest contributors and items first.
+- Added Items & Abilities category help. Reagents remain in consumable costs without separate action rows.
+- Stop counting the passive Supercharged Chronoboon aura as an item use or enemy buff advantage, repair affected saved costs, and price actual Chronoboon uses at the fixed 1-gold vendor cost.
+
+---
+
+# 1.0.99
+
+- Prevent World PvP encounters from splitting while an existing opponent is in Ice Block, including when a new enemy joins during the combat-state drop.
+- Added a short post-Ice-Block continuity buffer to absorb Classic combat-log/regen event ordering without lengthening normal encounter grace globally.
+- Retroactively merge adjacent saved encounter fragments when the first half ends with an active Ice Block and the same blocked opponent appears in the following fragment.
+- Recompute merged enemy headcount, pressure, outcome, combat log, usage, and consumable snapshot from the combined encounter.
+
+# 1.0.98
+
+- Fixed the 1.0.97 Mind Control Cap split migration so it actually runs during World PvP initialization. Existing adjacent fragments from the same opponent can now merge retroactively; the repair version was bumped so the corrected pass is not skipped.
+- Hide Supercharged Chronoboon Displacer from ENEMY BUFFS. The stored-world-buff aura is not treated as an enemy buff advantage or an in-encounter item use.
+- Added mouseover help to Items & Abilities category dividers explaining what belongs in each section.
+- Removed REAGENTS and its child rows from Items & Abilities. Reagent usage still contributes to the Consumable Cost ledger.
+- Consumable Cost now sorts by value: higher-spend participants first, then higher-value items within each participant, with deterministic tie-breakers.
+
+# 1.0.97
+
+- Added a conservative retroactive repair for World PvP encounters split by a Gnomish Mind Control Cap backfire. Adjacent same-opponent records are merged only when the earlier record ended from a combat drop/inactivity and a retained Mind Control Cap signal explains the boundary.
+- Merged historical records rebuild one continuous Combat Log/Items & Abilities timeline, reattribute NPC-sourced cap backfires to the player, recompute encounter outcome/headcount, and rebuild consumable cost from the combined evidence.
+- Preserves stars and the later encounter result/location while removing the duplicate History entry.
+
+# 1.0.96
+
+- Corrected Gnomish Mind Control Cap tracking to recognize both the 13180 item effect and the actual 13181 charm aura. NPC-sourced backfires are attributed to the player who activated the cap, collapsed to one gadget use, and shown as an item hyperlink in Combat Log and Engineering Gadgets.
+- Extended the same-encounter grace window after a Mind Control Cap signal to cover the full temporary charm/backfire interruption instead of allowing PLAYER_REGEN_ENABLED to split the fight.
+- Removed spell 349981 (the persistent Supercharged Chronoboon aura) as item-use evidence. Old fake Chronoboon rows are hidden/repaired and consumable snapshots containing them are rebuilt. Actual Chronoboon uses remain tracked from their cast spells.
+
+# 1.0.95
+
+- Moved inferred/known spec before Survived/Died in the encounter combatants tooltip so the green/red outcomes align on the right edge.
+- Keep a World PvP encounter continuous through Gnomish Mind Control Cap charm/backfire combat drops. Backfires are attributed to the player who used the cap, deduplicated, and rendered with the Gnomish Mind Control Cap item hyperlink.
+- Stopped treating a newly visible Supercharged Chronoboon aura as an in-encounter Chronoboon use. Existing affected consumable snapshots are repaired on load.
+- Set Chronoboon replacement cost to the fixed 1g vendor price.
+
+# 1.0.94
+
+- Replaced levels in the encounter combatants tooltip with green Survived or red Died. Kept class-colored names and known specs.
+- Retain friendly deaths and recover death status from older encounter logs, excluding recorded unconscious/Feign Death transitions.
+
+# 1.0.93
+
+- Fixed friendly level lookup through player, party, and raid unit tokens, including when friendly nameplates are disabled.
+- Retry missing/invalid friendly levels on target, mouseover, nameplate, aura, level, and roster events, with a final refresh before saving. Existing valid historical levels remain unchanged.
+
+# 1.0.92
+
+- Simplified the encounter combatants tooltip: removed YOUR SIDE, the player's (You) suffix, unknown-spec placeholders, and the footer. Added a vs. separator and singular OPPONENT for one enemy.
+
+# 1.0.91
+
+- Added a mouseover roster to the History detail ENCOUNTER section. Your side and opponents show class-colored names, levels colored relative to your recorded encounter level, and specs from recorded evidence. Missing levels/specs are explicitly unknown; the player appears once.
+- The hover area follows the variable-height location header and covers the encounter count and outcome without replacing the location tooltip.
+
+# 1.0.90
+
+- Added eight distinct face/hair/skin combinations per Classic race/sex, selected consistently by player GUID. Different saved encounters and reloads keep the same player's reconstructed features stable. These are approximations; old records did not store actual customization choices.
+- Prefer exact retained/live opponent bodies when available. Generic reconstructed portraits no longer all borrow the local player's face or the same single NPC display.
+- Reused actors now update their base features before dressing a different player. Matching cached faces are preferred, pending bodies remain reserved for their requester, and only visible requests load models.
+- Checked all 128 display mappings against race/sex/model/skin data; regression tests cover face changes on actor reuse, stable revisits/new outfits/reloads, and existing loading/camera behavior. New variants still need in-game visual validation.
+
+# 1.0.89
+
+- Replaced untextured bare player displays in the donor-independent path with race/sex-matched humanoid displays containing skin data. Actual Era skin and equipment composition still need in-game verification.
+- Added explicit-slot equipment application when numeric TryOn is ignored. A portrait with unverified or rejected equipment no longer becomes ready just because a timer expired.
+- Added persistent binding/API/per-slot equipment diagnostics, three archived session traces, a read-only report inspector, and `PORTRAIT_DEBUG_LOG.md` documenting evidence and failed assumptions.
+- Preserved foreground-only loading, spinner-only waiting, camera calibration, geometry, and recorded helms.
+
+# 1.0.88
+
+## History portraits
+- Identified a missing-body dependency in the reported trace: eight female templates existed, but the selected Human was male. No male model load started; the spinner could wait indefinitely for an addressable male player.
+- Added direct race/sex player-display loading with active-player customizations when no compatible live unit exists or unit binding is rejected. A timed-out unit binding switches to this independent source on the same actor. Exact retained opponent bodies remain preferred.
+- Removed the eight-race template burst on login and donor observation. Only requested portraits allocate and load shared bodies; completed bodies and outfits remain reusable.
+- Preserved spinner-only loading, saved cameras, medallion geometry, masks, and recorded equipment. Fixed an out-of-scope diagnostic variable in the calibration body's missing-donor path.
+- Load traces now identify the binding source/display ID and equipment readback counts.
+- Lua 5.1 regressions cover all 16 race/sex combinations with only an opposite-sex player available, rejected and stalled unit bindings, selection changes, outfit reuse, and no startup model loads. These use a simulated renderer: texture correctness, customization behavior across races/sexes, and actual load speed need in-game validation of the new display path. Combat Log classification and scrolling checks also pass.
+
+# 1.0.87
+
+## History portraits
+- Separated donor retention from portrait preparation. On observing a player, Rivals retains one hidden, paused body template for each Classic race of that sex. Selecting a different race later can activate its template after the donor has disappeared, instead of waiting for another compatible live player.
+- Only selected, visible opponents activate templates and dress recorded equipment. Removed the deferred idle sweep that could miss short-lived donors and leave an entire sex unavailable.
+- Discover donors at login and group changes, preserve actual nameplate tokens beyond nameplate40, and prioritize pending visible portraits when a donor appears. Body readiness starts dressing directly rather than waiting for a slow UI retry.
+- Reuse rejected model bindings instead of repeatedly allocating widgets. Added distinct diagnostics for retained templates, missing donors, creation failures, and binding failures.
+- Removed class-icon fallbacks. Saved portraits keep the spinner until the reconstructed portrait reveals; existing camera calibration, geometry, masking, and recorded helms are preserved.
+- Automated tests cover a fleeting male donor disappearing before a later male Dwarf selection. Actual game streaming and dormant-template behavior still require in-game validation; one initial compatible donor per sex is still needed after reload.
+
+## Combat Log
+- Fixed the large jump on the first wheel tick after changing encounters: resetting the log now clears the previous smooth-scroll destination and animation, and idle wheel input starts from the visible position.
+- Removed proc matching by shared names and the assumption that an unrecognized effect without a recorded cast must be a proc. NPCs cannot be attributed player equipment; old incorrect proc-item metadata is revalidated when displayed.
+- Added Diamond Flask's Era activation spell ID (363880) alongside its aura/heal ID (24427). The log shows the item use first and retains the subsequent applied-aura row.
+- Verified representative abilities from all nine classes, all proc-catalog rows, 72 class-signature IDs, and 354 saved-log spell ID/name pairs.
+
+# 1.0.86
+
+## History portraits
+- Removed login, landing-pane, History-page, and whole-encounter outfit preloading. Only opponents visible in the selected encounter request portraits; scrolling releases outgoing actors before requesting incoming rows.
+- Replaced the automatic four-bodies-per-race startup burst with one-at-a-time idle donor preservation. Visible History requests bypass unrelated idle work and pause further warming.
+- Coalesced repeated requests onto one pending race/sex body. Added a readiness watchdog for missing model-loaded callbacks, one bounded reseed attempt for stalled bodies, and continued recovery if the engine becomes ready later.
+- Cancelled abandoned dressing and reveal callbacks when switching encounters, scrolling, closing details, or changing tabs. Prepared outfits remain cached for revisits.
+- Limited the loading spinner to three seconds before showing a temporary class icon; a ready reconstructed portrait replaces it automatically. This is a fallback for unavailable donors/engine stalls, not a guarantee that models load within three seconds.
+- Added a bounded saved load trace and `/rivalsportrait loads` to inspect request, body, dressing, callback, attachment, and reveal stages.
+- Preserved the portrait geometry, masking, recorded helms, and saved camera calibrations. Lua 5.1 scheduling/lifecycle and camera/mask regression checks pass; actual loading speed and animation still require in-game validation.
+
+# 1.0.85
+
+## Combat Log
+- Fixed a `tonumber` base-out-of-range error when opening encounter details with equipped-item procs. Inventory lookups now capture only the item ID before numeric conversion.
+
+# 1.0.84
+
+## Combat Log
+- Replaced the five-entry proc seed list with a broad Classic Era equipped-item proc catalog: 240 proc relationships across 238 unique weapons, rings, armor pieces, shields, and trinkets.
+- Added reactive non-weapon sources including **Freezing Band**, Skullflame Shield, Demon Forged Breastplate, Wall of the Dead, Force of Will, Guardian Talisman, The Lion Horn of Stormwind, Thick Obsidian Breastplate, Naglering, Drillborer Disk, Girdle of Reprisal, Vile Protector, Truesilver Breastplate, Uther's Strength, Mark of the Chosen, The Green Tower, Crest of Retribution, and Force Reactive Disk.
+- Proc spells that are shared by many Classic items (for example Rend, Shadow Bolt, Stun, Drain Life, or Thorns) are no longer assigned to an arbitrary item. Rivals resolves the source against the actor's equipment and only prints an item when the match is unique.
+- New portrait/identity captures retain equipped item IDs for all inventory slots 1-19, while portrait reconstruction continues using only its existing visual slots. This gives future encounters enough gear evidence to attribute ambiguous weapon, armor, ring, shield, and trinket procs safely.
+- Known proc effects keep the lavender bracket treatment even when an older encounter lacks enough saved gear data to name the exact source item.
+
+# 1.0.83
+
+## Combat Log
+- Added equipped-item attribution for known intrinsic weapon/item procs. Proc effects can now identify the item that generated them instead of showing only the effect spell.
+- Item sources render as normal quality-colored item hyperlinks, so they use Blizzard item tooltips and remain Shift-clickable in the Combat Log.
+- `Glimpse of Madness` is attributed to **Dark Edge of Insanity**, producing rows such as `Zurker's [Dark Edge of Insanity] applied [Glimpse of Madness] to Orgrímmar`.
+- Added the same source layer for several other unambiguous Classic proc effects, including Bonereaver's Edge, The Untamed Blade, Nightfall, and Thunderfury.
+- Proc-source metadata is retained on new encounters and is also resolved at display time so supported older saved encounters gain the richer attribution automatically.
+
+# 1.0.82
+
+## Combat Log
+- Generalized item-use ordering so the **used [Item]** row renders before either a resulting aura or an immediate item heal/damage event. This fixes Healthstones appearing after their heal while preserving reflector **used -> applied** ordering.
+
+## Portraits
+- Reverted the 1.0.81 serialized portrait-body scheduler that could strand a foreground portrait behind an initializing body and leave the spinner running for extremely long periods.
+- Restored the faster 1.0.78 startup path: seed one retained body per race immediately for the player's sex, expand the pool in later passes, and start recent-History preparation at 0.55s / 1.6s / 3.2s after initialization.
+- Restored deterministic one-body player warming when portrait preloading runs, so opening History immediately after `/reload` does not depend on the delayed background worker having reached the requested race first.
+- Kept the zero-speed animation freeze introduced in 1.0.78 and the later encounter-switch cleanup/primary-opponent ordering.
+
+# 1.0.81
+
+## Combat Log
+- Reordered item-use display when Classic reports the resulting self-buff first: **used [Item]** now renders before the corresponding **applied [Buff]** row without altering the captured event data.
+
+## Portraits
+- Removed the remaining startup/model-loading stampede: player, target, mouseover, and nameplate donor warming now creates retained ModelScenes serially instead of seeding many race/sex actors in one frame.
+- Foreground History portrait requests now pause all background body warming and background History preparation until the selected portrait has had first access to the renderer.
+- Foreground cache misses create only the requested race/sex body on demand rather than implicitly warming every race.
+- Sorted the selected encounter's opponents before portrait preload so the lead/primary Rival gets the first foreground body lane.
+- Removed the delayed nameplate escalation to four background bodies per race; additional bodies are grown only as needed.
+
+# 1.0.80
+
+## Combat Log
+- Fixed malformed item-quality markup that could render literally as `|c[Major Healthstone]` when Classic returned an incomplete cached item link/color state.
+- Item-use rows now validate Blizzard item hyperlinks before using them and otherwise build a complete quality-colored, shift-clickable item link from Rivals' known item ID/quality.
+
+# 1.0.79
+
+## Combat Log
+- Item activations now keep both pieces of useful information instead of collapsing the activation and resulting aura into the same line.
+- On-use items render the activation as **used [Item]**, while the resulting buff/debuff remains a normal ability row such as **applied [Shadow Reflector] to Zurker**.
+
+# 1.0.78
+
+## World PvP
+- Removed the approximation tilde from **Enemy Gold Spent**; Rivals still discloses unpriced tracked consumables in the tooltip, and price lookup continues to fall back from TSM DBMarket to Auctionator per item.
+- Combat Log now resolves item activations through the Classic item-use catalog instead of a small hand list. Self-buff/on-use events render as **used [Item]** with the actual item quality color and a shift-clickable item link.
+- Collapsed redundant item cast + aura rows into one item-use row where the combat log provides both events.
+
+## Portraits
+- Reworked login warming so Rivals seeds one body per race first instead of launching 32 ModelScene loads at once, then expands the pool after login settles.
+- Delayed broad History background preparation so an encounter opened immediately after `/reload` gets the renderer first.
+- Fully verified outfits can now leave hidden preparation early instead of always waiting the full fallback window.
+- Changed reconstructed portraits from a near-zero animation speed to an actual zero-speed stand pose and disabled animation blending before pausing, targeting the remaining visible Human male / Night Elf female idle motion.
+
+# 1.0.77
+
+- Changed the Combat Log copy button to select the entire log instead of attempting the protected WoW clipboard API; its tooltip now instructs the user to press Ctrl+C after selection.
+- Reworked portrait preparation priority so the encounter currently being viewed can preempt unrelated background portrait generation of the same race/sex.
+- Reserved one retained portrait actor per race/sex for foreground History requests instead of letting background preload consume the entire four-actor pool.
+- Prevented repeated foreground retries from starting duplicate preparation jobs for the same opponent.
+- Released the previous encounter's portrait leases before preparing the newly selected encounter.
+- Skipped the up-to-one-second native portrait-camera probe when a saved race/sex calibration already exists, since production framing immediately replaces that native camera target anyway.
+- Reduced broad History preload churn that caused several same-race portraits to finish together after long waits.
+- Applied the hidden post-reparent freeze/settle sequence to every race/sex combination, not only Human males, to reduce brief visible portrait animation.
+
+# 1.0.76
+
+- Tightened reflected-spell inference so a cast is only inferred as reflected when its intended target actually had an active engineering reflector.
+- Prevented physical/self-effect abilities such as Bloodthirst and Diamond Flask from being falsely tagged as reflected.
+- Preserved reflected aura ownership for periodic effects so reflected damage-over-time ticks remain attributed to the reflector until the aura ends.
+- Classified Holy Strength (Crusader) as a weapon proc so its bracketed ability name uses the lavender proc treatment.
+- Improved self-cast target resolution for stances, buffs, consumables, and item activations, and removed Unidentified target labels when no reliable target exists.
+- New combat-log captures retain spell-school data to further guard reflection inference.
+
+# 1.0.75
+
+- Improved reflected-spell reconstruction when Classic omits the explicit REFLECT miss event.
+- Reflected casts are marked `(REFLECTED)` on the original cast line.
+- Returned reflected damage and hostile aura rows are attributed to the reflector instead of the original caster.
+
+# 1.0.74
+
+- Restored the Combat Log copy button with a Classic-safe TGA asset traced from the rounded overlapping-squares reference glyph.
+- Engineering reflector casts now normalize to the caster as the target instead of displaying an opaque CLEU destination as `Unidentified`.
+- Shadow, frost, and fire reflector activations therefore render as self-casts while reflected enemy spells continue to use the reflected-spell reconstruction logic.
+
+# 1.0.73
+
+- Replaced the Combat Log copy glyph with a rounded overlapping-squares icon matching the standard copy symbol more closely.
+- The Combat Log copy button now performs a direct one-click clipboard write when the client permits the protected clipboard API; it no longer intentionally uses a two-step Ctrl+C workflow.
+- Added reflected-spell reconstruction: reflected casts are marked `(REFLECTED)`, reflected damage/aura effects are attributed to the reflector, and the redundant REFLECT miss row is suppressed when the cast can be paired reliably.
+
+# 1.0.72
+
+- Removed the outer frame from Combat Log ability tooltip icons, enlarged the icon itself, and attached it directly to the tooltip edge.
+- Proc effects no longer print a separate PROC label; their bracketed ability name is tinted lavender instead.
+- Backspace/Delete are intercepted before the read-only Combat Log can mutate, preserving the caret position while arrow-key navigation remains available.
+- Switching to another World PvP encounter while viewing Combat Log now resets the caret and scroll position to the top.
+- Player killing blows retain the KILLING BLOW marker and are followed by an explicit death line; Rivals suppresses a duplicate death event when it has to synthesize that line.
+
+# 1.0.71
+
+- Restyled the Combat Log copy glyph to a smaller overlapping-square icon closer to the standard copy symbol.
+- Kept Combat Log text immutable while preserving normal cursor navigation; attempted edits restore the original text without moving the caret.
+- Combat-log ability names are now white, bracketed spell links with attached spell icons on mouseover tooltips.
+- Standardized combat verbs such as cast and hit to white text while keeping damage/heal numbers color-coded.
+- Added explicit PROC labeling for player-sourced non-class effects such as weapon/item procs while leaving the ability name itself white.
+- Expanded class-ability recognition for Warrior abilities including Whirlwind, Charge, Rend, and Deep Wounds so they are not misclassified as item procs.
+- Added renderer-side source correction for periodic class abilities when the saved source conflicts with a known player class and a recent valid caster can be identified; this repairs cases such as a Rogue being shown as the source of Rend.
+- Removed literal Unknown targets from structured and legacy Combat Log display. Untargeted/self/AoE casts now omit the fake target instead.
+- Preserved actual SPELL_DAMAGE / SPELL_MISSED results for direct-damage abilities; Rivals does not invent damage when Blizzard does not emit an impact event.
+
+# 1.0.70
+
+- Made World PvP and Duel combat-log text read-only while preserving mouse selection and Ctrl+C copying.
+- Added a square-over-square Copy control to the top-right of both combat-log panes; it prepares the complete plain-text log for Ctrl+C without exposing Rivals markup.
+- Made structured combat-log spell names interactive so hovering an ability shows its Blizzard spell tooltip.
+- Highlighted player-sourced non-class combat effects, including weapon/item-style procs such as Glimpse of Madness, with a distinct lavender treatment.
+- Added KILLING BLOW markers to lethal player-vs-player damage rows, including existing World PvP records where the stored overkill payload proves the lethal hit.
+- Added SPELL_MISSED / RANGE_MISSED capture and rendering so damaging abilities that are absorbed, resisted, immune, or otherwise miss no longer appear as a cast with no result.
+- Added aura refresh events to the retained World PvP log.
+- New Duel combat-log captures now retain spell IDs/names so ability tooltips are available there as well.
+
+# 1.0.69
+
+- Made World PvP combat logs selectable with the mouse and copyable using standard keyboard shortcuts.
+- Made Duel combat logs selectable and copyable as well for UI parity.
+- Combat-log scrolling and existing inline formatting are preserved.
+
+# 1.0.68
+
+## World PvP Overview
+- Replaced the standalone Nemesis plaque with **Enemy Gold Spent**, a lifetime estimate of tracked consumables used by enemy players against you.
+- Enemy spending now survives the 250-encounter rolling History cap by archiving totals before old encounters are discarded.
+- Moved **Nemesis** into the **Most Killed** mouseover and condensed both rival records using the same World PvP / Solo / encounter-count language used elsewhere in History.
+- Replaced `g` / `s` text abbreviations on Enemy Gold Spent with WoW coin icons and simplified its tooltip.
+
+## Opponent Portraits
+- Continued rebuilding the World PvP portrait lifecycle so saved encounters reconstruct generated 3D opponent portraits instead of relying on persisted render-target handles or temporary class icons.
+- Added an in-medallion loading state for reconstructable portraits while their ModelScene is being prepared.
+- Added higher-priority preparation and retry handling for the encounter the user is actively viewing.
+- Applied saved race/sex camera calibrations retroactively to reconstructed portraits from older encounters.
+- Expanded `/rivalsportrait test` with fixed-distance camera pitch, character rotation, horizontal/vertical framing, and zoom controls.
+- Portrait test previews now hide helms so headgear cannot obstruct camera calibration; normal History portraits still preserve recorded helm visibility.
+- Saved portrait-test camera settings persist across relogs and are reused by production portrait reconstruction.
+- Added extra hidden freeze handling for Human male portraits to reduce brief visible idle animation during reveal.
+- Iterated on the portrait loading indicator with circular dots, smoother tapering, and medallion-centered placement.
+
+## Stability
+- Reduced `WorldPvP.lua` chunk-level locals after the Enemy Gold Spent work exceeded Classic Lua's 200-local main-function limit.
+
+## Promos
+- Rewrote the in-game Rivals promo rotation around the addon's current World PvP features, including encounter history, opponent records, outnumbered fights, map captures, generated portraits, enemy buffs, consumable cost, and current duel functionality.
+
+# 1.0.67
+
+- Prioritized the portrait for the currently opened encounter so it prepares immediately instead of waiting behind broader History warming.
+- Reduced cases where the loading spinner could continue for a long time on the same portraits.
+- Refined the loading swirl centering and softened the leading dot highlight.
+- Tightened the swirl tail so the dots shrink more quickly and smoothly behind the lead.
+- Added extra hidden freeze passes for human male reconstructed portraits to reduce visible animation.
+
+# 1.0.66
+
+- Fixed a remaining portrait-loading deadlock where an unavailable exact live-body clone could prevent a prepared shared generated portrait from ever being used.
+- Visible History portraits now prefer exact live identity when ready, but immediately fall back to the generated race/sex body pool instead of spinning indefinitely.
+- Recentered the loading indicator directly on the portrait medallion.
+- Reworked the spinner with circular dots and a smooth, faster exponential size/alpha taper.
+- Added a hidden post-reparent hard-freeze for Human male portraits to suppress their brief idle-animation flash before reveal.
+- Increased active portrait retry responsiveness.
+
+# 1.0.65
+
+- Fixed generated portraits sometimes remaining on the loading indicator until the encounter was reopened.
+- Visible portrait requests now stay pinned in the prepared-model cache and are upgraded by cache key as soon as generation completes.
+- Replaced square loading blocks with circular dots and centered the spinner on the medallion viewport.
+- Increased priority retry responsiveness for a portrait the user is actively viewing.
+
+# 1.0.64
+
+- Reconstructed World PvP portraits now use an animated loading spinner instead of class icons while their generated portrait prepares.
+- Replaced the old refresh-style spinner with a round loading swirl.
+- Applied saved portrait camera calibrations to all reconstructed portraits, including old encounters loaded from History.
+- Reduced portrait preparation delays and increased preload/retry aggressiveness to improve first-open portrait load times.
+- The portrait calibration tool now immediately reapplies newly saved calibration values in-session.
+
+# 1.0.63
+
+- `/rivalsportrait test` now restores each race/sex calibration from the last saved result after relogging.
+- Portrait test previews always hide head-slot gear so helms cannot obscure face/camera calibration.
+- Test-only helm suppression does not modify saved encounter appearance data or production History portraits.
+
+# 1.0.62
+
+- Keep reconstructable World PvP portraits in an animated medallion loading state until the generated portrait is actually ready; no temporary class icon.
+- Retry hidden portrait preparation while the encounter remains open, so a portrait that missed the initial body-cache warm-up appears automatically without clicking away and back.
+- Keep the loading spinner visible until the frozen ModelScene is revealed, avoiding a blank transition frame.
+- Expanded `/rivalsportrait test` with fixed-distance camera pitch controls and character rotation controls.
+- Saved portrait test results now include camera pitch and character yaw values.
+
+# 1.0.61
+
+- Replaced temporary class-icon portrait fallbacks on reconstructable World PvP opponents with an in-medallion loading spinner.
+- Visible encounter cards now upgrade automatically to the generated portrait the moment hidden preparation finishes, without requiring you to click away and back.
+- Preserved existing portrait framing, medallion masking, and freeze behavior.
+
+# 1.0.60
+
+- Restyled the Most Killed / Nemesis tooltip with matching title-case gold headers.
+- Replaced kill/death bullet formatting with the History opponent-record format.
+- Added each rival's World PvP record, Solo record, and recorded encounter count.
+
+# 1.0.59
+
+- Condensed the Most Killed / Nemesis mouseover tooltip.
+- Standardized section header casing and kill/death presentation.
+- Shortened the encounter-relative death note.
+
+# 1.0.58
+
+- Replaced the Enemy Gold Spent plaque text abbreviations with coin icons.
+- Removed the footer line from the Enemy Gold Spent mouseover tooltip.
+
+# 1.0.57
+
+- Fixed the Classic Lua `main function has more than 200 local variables` warning in `WorldPvP.lua`. Module-wide World PvP constants now live in a single configuration table, reducing chunk-level locals without changing encounter, portrait, map, or Enemy Gold Spent behavior.
+
+# 1.0.56
+
+- Replace the standalone **Nemesis** Overview plaque with **Enemy Gold Spent**, showing the lifetime captured value of consumables used by enemy World PvP Rivals against you.
+- Preserve enemy consumable value when unstarred encounters age out of the rolling 250-encounter History cap, so the lifetime spend total keeps accumulating beyond retained History.
+- Count only enemy-player spend from each encounter cost snapshot; the user's own consumables are excluded. Unpriced tracked consumables are called out in the tooltip and leave the displayed total marked approximate.
+- Fold the Nemesis record into the **Most Killed** plaque tooltip, keeping both rivalry stats available without dedicating a second Overview plaque to them.
+
+# 1.0.55
+
+- Stop serializing `SetPortraitTexture` backing handles. Classic can expose session-local numeric render-target values that later alias unrelated spell/item icons, which caused some History portraits to reopen as random icons after `/reload`. Existing stale values are discarded on initialization.
+- Start retained-body warming and recent-history portrait preparation immediately after entering the world, with staggered retries, and increase the landing-pane warm set to 24 identities.
+- Protect portraits requested by the same visible History batch from evicting each other while the shared race/sex cache is preparing.
+- If a first-click fallback still wins a rare startup race, upgrade that exact visible card automatically when its hidden portrait finishes instead of requiring Rivals to be closed/reopened. The old static visual remains until the frozen actor is ready, so there is no blank medallion.
+- Keep a prepared ModelScene transparent for one UI tick after reparenting, reassert actor/scene pause, then reveal it. This targets the remaining one-frame idle-animation flash without delaying encounter content.
+- Preserve the 1.0.54 map exploration-tile fix and all accepted portrait framing/masks/plaque geometry.
+
+# 1.0.54
+
+- Rebuild encounter-map exploration overlays using Blizzard's actual map-layer tile dimensions and power-of-two edge texture sizes instead of assuming 256px backing files.
+- Respect exploration overlay draw-on-top and mouseover-only flags so captures such as Booty Bay no longer contain stretched/misplaced terrain rectangles.
+
+# 1.0.53
+
+- Remove portrait readiness and settle waits from the History click path. Encounter details now update immediately instead of disappearing while ModelScenes are attached.
+- Pause both the ModelScene actor and the scene. Actor-level pause survives Classic Era reparenting more reliably and targets the remaining one/two-frame idle animation flashes.
+- Never call `SetAnimation`, `StopAnimationKit`, or redundant `Show()` while attaching an already-prepared portrait to a visible plaque. Those mutations are restricted to hidden preparation; visible reassertions only preserve pause state.
+- Give the four visible World PvP History rows preload priority so they can recycle stale off-page shared bodies before the user clicks them. Missing old portraits still commit a stable fallback for that opening instead of blocking the encounter or hot-swapping later.
+- Leave portrait camera/framing, helm display, 46px viewport, medallion masks, plaque rail masks and border layering unchanged.
+
+# 1.0.52
+
+- Retain an identity-specific clone of each live World PvP opponent before generic race/sex donor warming. Newly observed encounters keep that opponent's actual face, hair, skin/body customization and then replay the saved encounter gear on that exact body for the current UI session.
+- Start portrait preloading shortly after login as well as when the Rivals pane opens. A clicked History encounter gets priority and can recycle an old unleased prepared body instead of falling back simply because a race/sex cache is full.
+- Gate encounter opening on hidden portrait preparation for up to a bounded wait. Reconstructable records no longer flash a default race portrait and then change into a geared portrait; if no compatible body is available, the opening commits to a neutral class icon instead of hot-swapping.
+- Hide the whole details pane during the short ModelScene re-anchor settle window, re-freeze attached actors several times, then reveal the finished pane atomically. Repeated clicks on the same encounter remain a portrait no-op.
+- Leave the accepted portrait camera calibration, 46px viewport, medallion masks, plaque rail masks and border layering unchanged.
+
+# 1.0.51
+
+- Preload recent World PvP opponent portraits off-screen when the Rivals pane opens. Visible History plaques now attach only fully dressed, framed, paused actors; no TryOn/model settling happens on the click path.
+- Commit a portrait source for the lifetime of the visible encounter card. A static fallback no longer hot-swaps to a reconstructed actor when the body cache becomes ready in the background.
+- Re-clicking the same History encounter is now a no-op for the portrait layer. Switching detail tabs also preserves already-attached portraits instead of releasing/rebuilding them.
+- Reopen/scroll-back paths reuse a prepared frozen actor when available. Prepared actors retain their outfit while parked and are invalidated only when their donor body is deliberately reseeded or the cached opponent changes.
+- Remove the 0.08-second reconstructed-portrait reveal shortcut; asynchronous model/outfit work now gets a real hidden quiet interval before any non-preloaded actor can be shown.
+- Keep the accepted 46px viewport, race/sex camera calibration, medallion spill cover, plaque-border layering, and shallow rail masks unchanged.
+
+# 1.0.50
+
+- Inset the circular cover by one pixel to overlap the medallion rim and conceal diagonal edge spill. Retain the 46px viewport and all calibrated camera settings.
+- Use a new texture filename to avoid reusing a cached cover image. Add alpha coverage checks around the full perimeter, including the lower-right diagonal.
+
+# 1.0.49
+
+- Match reconstructed viewports and circular openings to the 46-pixel live portrait area. Extend opaque corner patches across the full enlarged renderer.
+- Preserve all calibrated camera targets, distances, and on-screen face magnification with the corresponding field-of-view compensation.
+- Verify the newly exposed top/side regions and all four renderer corners in the cover texture.
+
+# 1.0.48
+
+- Expand reconstructed portrait viewports from 35 to 40 pixels and enlarge the circular opening to reduce the inset dark gap beneath the medallion.
+- Compensate field of view for the larger viewport, preserving the face size and exact calibrated camera targets/distances. Match History and the test panel.
+- Extend corner coverage for the larger viewport; verify opaque corners, clear center, and unchanged projection scale.
+
+# 1.0.47
+
+- Apply all 16 user-calibrated race/sex camera targets and distances to reconstructed History portraits and the test preview. Use the saved absolute values so donor geometry cannot change the accepted framing.
+- Add a circular opaque cover between reconstructed models and their medallion rings to conceal the model viewport's square corners. Keep the accepted camera scale and leave generic/live texture portraits uncovered.
+- Preserve test results. Preview controls now adjust from the calibrated baseline.
+- Verify all accepted camera values against saved fixtures and check cover alpha at all four model corners.
+
+# 1.0.46
+
+- Add Move left/Move right controls to the portrait test window. Horizontal movement follows the camera's screen-right vector and is included in saved diagnostic results.
+- Reset clears both offsets. Add regression checks for horizontal direction, saving, reset, and isolation from production portraits.
+
+# 1.0.45
+
+- Add `/rivalsportrait test`: an enlarged History-style reconstructed portrait, all eight races and both sexes, automatic saved-outfit samples, aim/zoom controls, reset, retry, and diagnostic result saving.
+- Keep camera adjustments isolated to the preview. Closing the window releases its cached body and cancels delayed operations. Unavailable bodies are labeled rather than replaced with generic portraits.
+- Add controller tests for preview controls, immutable encounters, result saving, missing bodies, retry, and close/reopen behavior. Production camera settings are unchanged.
+
+# 1.0.44
+
+- Save portrait camera diagnostics on addon initialization and logout/reload, including empty pools, unloaded actors, and pending camera reads. Previously the report existed only after successful body priming, leaving failures unrecorded.
+- Add regression coverage for missing bodies and unfinished initialization. No camera offsets changed.
+
+# 1.0.43
+
+- Attempt native model portrait-camera targeting instead of estimating head height from body bounds. Rotate the returned focus with the portrait actor and normalize actor origin/scale.
+- Share one off-screen camera probe per model file per session; clear it after reading, reject default/unchanged camera values, and time out after one second. Retain the previous framing if the client cannot supply a usable native target.
+- Delay cached-body availability while its camera probe is pending. Keep saved-equipment reconstruction and body-ready fallback retries.
+- Record bounded numeric camera evidence for all observed race/sex pairs in SavedVariables, allowing investigation without relying only on screenshots.
+- Add regression coverage for native target selection, coordinate rotation, invalid getter results, shared probe cleanup and timeout. In-game camera readback and visual composition remain unverified.
+
+# 1.0.42
+
+- Remove donor equipment after model loading and wait for geometry to settle before measuring cached portrait bodies. Skip unloaded actors and duplicate priming callbacks.
+- Retry visible saved-gear portraits when the needed body finishes loading or becomes free. Discard retries for scrolled-out or recycled rows.
+- Revert speculative 1.0.41 focal-point increases while correcting the underlying body measurements. Exact in-game framing remains unverified.
+- Add development-only Lua 5.1 regression tests for all eight races and both sexes, asynchronous loading, saved outfits, fallback upgrades, stale callbacks, and capture concealment. Tests are not loaded by the addon.
+
+# 1.0.41
+
+- Add female-specific Human and Night Elf head framing, raising the focal point from chest/shoulders to the head and allowing slightly more vertical headroom.
+- Raise the Dwarf focal point for the chest-only crop shown on Uriko. Keep other race profiles and Human/Night Elf male framing unchanged.
+- Carry saved sex into camera selection during body priming and every lease, preventing pooled scenes from inheriting an unrelated sex profile.
+- Retain the off-screen capture fix. Camera changes require in-game comparison; no claim of completed visual QA.
+
+# 1.0.40
+
+- Move all background equipment-capture DressUpModels fully off-screen and independently set their model-render alpha to zero. Reassert concealment before showing, after SetUnit, and on model load so capture models cannot appear as miniature fighters at screen center.
+- Keep asynchronous gear capture and encounter-finalization retries intact. Portraits2.mp4 still shows unresolved reconstruction framing; this build does not claim to fix those camera issues.
+
+# 1.0.39
+
+- Replace the whole-body width/depth camera-distance heuristic with race-specific vertical head spans and focal points. Distance follows the portrait field of view, so broad body bounds no longer shrink the face.
+- Lower the reconstructed head focal point for Human/Dwarf and other affected races, retaining separate Gnome proportions and horn/ear allowance.
+- Reset pooled camera pan offsets before applying the profile. Retain the 22-degree turn, elevated camera, actor cache, saved gear, and reveal/release safeguards.
+- Camera profiles are a visual QA candidate based on Portraits1.mp4; exact crop and containment still require in-game confirmation.
+
+# 1.0.38
+
+- Deploy the 1.0.37 native-composition baseline to the active addon directory; the nested Rivals_work copy had not replaced the installed 1.0.36 build.
+- Invalidate pending portrait operations on direct pool release, clear model-loaded callbacks, and check both actor ownership and card references before delayed dressing/reveal.
+- Prevent repeat reveals and dressing after a portrait becomes visible. Fully verified pooled outfits may reveal after the first 80ms quiet interval instead of always undergoing repeated dressing and a 360ms wait.
+- Synchronize capture-report and addon versions. Runtime visual QA is still required for composition, containment, Gnome framing, and first-frame stability; these are not declared solved.
+
+# 1.0.37
+
+- Match reconstructed opponent portraits to Blizzard's native portrait composition instead of a straight-on mugshot: actors now use a mild 22-degree three-quarter turn and the portrait camera sits about 6 degrees above the face.
+- Fix the Gnome framing regression from 1.0.36. Gnome body bounds use a much lower focal point and normal headshot distance; the camera no longer looks above the character and leaves only the top of the head at the bottom of the medallion.
+- Remove the temporary synthetic race/class portrait shown while a reconstructable 3D portrait settles. Reconstructed rows now reveal once, eliminating the obvious generic-portrait flash before the real Rival appears.
+- Shorten the hidden dress/settle path while keeping all retries invisible. A pooled portrait should populate sooner without exposing the intermediate TryOn/model-load motion.
+
+# 1.0.36
+
+- Contain the square ModelScene render target fully beneath the circular medallion ring. Production portraits now use a 35px viewport instead of 40px, eliminating the shoulder pixels that could protrude below the ring even though the child frame itself was clipped.
+- Add race-proportion camera compensation. Gnome portraits back off substantially so their oversized heads fit, with additional headroom/distance compensation for Tauren horns, Troll tusks/hair, Night Elf ears, Orcs, Dwarves, and Undead while leaving Human framing essentially unchanged.
+- Remove the visible blank/populate delay when opening an encounter. A static race/class portrait is shown immediately while the retained body is redressed and frozen transparently, then replaced only after the ModelScene has settled.
+- Extend the hidden settle window and never reveal on the same tick as the last `Undress`/`TryOn` pass. This hides the brief animation/model twitch that could still leak through in 1.0.35.
+- Keep final gear retries in the hidden path; the visible portrait is no longer redressed after reveal.
+
+# 1.0.35
+
+- Normalize retained bodies to a neutral stand pose before reading any camera bounds. 1.0.34 was still capturing `GetActiveBoundingBox` from arbitrary donor idle frames, which made same-race portraits use different zooms and vertical placement.
+- Share one framing profile across every retained variant of the same race/sex. Donor diversification can change face/hair/skin, but it can no longer change portrait scale or camera position. Camera X/Y now stays on the player-model root instead of following customization-dependent bounding-box centers.
+- Remove the last visible ModelScene lifecycle flash. Pooled scenes stay shown but alpha-zero while they are reparented, redressed, paused and framed; they become opaque only on the following UI frame after the final pause.
+- Reduce the reconstructed 3D viewport from 44px to 40px while keeping the 56px gold medallion. The square ModelScene corners now sit under the circular ring instead of visibly protruding below/beside it.
+- Restore the tighter 1.0.33 camera distance after the 1.0.34 headroom experiment made several portraits read too small.
+
+# 1.0.34
+
+- Fix the inconsistent production portrait crop exposed by switching between the tested 1v3 and newer encounters. Retained pool entries now preserve the naked body bounds captured only after the donor model is fully loaded; opening another Rival no longer overwrites those stable bounds with the previous Rival's still-stale dressed bounding box immediately after `Undress()`.
+- Never lease a body entry while a donor diversification reseed is still loading. Only fully primed entries with stable base bounds can be attached to an opponent card.
+- Keep a reconstructed ModelScene hidden while saved gear is being reapplied and the first camera pass settles, then reveal it already paused. This removes the visible donor/idle/reposition flash that could still occur on individual cards such as the Night Elf test case.
+- Camera retries after the initial frame now redress/freeze only; they do not repeatedly recompute camera framing from transient model state.
+- Add a small amount of headroom to the reconstructed headshot crop while preserving the 1.0.32/1.0.33 medallion viewport and ring layering.
+
+# 1.0.33
+
+- Eliminate the last visible portrait motion on history-open. Every production ModelScene is now paused before it is first shown, retained body scenes are re-paused before attachment, and the saved-gear/camera retry path no longer unpauses the scene between retries.
+- Keep hidden donor reseeding free to animate/load off-screen, but guarantee a body is frozen again before any opponent plaque can display it.
+- Preserve the 1.0.32 medallion clipping, ring layering, flattened portrait camera, and head-line framing unchanged.
+
+# 1.0.32
+
+- Fix the production medallion failures visible in the 1.0.31 1v3 test. Reconstructed ModelScene actors now render inside a clipped 44px child viewport, are centered on the medallion, and the gold ring is raised well above the 3D scene so shoulders/chests cannot draw below or over the ring.
+- Use Classic Era's actual `ModelScene:SetPaused(true, false)` API after forcing a neutral stand pose. This replaces the ineffective speed-zero-only freeze and stops retained portraits from idling after reload.
+- Reframe reconstructed portraits around the eye/head line instead of the neck/chest line, with small race-specific headroom adjustments for Tauren, Night Elf, Troll, Gnome, and Dwarf proportions.
+- Reduce camera FOV from 0.68 to 0.30 and compensate camera distance to preserve crop size. This flattens perspective so reconstructed models read much closer to Blizzard's static portrait render instead of a miniature 3D character-preview camera.
+- Slightly flatten portrait lighting so facial features remain readable at 44px without exaggerated 3D shading.
+
+# 1.0.31
+
+- Continue portrait production QA rather than treating the retained-body proof as final. The session cache now keeps four bodies per race/sex, enough for every materially visible OPPONENTS row at once.
+- Release 3D body leases from opponent rows that are clipped out of the scroll viewport and reacquire them when those rows become visible. Long 1vN histories no longer consume bodies for off-screen plaques.
+- Diversify the four stable body variants automatically as distinct same-sex players are observed. New donors replace only duplicate, currently-free variants, so repeated reconstructed rivals no longer all inherit the first donor's face/hair palette. Rival GUID/name hashing gives each opponent a stable preferred variant whenever it is available.
+- Frame reconstructed portraits from the undressed player-body bounds captured before saved gear is applied. Oversized shoulders, helms and cloaks no longer zoom the camera away from the face or make the same race use wildly different crops.
+- Freeze retained ModelScene actors on a neutral stand frame and clear stale model-loaded callbacks before pooled actors are reseeded, preventing distracting idle motion and old-card gear callbacks from leaking into a newly seeded body.
+- Add `/rivalsportrait pool detail` to report each race's total/free bodies and unique donor-variant count for male and female caches.
+
+# 1.0.30
+
+- Promoted the retained race/sex portrait body cache to the final production path after verifying simultaneous male/female opponent plaques borrow the expected cached bodies after `/reload`.
+- Removed the experimental portrait lab, offline matrices, actor-info/display-ID/texture probes, prototype preview UI, capture debug payloads, and their diagnostic SavedVariables.
+- Kept only `/rivalsportrait pool` and `/rivalsportrait pool warm` as lightweight cache diagnostics; portrait capture and reconstruction remain automatic.
+
+# 1.0.29-portrait-finalize-capture-fix
+
+- Fix the production opponent portrait snapshot race revealed by the 1.0.28 body-pool test. Encounter finalization marked opponents `portraitFrozen` immediately, which caused the bounded `.1/.4/1.0s` DressUpModel loading retries to abort before saved gear could be retained. Forced finalization captures may now finish against their already-bound model after the identity is frozen.
+- Allow a bound finalization model to finish if its nameplate/target token disappears; abort only if the token is recycled to a different GUID.
+- Give simultaneous enemies independent bounded capture models during finalization. The previous single shared model let later enemies overwrite earlier pending retries, so a multi-opponent encounter could retain gear only for the last participant.
+- Keep the 1.0.28 retained male/female race-body pool unchanged. Once a new encounter actually retains `portraitAppearance`, its History plaque now has the data required to borrow one cached body, dress the saved appearances, and hold that body while the plaque is visible.
+
+# 1.0.28-portrait-session-body-cache
+
+- Promote the proven 1.0.27 same-sex donor path into the real World PvP portrait renderer. One live player seeds retained player-body actors for all eight Classic races of that sex; saved numeric gear is then dressed onto those bodies without needing the donor again.
+- Seed two retained bodies per race/sex for simultaneous opponent plaques. The player automatically seeds their own sex after entering the world; target, mouseover, nameplate, and encounter capture events opportunistically seed the other sex.
+- Real opponent cards now borrow/release those retained ModelScene bodies instead of requiring a same-sex unit every time the History pane redraws. Hidden/unused summary cards release their borrowed body back to the session pool.
+- Keep the exact live `SetPortraitTexture` capture as first priority for same-session fidelity. The retained body pool is the reload/session fallback when the baked portrait is no longer available.
+- This is intentionally session-only: Era 1.15.9 proved live player bodies expose `displayID=0`, raw player model files replay untextured, and actor-info/custom-race APIs needed for donor-free persistence are absent.
+
+# 1.0.27-portrait-donor-race-matrix
+
+- Added `/rivalsportrait donor` to prove the practical Classic Era reconstruction path: one live player supplies the body sex while `ModelSceneActor:SetModelByUnit(..., customRaceID)` supplies each of the eight Classic races.
+- The matrix reapplies the same saved gear to every race and reports the normal Rivals portrait diagnostics/gear verification.
+- Added `/rivalsportrait donor retained` to re-show the already-built actors without calling `SetModelByUnit` again, for a same-session retention check after clearing/losing the donor target.
+- This follows the 1.0.26 result that live player `GetDisplayInfo()` is `0` and the raw player model file replays white/untextured, so the live unit body itself is the useful primitive on Era.
+
+## 1.0.26 - Portrait live display-ID persistence probe
+
+- The 1.0.25 runtime probe proved this 1.15.9 Era client uses the old Classic `DressUpModelFrame` architecture; `DressUpFrame.ModelScene` is nil, and the ModelScene actor/scene database is not a viable player-body source here.
+- Add `/rivalsportrait display` to capture the actual live Classic `DressUpModel:SetUnit()` body's `GetDisplayInfo()`, `GetModelFileID()`, and visible numeric appearance IDs.
+- Compare direct display-ID replay, display-ID + saved gear, player-seeded display replay, player-seeded display + gear, and raw model-file + gear.
+- Persist only primitive IDs so `/rivalsportrait display saved` can repeat the same reconstruction after `/reload`.
+
+## 1.0.24 - Portrait actor custom-race matrix
+
+- Test `SetCustomRace(raceID, gender)` on the **ModelSceneActor** itself, distinct from the already-failed DressUpModel API.
+- Test the same call on Blizzard/Narcissus Classic dressing-room **ModelScene 290** if that scene exists on the live Era client.
+- Preserve the known-good player-backed control and saved gear verification.
+
+# 1.0.19-portrait-texture-persistence-probe
+
+- Added `/rivalsportrait texture` to test whether Classic Era's exact baked `SetPortraitTexture` output exposes a serializable texture value/file ID/path.
+- Saves only primitive texture metadata plus `UnitCreatureDisplayID`; `/rivalsportrait texture saved` replays those values after `/reload`.
+- Adds a five-column comparison: live unit portrait, `GetTexture()` replay, file-ID replay, file-path replay, and `SetPortraitTextureFromCreatureDisplayID`.
+- This probe does not replace the normal opponent portrait path yet. It is intended to determine whether exact face/gear portraits can be persisted directly instead of reconstructed.
+
+## 1.0.17-portrait-glue-donor-matrix
+- The 1.0.16 live Era test definitively showed that `DressUpModel:SetCustomRace` is absent on this client, so remove it from the active offline experiment.
+- Add a focused `ModelSceneActor:SetPlayerModelFromGlues` matrix. Classic Era exposes this actor API with both a character index and `customRaceID`; the experiment tests whether it remains usable while logged in and whether a real character-select body can lend sex/customization while the saved opponent race and gear are replayed.
+- Compare the known-good wrong-sex player control against the selected character and character slots 1-4. Diagnostics now report the resulting model file, inferred body sex, requested sex, and saved-gear verification count.
+
+## 1.0.16-portrait-customrace-matrix
+- Replace the exhausted white-body offline matrix with a focused Classic `DressUpModel:SetCustomRace` matrix. The 1.0.15 result proved raw display/model-file bodies are either untextured or cannot retain the outfit; the remaining promising path is the real DressUpModel race+sex API.
+- Compare four initialization/order variants against the known-good wrong-sex ModelScene control: direct `SetCustomRace -> gear`, `player -> SetCustomRace -> gear`, `player -> gear -> SetCustomRace`, and `none -> SetCustomRace -> gear`. Saved WoW `UnitSex` values are normalized to the `SetCustomRace` 0/1 gender convention.
+- Keep this diagnostic-only until one column is both textured, the requested sex, and still verifies the saved appearance IDs.
+
+## 1.0.15-portrait-offline-synthetic
+- Preserve up to 24 opponent portrait prototype samples in a plain SavedVariables archive so later self-tests cannot erase the only offline reconstruction sample. Named `/rivalsportrait offline <name>` lookup now checks this archive before World PvP history.
+- Add `/rivalsportrait offline synthetic <raceID> <sex>` so the donor-free renderer can be tested with an arbitrary Classic race/sex using already-saved gear. This does not require finding the opponent again; e.g. Undead male is `5 2`. `/rivalsportrait offline synthetic` defaults to the player's race and opposite sex.
+- Expand the offline matrix with a fifth `player seed -> raw model file` candidate.
+- Give a precise diagnostic when an older prototype sample is genuinely gone instead of implying the named history lookup itself is broken.
+
+## 1.0.14-portrait-offline-lab-fix
+- Fix a syntax error in `PortraitLab.lua` that prevented the diagnostic lab from loading. Because the slash handler checks for `DP.PortraitLab`, `/rivalsportrait offline` was silently falling through to the normal capture path and overwriting the sample with the player.
+- Preserve the latest non-self portrait sample separately from self tests.
+- `/rivalsportrait offline` now prefers the saved opponent sample and can recover the newest opponent with portrait data from World PvP history. `/rivalsportrait offline <name>` selects a specific historical opponent, e.g. `/rivalsportrait offline Johnbasilone`.
+- Hide the normal preview when opening the offline matrix so the two diagnostics cannot be confused.
+
+# 1.0.11-portrait-front-facing
+
+- Corrected the reconstructed ModelScene actor facing from `pi` to `0` after the 1.0.10 live test proved `pi` was showing the back of the character on Classic Era.
+- Retains the tight race-aware bust framing, manual/template OrbitCamera setup, saved appearance replay, and diagnostic yaw/bounds output from the prior prototype.
+
+# 1.0.10-portrait-tight-bust
+
+- Tightened reconstructed player portraits from a waist-up view to a face-dominant head-and-shoulders crop.
+- Raised the camera target using the actor's real active bounds and reduced race-aware camera distance while preserving width/depth guards for broad/tall races.
+- Added framing mode to `/rivalsportrait` diagnostics.
+
+# 1.0.7-portrait-camera-init
+
+- Fixed the Classic Era portrait prototype crash in `OrbitCameraMixin:UpdateCameraOrientationAndPosition` by initializing `panningXOffset` and `panningYOffset` on both template-provided and Rivals-created OrbitCameras.
+- Hardened partially initialized Era cameras with default input-mode and camera-info state before the ModelScene starts updating.
+- Diagnostic camera source now distinguishes the template OrbitCamera from a Rivals-created manual OrbitCamera.
+
+# 1.0.6-portrait-actor-camera
+
+- Fix the blank ModelScene reconstruction shown by the 1.0.5 diagnostics. The actor was loaded, shown, and accepting 4/4 saved appearance IDs, but Classic Era had no active camera because Mainline dress-up scene 596 is not guaranteed to exist even though the transition API does.
+- Build and activate a Classic OrbitCamera directly when the scene preset provides none, add explicit portrait lighting/camera clips/FOV, and frame the bust from the actor's live bounding box so Orcs, Tauren, Gnomes, etc. do not depend on one hard-coded human camera.
+- Stop treating a successful TransitionToModelSceneID pcall as proof that scene 596 exists; validate its scene data/camera first. `/rivalsportrait` now reports camera source, zoom, target Z, and actor bounds.
+
+# 1.0.5-portrait-actor-framing
+
+- Fix the ModelScene portrait prototype rendering blank despite a successful exact-unit actor and 4/4 saved appearance readback. The reconstruction itself was working; 1.0.4 was placing the diagnostic scene in the center of the window and forcing the dress-up camera to 2.35, which can put the camera inside the character.
+- Anchor the ModelScene directly to the existing portrait-model slot, prefer Blizzard's TransitionToModelSceneID(596) setup path, explicitly show the actor, preserve the authored camera distance, and derive a conservative portrait zoom from that distance instead of hard-coding an unsafe value.
+- Add actor loaded/shown state and the chosen camera zoom to `/rivalsportrait` diagnostics so any remaining client-side render problem is immediately distinguishable from gear reconstruction.
+
+# 1.0.4-portrait-actor-reconstruction
+
+- Replace the failed plain DressUpModel custom-race path with a dressing-room ModelScene actor using SetModelByUnit(..., customRaceID), preserving a live opponent's exact unit appearance when the unit is still addressable and otherwise borrowing a same-sex player body before applying the saved race and gear.
+- Replay and verify the saved appearance IDs on the actor; the actual OPPONENTS portrait path now uses the same reconstruction before legacy display/class fallbacks.
+
+# 1.0.3-portrait-reconstruction
+
+- Rework offline portrait reconstruction to use the Classic custom-race initialization order that old DressUpModel code expects: `SetUnit("none")` first, then `SetCustomRace(raceID, gender)`, with the previous player-seeded route retained only as a fallback. The `/rivalsportrait base` result already proved the saved numeric outfit IDs are valid; this change targets the character-base initialization that was still failing in 1.0.2.
+- Expand `/rivalsportrait` diagnostics so a failed reconstruction reports which base/custom-race call failed instead of only saying that no model was available.
+
+# 1.0.2-portrait-reconstruction
+
+- Promote saved opponent outfits from diagnostics into the World PvP OPPONENTS portraits after reload. Reconstruction now seeds a real player-character DressUpModel, switches it to the saved opponent race/sex with SetCustomRace, then replays the captured numeric appearance IDs with TryOn. This follows the in-game `base` result: player-backed numeric replay verified 4/4 saved IDs while both NPC-backed variants verified 0/4.
+- Capture and persist race ID, sex, and per-slot visibility alongside the saved appearance IDs. Druid/other shapeshift captures request the native player form so the retained outfit is based on the character rather than the temporary form.
+- Keep the exact in-session Blizzard portrait as highest priority. After reload the reconstructed race/sex/outfit now takes priority over the old creature-display and curated race/class fallbacks.
+- Make reconstructed models self-refresh on model load, reassert the saved race/sex, and verify saved appearance IDs on bounded delayed reads without changing the stored encounter.
+
+## 1.0.1-portrait-prototype (local experiment)
+
+- Capture observed head, shoulder, chest, cloak, shirt, and tabard appearance/item IDs in encounter data using one throttled DressUpModel, without inspect requests or external software.
+- Attempt saved-gear portrait reconstruction after the exact session texture is unavailable. Existing records without gear evidence retain their previous fallback.
+- Add `/rivalsportrait` for a live/saved-gear comparison and `/rivalsportrait saved` for replaying the saved sample after reload.
+- This is an unverified in-game prototype, not exact image persistence. Enemy gear availability, offline model materials, and framing require Classic client testing. Face/hair customization and helm/cloak visibility preferences are not captured.
+
 ## Rivals 1.0.0
 
 Rivals is out of beta! Changes since 0.21.181-beta:

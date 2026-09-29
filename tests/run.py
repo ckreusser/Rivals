@@ -5,7 +5,7 @@ from lupa.lua51 import LuaRuntime
 root = Path(__file__).resolve().parents[1]
 lua = LuaRuntime(unpack_returned_tuples=True)
 lua.execute('DP = {}; function loadAddon(source) assert(loadstring(source))("Rivals", DP) end')
-for name in ("Parser.lua", "Tracker.lua", "UsageCatalog.lua", "Specs.lua", "Usage.lua", "Rating.lua", "Verification.lua", "Recovery.lua", "Periods.lua", "Theme.lua", "WorldPvP.lua", "Views.lua", "Promos.lua", "CharacterTab.lua", "Inspect.lua", "Tooltip.lua"):
+for name in ("Parser.lua", "Tracker.lua", "UsageCatalog.lua", "ProcCatalog.lua", "Specs.lua", "Usage.lua", "Rating.lua", "Verification.lua", "Recovery.lua", "Periods.lua", "Theme.lua", "Portraits.lua", "WorldPvP.lua", "Views.lua", "Promos.lua", "CharacterTab.lua", "Inspect.lua", "Tooltip.lua"):
     lua.globals().loadAddon((root / name).read_text(encoding="utf-8"))
 lua.execute((root / "tests" / "spec.lua").read_text(encoding="utf-8"))
 lua.execute((root / "tests" / "specs.lua").read_text(encoding="utf-8"))

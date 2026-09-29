@@ -262,8 +262,8 @@ do
     assert(juju == 76543 and jujuProxy == 12431)
     assert(jujuKey and jujuKey:find("1x Winterfall E'ko", 1, true))
     local boon, _, boonKey, _, boonProxy = U.GetSnapshotPrice(184938)
-    assert(boon == 100000 and boonProxy == 184937)
-    assert(boonKey and boonKey:find("1x Chronoboon Displacer", 1, true))
+    assert(boon == 10000 and boonProxy == nil)
+    assert(boonKey == "Fixed vendor price")
 
     local record = {
         timestamp=1700001000, playerGUID="Player-1", playerName="Zurker", playerClass="WARRIOR", playerLevel=60,
@@ -290,23 +290,23 @@ do
     local byItem = {}
     for _, event in ipairs(rebuilt.events) do byItem[event.itemID] = (byItem[event.itemID] or 0) + (event.count or 1) end
     assert(byItem[13506] == 1 and byItem[2091] == 1 and byItem[5634] == 1 and byItem[14530] == 1)
-    assert(byItem[184937] == 1, "Supercharged aura must recover one consumed Chronoboon")
+    assert(byItem[184937] == nil, "Passive Supercharged aura must not invent a Chronoboon use")
     assert(byItem[12451] == 1, "retained Juju buff must infer one Juju Power")
 
     local snap = U.CaptureLegacyWorldConsumableCost(record, 1700002000, {}, true)
     assert(snap.legacyBackfillVersion == U.LEGACY_CONSUMABLE_BACKFILL_VERSION)
-    assert(snap.pricedCount == 6 and snap.unpricedCount == 0)
-    local expected = 120000 + 5000 + 35000 + 2500 + 100000 + 76543
+    assert(snap.pricedCount == 5 and snap.unpricedCount == 0)
+    local expected = 120000 + 5000 + 35000 + 2500 + 76543
     assert(snap.totalCopper == expected, "legacy reconstruction total mismatch: "..tostring(snap.totalCopper).." ~= "..expected)
     local actors = {}
     for _, actor in ipairs(snap.actors) do actors[actor.guid] = actor end
     assert(actors["Player-1"] and #actors["Player-1"].items == 2, "player FAP/bandage spend must be included")
-    assert(actors["Enemy-1"] and #actors["Enemy-1"].items == 4, "enemy uses and inferred buff spend must be included")
+    assert(actors["Enemy-1"] and #actors["Enemy-1"].items == 3, "enemy uses and inferred buff spend must be included")
 
     GetItemInfo, TSM_API, TSMAPI_FOUR = oldGetItemInfo, oldTSMAPI, oldTSM4
     Auctionator, Atr_GetAuctionBuyout = oldAuctionator, oldAtr
 end
-print("PASS: legacy rows recover item IDs, Chronoboon aura is retained, and Zanza/Juju proxies are one-for-one")
+print("PASS: legacy rows recover item IDs, passive Chronoboon aura is excluded, and Zanza/Juju proxies are one-for-one")
 
 
 -- Noggenfogger is a fixed vendor purchase and must bypass market add-ons.

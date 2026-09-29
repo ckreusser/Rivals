@@ -29,6 +29,24 @@ local insigniaSpells = {
     [23276] = true, -- Immune Fear/Polymorph/Stun (Priest/Paladin)
     [23277] = true, -- Immune Charm/Fear/Stun (Druid)
 }
+
+-- Equipped-item proc effects. ProcCatalog.lua is generated from curated Classic
+-- proc data and includes weapon, trinket, ring, shield, and armor effects. Many
+-- vanilla items intentionally share the same proc spell (Rend, Shadow Bolt,
+-- Stun, etc.), so a spell maps to CANDIDATES rather than one guessed item.
+-- ResolveProcItem narrows those candidates against the source actor's recorded
+-- equipment and refuses to invent a source when the evidence is ambiguous.
+local procCandidatesBySpell = {}
+local function AddProcCandidate(row)
+    local spellID, itemID, itemName, spellName = tonumber(row[1]), tonumber(row[2]), row[3], row[4]
+    if not spellID or not itemID then return end
+    local candidate = {itemID=itemID, name=itemName, spellID=spellID, spellName=spellName}
+    procCandidatesBySpell[spellID] = procCandidatesBySpell[spellID] or {}
+    procCandidatesBySpell[spellID][#procCandidatesBySpell[spellID] + 1] = candidate
+
+end
+for _, row in ipairs(DP.ProcCatalog or {}) do AddProcCandidate(row) end
+
 local factionByRace = {
     Human = "Alliance", Dwarf = "Alliance", NightElf = "Alliance", Gnome = "Alliance",
     Orc = "Horde", Scourge = "Horde", Undead = "Horde", Tauren = "Horde", Troll = "Horde",
@@ -227,6 +245,110 @@ local function ResolvePlayerItem(spellID)
     return nil, true
 end
 
+local function ProcCandidateList(spellID, spellName)
+    -- Names such as Disarm, Rend, Frostbolt, Shadow Bolt, and Dazed are reused
+    -- by class/NPC abilities. A known ID must NEVER fall back to a name match.
+    local id = tonumber(spellID)
+    if id and id > 0 then return procCandidatesBySpell[id] end
+    -- Old rows without IDs have insufficient evidence to label a proc safely.
+    return nil
+end
+
+function U.IsKnownProcEffect(spellID, spellName, sourceGUID)
+    if type(sourceGUID) ~= "string" or not sourceGUID:match("^Player%-") then return false end
+    local list = ProcCandidateList(spellID, spellName)
+    return list ~= nil and #list > 0
+end
+
+local function EquippedItemSet(session, guid, record, identity)
+    local set, count = {}, 0
+    local playerGUID = (session and session.playerGUID) or (record and record.playerGUID)
+    if not record and guid and playerGUID and guid == playerGUID and GetInventoryItemID then
+        for slot = 1, 19 do
+            -- Capture only the item ID; extra API returns must not become tonumber's base.
+            local itemID = GetInventoryItemID("player", slot)
+            itemID = tonumber(itemID)
+            if itemID and not set[itemID] then set[itemID], count = true, count + 1 end
+        end
+        if count > 0 then return set, count end
+    end
+    identity = identity or FindIdentity(session, guid, record)
+    local snapshot = identity and identity.portraitAppearance
+    if snapshot and type(snapshot.items) == "table" then
+        for _, itemID in pairs(snapshot.items) do
+            itemID = tonumber(itemID)
+            if itemID and not set[itemID] then set[itemID], count = true, count + 1 end
+        end
+    end
+    return set, count
+end
+
+local function ResolveProcCandidate(candidate)
+    if not candidate then return nil end
+    local resolved = {
+        itemID = candidate.itemID, name = candidate.name, quality = candidate.quality,
+        category = "equipment", procSource = true,
+    }
+    local name, _, quality = ItemInfo(candidate.itemID)
+    if type(name) == "string" and name ~= "" then resolved.name = name end
+    if tonumber(quality) then resolved.quality = tonumber(quality) end
+    return resolved
+end
+
+-- Resolve the equipped item that owns a passive/reactive proc. Vanilla reuses
+-- many proc spells across unrelated items, so the source actor's actual gear is
+-- the primary disambiguator. A globally unique proc remains retroactively
+-- resolvable for old records that predate full-slot equipment snapshots.
+function U.ResolveProcItem(spellID, spellName, session, guid, record)
+    if type(guid) ~= "string" or not guid:match("^Player%-") then return nil end
+    local list = ProcCandidateList(spellID, spellName)
+    if not list or #list == 0 then return nil end
+
+    local uniqueByItem, unique = {}, {}
+    for _, candidate in ipairs(list) do
+        if candidate and candidate.itemID and not uniqueByItem[candidate.itemID] then
+            uniqueByItem[candidate.itemID] = true
+            unique[#unique + 1] = candidate
+        end
+    end
+    if #unique == 0 then return nil end
+
+    local identity = FindIdentity(session, guid, record)
+    local equipped, equippedCount = EquippedItemSet(session, guid, record, identity)
+    if equippedCount > 0 then
+        local match
+        for _, candidate in ipairs(unique) do
+            if equipped[candidate.itemID] then
+                if match and match.itemID ~= candidate.itemID then return nil end
+                match = candidate
+            end
+        end
+        if match then return ResolveProcCandidate(match) end
+    end
+
+    if #unique == 1 then return ResolveProcCandidate(unique[1]) end
+    return nil
+end
+
+-- Resolve the actual on-use item behind a CLEU spell. The catalog is generated
+-- from the Classic item database rather than a hand-maintained PvP shortlist, so
+-- combat-log item links automatically cover reflectors, Zanzas, PvP trinkets,
+-- engineering gadgets, quest trinkets, consumables, and other unambiguous uses.
+function U.ResolveCombatItem(spellID, session, sourceGUID, spellName, record)
+    spellID = tonumber(spellID)
+    if not spellID then return nil end
+    local item, ambiguous
+    local playerGUID = (session and session.playerGUID) or (record and record.playerGUID)
+    if sourceGUID and playerGUID and sourceGUID == playerGUID then
+        item, ambiguous = ResolvePlayerItem(spellID)
+        if not item and not ambiguous then item = Catalog(spellID) end
+    else
+        item = ResolveInsignia(spellID, session, sourceGUID, spellName, record) or Catalog(spellID)
+    end
+    if type(item) ~= "table" or not tonumber(item.itemID) then return nil end
+    return {itemID=tonumber(item.itemID), name=item.name, quality=item.quality, category=item.category}
+end
+
 local function UsageEntryKey(spellID, item)
     local base = tostring(spellID)
     if type(item) == "table" and item.itemID then
@@ -304,7 +426,7 @@ local function CombatAmount(value)
     return type(value) == "number" and tostring(math.floor(value + .5)) or "?"
 end
 
-local function AppendCombat(session, key, text, elapsed)
+local function AppendCombat(session, key, text, elapsed, info)
     U.Begin(session)
     local log = session.combatLog
     local list = log[key]
@@ -312,7 +434,10 @@ local function AppendCombat(session, key, text, elapsed)
         log[key == "myActions" and "myTruncated" or "toMeTruncated"] = true
         return
     end
-    list[#list + 1] = {t = math.max(0, elapsed or 0), text = text}
+    local event = info and info[2]
+    local spellID = type(event) == "string" and (event:find("^SPELL_") or event:find("^RANGE_")) and tonumber(info[12]) or nil
+    local spellName = spellID and type(info[13]) == "string" and info[13] or nil
+    list[#list + 1] = {t = math.max(0, elapsed or 0), text = text, event = event, spellID = spellID, spellName = spellName}
 end
 
 local function MyCombatText(event, info)
@@ -397,11 +522,11 @@ function U.Combat(session, playerGUID)
     local elapsed = now - session.estimatedStartAt
     if sourceGUID == playerGUID then
         local text = MyCombatText(event, info)
-        if text then AppendCombat(session, "myActions", text, elapsed) end
+        if text then AppendCombat(session, "myActions", text, elapsed, info) end
     end
     if destGUID == playerGUID and sourceGUID ~= playerGUID then
         local text = IncomingCombatText(event, info)
-        if text then AppendCombat(session, "toMe", text, elapsed) end
+        if text then AppendCombat(session, "toMe", text, elapsed, info) end
     end
 end
 
@@ -509,22 +634,30 @@ function U.WorldObserve(session, playerGUID, info)
     local eventType = info[2]
     local sourceGUID, sourceName, destGUID, destName = info[4], info[5], info[8], info[9]
     local spellID, spellName = info[12], info[13]
-    -- Classic Era's Chronoboon charge can surface only as the applied
-    -- Supercharged aura in CLEU. Treat that aura as proof that one base
-    -- Chronoboon Displacer was consumed, while deduping the normal Charging cast
-    -- if a client happens to emit both signals.
-    if eventType == "SPELL_AURA_APPLIED" and tonumber(spellID) == 349981 then
-        if not sourceGUID or not session.participants or not session.participants[sourceGUID] then return end
-        if not RecentWorldItemUse(session, sourceGUID, 184937, 10) then
-            local event = WorldUsageBase(session, sourceGUID, sourceName, destGUID, destName, 349981, spellName)
-            event.spellID = 349981
+    -- Mind Control Cap has a dummy item effect (13180) and a separate charm
+    -- aura (13181). On a backfire Classic can report only the aura, sourced by
+    -- an NPC/temporary controller and landing on the player who used the cap.
+    -- Treat either ID/name as evidence of one gadget activation and attribute it
+    -- to the tracked participant, not to the temporary NPC controller.
+    local mindControlCap = (tonumber(spellID) == 13180 or tonumber(spellID) == 13181 or spellName == "Gnomish Mind Control Cap")
+    if mindControlCap and (eventType == "SPELL_CAST_SUCCESS" or eventType == "SPELL_AURA_APPLIED" or eventType == "SPELL_AURA_REFRESH") then
+        local actorGUID, actorName, backfire
+        if sourceGUID and session.participants and session.participants[sourceGUID] then
+            actorGUID, actorName = sourceGUID, sourceName
+        elseif destGUID and session.participants and session.participants[destGUID] then
+            actorGUID, actorName, backfire = destGUID, destName, true
+        end
+        if actorGUID and not RecentWorldItemUse(session, actorGUID, 10726, 3) then
+            local event = WorldUsageBase(session, actorGUID, actorName, destGUID, destName, spellID, spellName)
+            event.spellID = tonumber(spellID) or 13180
             event.nameSpell = spellName
-            event.name = "Chronoboon Displacer"
-            event.itemID = 184937
-            event.itemName = "Chronoboon Displacer"
+            event.name = "Gnomish Mind Control Cap"
+            event.itemID = 10726
+            event.itemName = "Gnomish Mind Control Cap"
+            event.quality = 2
             event.kind = "item"
-            event.category = "potions"
-            event.consumable = true
+            event.category = "engineering"
+            event.backfire = backfire and true or nil
             WorldUsageEvent(session, event)
         end
         return
@@ -592,7 +725,7 @@ end
 -- snapshot writer cannot silently drift apart. Any change to legacy evidence or
 -- proxy pricing must bump this number so already-frozen legacy snapshots are
 -- recalculated once with the improved logic.
-U.LEGACY_CONSUMABLE_BACKFILL_VERSION = 10
+U.LEGACY_CONSUMABLE_BACKFILL_VERSION = 12
 
 -- Prices are resolved once, when the encounter is finalized, and copied into
 -- the record. Historical records never query a pricing addon again, so their
@@ -786,6 +919,12 @@ function U.GetSnapshotPrice(itemID)
     -- Noggenfogger is a fixed vendor purchase in Classic Era. Marin sells five
     -- for 35 silver, so each consumed elixir is exactly 7 silver replacement cost.
     if itemID == 8529 then return 700, "Vendor", "Fixed vendor price", nil, nil, nil end
+    -- Chronoboon Displacers are fixed-price vendor items. The base Displacer
+    -- costs exactly 1 gold; use the same replacement value for a Supercharged
+    -- Displacer rather than a market-addon quote.
+    if itemID == 184937 or itemID == 184938 then
+        return 10000, "Vendor", "Fixed vendor price", nil, nil, nil
+    end
     -- Proxy-derived BOP/generated consumables before trying their own item ID;
     -- stale addon databases sometimes expose meaningless prices for those IDs.
     if ZANZA_ITEMS[itemID] then return ZanzaProxyPrice() end
@@ -804,10 +943,13 @@ local NOGGENFOGGER_AURA_SPELLS = {[16591]=true, [16593]=true, [16595]=true}
 local CatalogByName
 local function ConsumableFromTrackedBuff(buff)
     if type(buff) ~= "table" then return nil end
+    -- Seeing the Supercharged Chronoboon aura only means the player currently
+    -- has world buffs stored. It is not evidence that a Chronoboon was consumed
+    -- during this encounter (Vanish/visibility changes can make it appear anew).
+    if tonumber(buff.spellID) == 349981 then return nil end
     local known = buff.spellID and Catalog(tonumber(buff.spellID)) or nil
     if known and known.category == "equipment" then return nil end
     if known and known.category == "potions" and known.itemID then
-        if tonumber(buff.spellID) == 349981 then return 184937, "Chronoboon Displacer", 1 end
         return tonumber(known.itemID), known.name or buff.name, known.quality
     end
     if buff.itemID then
@@ -889,7 +1031,7 @@ end
 function U.CaptureWorldConsumableCost(session, options)
     options = options or {}
     local capturedAt = tonumber(options.capturedAt) or (time and time() or 0)
-    local snapshot = {version=1, captureModelVersion=2, capturedAt=capturedAt, totalCopper=0, pricedCount=0, unpricedCount=0,
+    local snapshot = {version=1, captureModelVersion=4, capturedAt=capturedAt, totalCopper=0, pricedCount=0, unpricedCount=0,
         actors={}, priceSourceOrder={"Fixed vendor prices", "TradeSkillMaster DBMarket", "Auctionator"}}
     if options.backfilled then
         snapshot.backfilled = true
@@ -1066,6 +1208,10 @@ local function NormalizeLegacyUsageEvent(entry)
     if type(entry) ~= "table" then return nil end
     local event = ShallowCopy(entry)
     local spellID = tonumber(event.spellID or event.sourceSpellID)
+    -- Older builds turned the passive/visibility-driven Supercharged Chronoboon
+    -- aura into a fake base-Displacer use row (spell 349981 + item 184937).
+    -- Drop that exact legacy signature. A real item cast can still be retained.
+    if spellID == 349981 then return nil end
     local known = spellID and Catalog(spellID) or nil
     if known then
         -- Legacy rows occasionally retained a spell/effect ID in itemID. For
@@ -1095,17 +1241,6 @@ local function NormalizeLegacyUsageEvent(entry)
         event.category = byName.category or event.category
         event.kind = event.kind or "item"
         if byName.category == "potions" or byName.category == "reagents" then event.consumable = true end
-    end
-    -- The Supercharged aura is the retained CLEU evidence emitted when a base
-    -- Chronoboon Displacer is consumed to store world buffs.  Price/count that
-    -- original consumed item, not the generated Supercharged item.
-    if spellID == 349981 and event.event == "SPELL_AURA_APPLIED" then
-        event.itemID = 184937
-        event.itemName = "Chronoboon Displacer"
-        event.name = "Chronoboon Displacer"
-        event.category = "potions"
-        event.kind = "item"
-        event.consumable = true
     end
     return event
 end
@@ -1201,24 +1336,11 @@ local function ReconstructLegacyWorldUsage(record, saved)
                     local drinkAt = recentCasts[EvidenceKey(entry.sourceGUID, 16589)]
                     duplicateCast = drinkAt and math.abs(now - drinkAt) <= 4
                 end
-                if spellID == 349981 then
-                    -- Charging uses spell 349858 and then applies aura 349981.
-                    -- Old logs frequently retained only the aura; use it as a
-                    -- fallback, but never count both signals for one Chronoboon.
-                    local chargeAt = recentCasts[EvidenceKey(entry.sourceGUID, 349858)]
-                    duplicateCast = chargeAt and math.abs(now - chargeAt) <= 10
-                    if not duplicateCast then
-                        AddLogCandidate({
-                            event = eventType, t = now, guid = entry.sourceGUID, actorName = entry.sourceName,
-                            targetGUID = entry.destGUID, targetName = entry.destName, sourceSpellID = spellID,
-                            sourceSpellName = spellName, spellID = spellID, name = "Chronoboon Displacer",
-                            itemID = 184937, itemName = "Chronoboon Displacer", kind = "item",
-                            category = "potions", consumable = true, count = 1,
-                        })
-                    end
-                elseif not duplicateCast then
+                if spellID ~= 349981 and not duplicateCast then
                     -- Aura application is useful fallback evidence for old logs
                     -- which retained the buff but dropped the item cast itself.
+                    -- Supercharged Chronoboon is deliberately excluded: merely
+                    -- observing that aura does not prove an in-encounter purchase/use.
                     local item = Catalog(spellID)
                     if item then
                         AddLogCandidate({
@@ -1344,6 +1466,17 @@ function U.NeedsLegacyConsumableBackfill(record)
     if type(record) ~= "table" then return false end
     local cost = record.consumableCost
     if not cost then return true end
+    if (tonumber(cost.captureModelVersion) or 0) < 4 then
+        -- Model 4 removes passive Supercharged Chronoboon aura sightings from
+        -- both live and legacy usage evidence. Rebuild only snapshots that
+        -- actually contain a Chronoboon so unrelated historical prices stay frozen.
+        for _, actor in ipairs(cost.actors or {}) do
+            for _, item in ipairs(actor.items or {}) do
+                local itemID = tonumber(item.itemID)
+                if itemID == 184937 or itemID == 184938 then return true end
+            end
+        end
+    end
     if not cost.backfilled then
         -- Old live recordings could freeze a false zero before aura inference
         -- existed. Preserve all nonempty market snapshots, including unpriced ones.
@@ -1450,6 +1583,9 @@ function U.CaptureDuelBuffs(session)
     identity.portraitSex = identity.portraitSex or identity.sex
     identity.faction = identity.faction or (UnitFactionGroup and UnitFactionGroup(unit))
     identity.portraitDisplayID = identity.portraitDisplayID or (UnitCreatureDisplayID and UnitCreatureDisplayID(unit))
+    if DP.WorldPvP and DP.WorldPvP.CaptureOpponentPortrait then
+        DP.WorldPvP.CaptureOpponentPortrait(identity, unit)
+    end
 
     session.duelBuffs = session.duelBuffs or {version = 1, opponent = {}}
     local bucket = session.duelBuffs.opponent
@@ -2107,10 +2243,10 @@ local function ColorDuelCombatText(record, key, rawText)
     -- Color spell/ability names from the fixed duel-log sentence grammar before
     -- actor names inject WoW color escape sequences into those same strings.
     if key == "myActions" then
-        text = text:gsub("^Cast (.-)( on .+)$", function(spell, rest) return GoldCombat("Cast") .. " " .. WhiteCombat(spell) .. rest end)
+        text = text:gsub("^Cast (.-)( on .+)$", function(spell, rest) return "Cast" .. " " .. WhiteCombat(spell) .. rest end)
         text = text:gsub("^([^|].-) hit (.+) for (%d+)$", function(spell, target, amount)
-            if spell == "Melee" then return WhiteCombat(spell) .. " " .. DamageCombat("hit") .. " " .. target .. " for " .. DamageCombat(amount) end
-            return WhiteCombat(spell) .. " " .. DamageCombat("hit") .. " " .. target .. " for " .. DamageCombat(amount)
+            if spell == "Melee" then return WhiteCombat(spell) .. " hit " .. target .. " for " .. DamageCombat(amount) end
+            return WhiteCombat(spell) .. " hit " .. target .. " for " .. DamageCombat(amount)
         end)
         text = text:gsub("^([^|].-) healed (.+) for (%d+)$", function(spell, target, amount)
             return WhiteCombat(spell) .. " " .. HealCombat("healed") .. " " .. target .. " for " .. HealCombat(amount)
@@ -2122,7 +2258,7 @@ local function ColorDuelCombatText(record, key, rawText)
         text = text:gsub("^Refreshed (.-) on (.+)$", function(spell, target) return "Refreshed " .. WhiteCombat(spell) .. " on " .. target end)
         text = text:gsub("^([^|].-) faded from (.+)$", function(spell, target) return WhiteCombat(spell) .. " faded from " .. target end)
         text = text:gsub("^([^|].-) interrupted (.+)'s (.+)$", function(spell, target, interrupted)
-            return WhiteCombat(spell) .. " " .. GoldCombat("interrupted") .. " " .. target .. "'s " .. WhiteCombat(interrupted)
+            return WhiteCombat(spell) .. " interrupted " .. target .. "'s " .. WhiteCombat(interrupted)
         end)
         text = text:gsub("^([^|].-) removed (.-) from (.+)$", function(spell, removed, target)
             return WhiteCombat(spell) .. " removed " .. WhiteCombat(removed) .. " from " .. target
@@ -2134,10 +2270,10 @@ local function ColorDuelCombatText(record, key, rawText)
     else
         local opp = EscapeCombatPattern(opponent)
         text = text:gsub("^" .. opp .. "'s (.-) hit you for (%d+)$", function(spell, amount)
-            return opponentColored .. "'s " .. WhiteCombat(spell) .. " " .. DamageCombat("hit") .. " " .. youColored .. " for " .. DamageCombat(amount)
+            return opponentColored .. "'s " .. WhiteCombat(spell) .. " hit " .. youColored .. " for " .. DamageCombat(amount)
         end)
         text = text:gsub("^" .. opp .. " hit you for (%d+)$", function(amount)
-            return opponentColored .. " " .. DamageCombat("hit") .. " " .. youColored .. " for " .. DamageCombat(amount)
+            return opponentColored .. " hit " .. youColored .. " for " .. DamageCombat(amount)
         end)
         text = text:gsub("^" .. opp .. "'s (.-) healed you for (%d+)$", function(spell, amount)
             return opponentColored .. "'s " .. WhiteCombat(spell) .. " " .. HealCombat("healed") .. " " .. youColored .. " for " .. HealCombat(amount)
@@ -2156,7 +2292,7 @@ local function ColorDuelCombatText(record, key, rawText)
         end)
         text = text:gsub("^(.-) faded from you$", function(spell) return WhiteCombat(spell) .. " faded from " .. youColored end)
         text = text:gsub("^" .. opp .. "'s (.-) interrupted your (.+)$", function(spell, interrupted)
-            return opponentColored .. "'s " .. WhiteCombat(spell) .. " " .. GoldCombat("interrupted") .. " your " .. WhiteCombat(interrupted)
+            return opponentColored .. "'s " .. WhiteCombat(spell) .. " interrupted your " .. WhiteCombat(interrupted)
         end)
         text = text:gsub("^" .. opp .. "'s (.-) removed your (.+)$", function(spell, removed)
             return opponentColored .. "'s " .. WhiteCombat(spell) .. " removed your " .. WhiteCombat(removed)
@@ -2476,14 +2612,21 @@ local function DuelCombinedCombatLog(record)
     local entries={}
     for _,key in ipairs({"myActions","toMe"}) do
         for _,entry in ipairs(log[key] or {}) do
-            entries[#entries+1]={t=type(entry)=="table" and tonumber(entry.t) or 0,text=type(entry)=="table" and entry.text or tostring(entry),key=key}
+            entries[#entries+1]={t=type(entry)=="table" and tonumber(entry.t) or 0,text=type(entry)=="table" and entry.text or tostring(entry),key=key,
+                spellID=type(entry)=="table" and tonumber(entry.spellID) or nil,spellName=type(entry)=="table" and entry.spellName or nil,event=type(entry)=="table" and entry.event or nil}
         end
     end
     table.sort(entries,function(a,b) if a.t~=b.t then return a.t<b.t end return a.key<b.key end)
     if #entries==0 then return "|cff8f98a6No qualifying combat-log events were recorded.|r" end
+    local function EscapePattern(value) return (tostring(value or ""):gsub("([%(%)%.%%%+%-%*%?%[%]%^%$])","%%%1")) end
     local lines={}
     for _,entry in ipairs(entries) do
-        lines[#lines+1]=string.format("|cff8f98a6+%05.1fs|r  %s",entry.t or 0,ColorDuelCombatText(record,entry.key,entry.text or ""))
+        local rendered=ColorDuelCombatText(record,entry.key,entry.text or "")
+        if entry.spellID and entry.spellName and DP.Theme.SpellTextLink then
+            local link=DP.Theme.SpellTextLink(entry.spellID,entry.spellName,"|cffffffff")
+            rendered=rendered:gsub(EscapePattern(entry.spellName),link,1)
+        end
+        lines[#lines+1]=string.format("|cff8f98a6+%05.1fs|r  %s",entry.t or 0,rendered)
     end
     if log.myTruncated or log.toMeTruncated then lines[#lines+1]="|cff8f98a6… additional events were omitted.|r" end
     return table.concat(lines,"\n")
@@ -2609,9 +2752,14 @@ local function RefreshDuelUsage(window,record)
 end
 
 local function RefreshDuelCombatLog(window,record)
-    window.logText:SetText(DuelCombinedCombatLog(record))
-    local height=window.logText.GetStringHeight and window.logText:GetStringHeight() or 100
-    window.logBody:SetHeight(math.max(1,(height or 100)+10)); if window.logScroll.RefreshRivalsScrollbar then window.logScroll:RefreshRivalsScrollbar(true) end
+    local text=DuelCombinedCombatLog(record)
+    window.logPlainText=DP.Theme.PlainCombatLogText and DP.Theme.PlainCombatLogText(text) or text
+    if DP.Theme.SetLockedEditBoxText then DP.Theme.SetLockedEditBoxText(window.logText,text) else window.logText:SetText(text) end
+    window.logMeasure:SetText(text)
+    local height=window.logMeasure:GetStringHeight() or 100
+    local contentHeight=math.max(1,(height or 100)+10)
+    window.logText:SetHeight(contentHeight); window.logBody:SetHeight(contentHeight)
+    if window.logScroll.RefreshRivalsScrollbar then window.logScroll:RefreshRivalsScrollbar(true) end
 end
 
 local function SelectDuelDetailTab(window,key)
@@ -2741,7 +2889,18 @@ local function EnsureDetailWindow()
     window.logBox.bg=window.logBox:CreateTexture(nil,"BACKGROUND"); window.logBox.bg:SetAllPoints(); window.logBox.bg:SetColorTexture(.025,.032,.043,.78); local lb=DP.Theme.Border(window.logBox,0,0,598,322); lb:ClearAllPoints(); lb:SetAllPoints(window.logBox); lb:EnableMouse(false)
     window.logScroll=CreateFrame("ScrollFrame",nil,window.logBox); window.logScroll:SetPoint("TOPLEFT",10,-10); window.logScroll:SetPoint("BOTTOMRIGHT",-17,10)
     window.logBody=CreateFrame("Frame",nil,window.logScroll); window.logBody:SetSize(583,1); window.logScroll:SetScrollChild(window.logBody)
-    window.logText=window.logBody:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); window.logText:SetPoint("TOPLEFT",4,-4); window.logText:SetWidth(575); window.logText:SetJustifyH("LEFT"); window.logText:SetJustifyV("TOP"); window.logText:SetWordWrap(true)
+    -- Multiline EditBox keeps the duel combat log selectable/copyable while
+    -- preserving the existing scroll-frame layout and inline WoW color markup.
+    window.logText=CreateFrame("EditBox",nil,window.logBody); window.logText:SetPoint("TOPLEFT",4,-4); window.logText:SetWidth(575); window.logText:SetHeight(1)
+    window.logText:SetMultiLine(true); window.logText:SetAutoFocus(false); window.logText:SetFontObject(GameFontHighlightSmall); window.logText:SetJustifyH("LEFT"); window.logText:SetJustifyV("TOP"); window.logText:SetTextInsets(0,0,0,0)
+    window.logText:SetScript("OnEscapePressed",function(self) self:ClearFocus() end)
+    if DP.Theme.ConfigureReadOnlyCombatLog then DP.Theme.ConfigureReadOnlyCombatLog(window.logText) end
+    if DP.Theme.CreateCombatLogCopyButton then
+        window.logCopyButton=DP.Theme.CreateCombatLogCopyButton(window.logBox,window.logText,function()
+            return window.logPlainText or (DP.Theme.PlainCombatLogText and DP.Theme.PlainCombatLogText(window.logText._rivalsLockedText or "")) or ""
+        end)
+    end
+    window.logMeasure=window.logBody:CreateFontString(nil,"ARTWORK","GameFontHighlightSmall"); window.logMeasure:SetPoint("TOPLEFT",4,-4); window.logMeasure:SetWidth(575); window.logMeasure:SetJustifyH("LEFT"); window.logMeasure:SetJustifyV("TOP"); window.logMeasure:SetWordWrap(true); window.logMeasure:SetAlpha(0)
     window.logScrollbar=DP.Theme.ScrollBar(window.logBox,30); window.logScrollbar:SetPoint("TOPRIGHT",-4,-8); window.logScrollbar:SetPoint("BOTTOMRIGHT",-4,8); BindRivalsScroll(window.logScroll,window.logBody,window.logScrollbar,30)
 
     UISpecialFrames[#UISpecialFrames+1]="RivalsDuelUsageDetails"; U.window=window

@@ -1,24 +1,35 @@
-## Rivals 1.0.0
+## Rivals 1.0.101
 
-Rivals is out of beta! Changes since 0.21.181-beta:
+Changes since 1.0.0.
 
-### Duel Details
-- Rebuilt Duel Details with Summary, Items & Abilities, and Combat Log tabs matching the World PvP detail window.
-- Added rating before/after and change, class-matchup rating, lifetime/rated/class records, verification status, and duel date/duration to Summary.
-- Added a consumable-spend comparison and itemized ledger using frozen encounter pricing.
-- Added an Enemy Buffs card for newly recorded duels and improved opponent identity capture and portrait fallbacks.
-- Combined duel actions into one chronological combat log and added a participant filter to Items & Abilities. New captures retain first-use timing and target identity when available.
-- Fixed the unsupported rating-change arrow. Duels can still be starred from History.
+### History portraits
 
-### Enemy Buffs and Layout
-- Expanded eligible long-duration class buffs, with a five-minute minimum duration to reduce short-effect clutter. Lightning Shield is excluded.
-- Prioritized World Buffs, Flasks, Zanzas, Elixirs, Protection Potions, Class Buffs, then miscellaneous effects.
-- Kept all World PvP detail tabs at a consistent window height and removed phantom scrolling from short combat logs.
+- Added reconstructed 3D opponent portraits using captured race, sex, and equipment, with saved outfits available after reloads.
+- Rebuilt loading around the selected encounter: only visible portraits load, completed portraits are reused, and switching encounters cancels abandoned work.
+- Removed the dependency on finding a nearby player of the same sex, fixing prolonged waits affecting male Dwarves and other portraits.
+- Improved framing, circular clipping, equipment verification, and animation freezing. A spinner remains visible while a portrait prepares.
+- Added eight stable face, hair, and skin variants per race/sex. Reconstructed features are approximations; exact live appearances are preferred when available.
 
-### Screenshot and Kill-Tracking Fixes
-- World PvP kill screenshots now wait for confirmed death, preventing premature captures during Druid shapeshifts and similar health transitions.
-- Hunter Feign Death no longer counts as a real death, advances kill statistics, or triggers a kill screenshot.
-- Automatic Rivals screenshots now suppress Blizzard's screenshot-status messages and clear lingering notices before capture. Normal manual screenshot notifications are restored afterward, with a safety timeout.
+### Combat Log
 
-### Release
-- Graduated Rivals from beta to version 1.0.0 and synchronized addon, capture-report, and README version information.
+- Added selectable, read-only logs and a Copy button that selects the log for Ctrl+C.
+- Added spell tooltips, quality-colored item links, clearer proc highlighting, killing-blow markers, and additional missed/absorbed/resisted attack results.
+- Expanded equipped-item proc recognition and corrected false attribution, including NPC Dazed and normal class abilities such as Disarm.
+- Improved reflected-spell attribution and periodic-effect ownership.
+- Item activations now appear before their resulting effects. Diamond Flask is correctly shown as an item use while retaining its applied-buff entry.
+- Fixed large mousewheel jumps after switching encounters and an error when opening details containing equipped-item procs.
+
+### Encounter tracking
+
+- Keep fights together through Ice Block and Gnomish Mind Control Cap interruptions, including cap backfires.
+- Repair eligible adjacent saved encounter fragments when retained evidence identifies one continuous fight, rebuilding their logs, results, and consumable totals.
+- Added an encounter mouseover roster with class-colored names, known or inferred specs, and Survived/Died status.
+- Improved friendly participant capture and death tracking without treating Feign Death as a real death.
+- Fixed stretched or misplaced exploration overlays on encounter maps.
+
+### Spending and encounter details
+
+- Added lifetime Enemy Gold Spent to the World PvP overview, preserving accumulated spending as older encounters leave rolling History. Nemesis remains available in the Most Killed tooltip.
+- Sort the consumable ledger by spending, with the largest contributors and items first.
+- Added Items & Abilities category help. Reagents remain in consumable costs without separate action rows.
+- Stop counting the passive Supercharged Chronoboon aura as an item use or enemy buff advantage, repair affected saved costs, and price actual Chronoboon uses at the fixed 1-gold vendor cost.

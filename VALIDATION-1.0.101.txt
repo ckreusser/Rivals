@@ -1,0 +1,32 @@
+Rivals 1.0.101 release validation
+Baseline: 2b03b48435c3b01c4c671fdce8b9f365d99b0fd9 (GitHub main, Rivals 1.0.0).
+Source: installed Classic Era addon, version 1.0.101.
+
+All 57 Lua files compile under Lua 5.1. All 19 TOC runtime files exist
+and match the installed build after capture-version synchronization.
+
+PASS: portrait_loading.py, portraits.py, portrait_lifecycle.py,
+portrait_test_panel.py, combat_item_classification.py, combat_log_scroll.py,
+friendly_levels.py, worldpvp_detail_regression.py,
+mind_control_cap_regression.py, combat_suspension_regression.py.
+The last three scripts are static wiring checks; portrait controller tests use
+a simulated renderer and do not verify Blizzard's rendering/streaming.
+
+Updated test harnesses to load ProcCatalog/Portraits and the log formatter's
+WorldPvP dependency. Updated legacy Chronoboon expectations to require its
+fixed 1g vendor price and reject passive aura-based item-use inference.
+
+Legacy tests/run.py passes parser/tracker, usage/pricing, rating and protection
+checks, then stops at tests/verification.lua:42. This same assertion is recorded
+in VALIDATION-1.0.0.txt and is not a new failure in this release.
+Legacy tests/run_encounter_fixes.py passes parser/tracker and usage/pricing,
+then stops because its UI mock lacks SetNormalTexture; downstream encounter
+assertions are not reached. These runners are not reported as full passes.
+
+No fresh in-game test was performed during release preparation. Earlier user
+feedback confirmed improved portrait loading; all 128 face variants and latest
+encounter repairs still require client-level visual/behavior verification.
+
+Release notes summarize final behavior since 1.0.0; historical intermediate
+changelog entries retain abandoned approaches as development history.
+No account SavedVariables, screenshots, or videos are included.

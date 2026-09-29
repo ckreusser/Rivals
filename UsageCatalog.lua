@@ -271,6 +271,7 @@ DP.UsageCatalog = {
     [13120] = {itemID=10720, name="Gnomish Net-o-Matic Projector", quality=1, category="engineering"},
     [13141] = {itemID=10724, name="Gnomish Rocket Boots", quality=2, category="engineering"},
     [13180] = {itemID=10726, name="Gnomish Mind Control Cap", quality=2, category="engineering"},
+    [13181] = {itemID=10726, name="Gnomish Mind Control Cap", quality=2, category="engineering"},
     [13183] = {itemID=10727, name="Goblin Dragon Gun", quality=1, category="engineering"},
     [13219] = {itemID=10918, name="Wound Poison", quality=1, category="potions"},
     [13225] = {itemID=10920, name="Wound Poison II", quality=1, category="potions"},
@@ -550,6 +551,8 @@ DP.UsageCatalog = {
     [24389] = {itemID=20036, name="Fire Ruby", quality=3, category="equipment"},
     [24417] = {itemID=20080, name="Sheen of Zanza", quality=2, category="potions"},
     [24427] = {itemID=20130, name="Diamond Flask", quality=3, category="equipment"},
+    -- Era CLEU uses a separate activation ID; 24427 remains its aura/heal.
+    [363880] = {itemID=20130, name="Diamond Flask", quality=3, category="equipment"},
     [24498] = {itemID=19952, name="Gri'lek's Charm of Valor", quality=4, category="equipment"},
     [24499] = {itemID=19956, name="Wushoolay's Charm of Spirits", quality=4, category="equipment"},
     [24531] = {itemID=19953, name="Renataki's Charm of Beasts", quality=4, category="equipment"},
@@ -759,5 +762,4 @@ DP.UsageCatalog = {
     -- Supercharged replacement cost is proxied to the base Displacer.
     [349858] = {itemID=184937, name="Chronoboon Displacer", quality=1, category="potions"},
     [349863] = {itemID=184938, name="Supercharged Chronoboon Displacer", quality=1, category="potions"},
-    [349981] = {itemID=184938, name="Supercharged Chronoboon Displacer", quality=1, category="potions"},
 }

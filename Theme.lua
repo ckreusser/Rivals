@@ -954,3 +954,222 @@ function T.SelectDataTab(button, selected, text)
         button.gloss:SetAlpha(.32)
     end
 end
+
+-- Combat-log text helpers ----------------------------------------------------
+-- Keep the rendered combat log selectable while treating its content as
+-- display-only. Hyperlinks remain interactive so spell names can expose normal
+-- Blizzard tooltips without reverting to a row-by-row, non-selectable layout.
+function T.PlainCombatLogText(text)
+    text = tostring(text or "")
+    text = text:gsub("|H[^|]-|h(.-)|h", "%1")
+    text = text:gsub("|c%x%x%x%x%x%x%x%x", "")
+    text = text:gsub("|r", "")
+    text = text:gsub("|T.-|t", "")
+    return text
+end
+
+function T.SetLockedEditBoxText(edit, text)
+    if not edit then return end
+    text = tostring(text or "")
+    edit._rivalsLockedText = text
+    edit._rivalsSettingLockedText = true
+    edit:SetText(text)
+    edit._rivalsSettingLockedText = nil
+end
+
+function T.ConfigureReadOnlyCombatLog(edit)
+    if not edit or edit._rivalsReadOnlyConfigured then return end
+    edit._rivalsReadOnlyConfigured = true
+    if edit.SetSecurityDisablePaste then pcall(edit.SetSecurityDisablePaste, edit) end
+    if edit.SetHyperlinksEnabled then pcall(edit.SetHyperlinksEnabled, edit, true) end
+
+    -- Keep navigation/selection native, but intercept destructive keys before
+    -- EditBox can apply them. Temporarily disabling keyboard handling for the
+    -- remainder of the key event prevents Backspace/Delete from moving the caret
+    -- or restarting its blink. OnTextChanged below is only a compatibility fallback.
+    edit:HookScript("OnKeyDown", function(self, key)
+        local destructive = key == "BACKSPACE" or key == "DELETE"
+        if destructive then
+            self._rivalsBlockedEdit = true
+            self._rivalsCursorBeforeEdit = self.GetCursorPosition and self:GetCursorPosition() or 0
+            if self.SetPropagateKeyboardInput then self:SetPropagateKeyboardInput(false) end
+            if self.EnableKeyboard then
+                self:EnableKeyboard(false)
+                if C_Timer and C_Timer.After then
+                    C_Timer.After(0, function()
+                        if self and self.EnableKeyboard then self:EnableKeyboard(true) end
+                        if self and self.SetPropagateKeyboardInput then self:SetPropagateKeyboardInput(true) end
+                        if self then self._rivalsBlockedEdit = nil end
+                    end)
+                else
+                    self:EnableKeyboard(true)
+                    if self.SetPropagateKeyboardInput then self:SetPropagateKeyboardInput(true) end
+                    self._rivalsBlockedEdit = nil
+                end
+            end
+            return
+        end
+        if key ~= "LEFT" and key ~= "RIGHT" and key ~= "UP" and key ~= "DOWN" and
+                key ~= "HOME" and key ~= "END" and key ~= "PAGEUP" and key ~= "PAGEDOWN" then
+            self._rivalsCursorBeforeEdit = self.GetCursorPosition and self:GetCursorPosition() or 0
+        else
+            self._rivalsCursorBeforeEdit = nil
+        end
+    end)
+    edit:HookScript("OnChar", function(self)
+        if self._rivalsCursorBeforeEdit == nil then
+            self._rivalsCursorBeforeEdit = self.GetCursorPosition and self:GetCursorPosition() or 0
+        end
+    end)
+    edit:HookScript("OnTextChanged", function(self, userInput)
+        if not userInput or self._rivalsSettingLockedText then return end
+        local locked = tostring(self._rivalsLockedText or "")
+        local cursor = self._rivalsCursorBeforeEdit
+        if cursor == nil then cursor = self.GetCursorPosition and self:GetCursorPosition() or 0 end
+        self._rivalsSettingLockedText = true
+        self:SetText(locked)
+        if self.SetCursorPosition then self:SetCursorPosition(math.min(math.max(0, cursor), #locked)) end
+        self._rivalsSettingLockedText = nil
+        self._rivalsCursorBeforeEdit = nil
+    end)
+
+    edit:SetScript("OnHyperlinkEnter", function(self, link)
+        if type(link) ~= "string" then return end
+        local spellID = tonumber(link:match("^spell:(%d+)"))
+        GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
+        if spellID and GameTooltip.SetSpellByID then
+            GameTooltip:SetSpellByID(spellID)
+        else
+            local ok = pcall(GameTooltip.SetHyperlink, GameTooltip, link)
+            if not ok then GameTooltip:SetText("Ability") end
+        end
+        GameTooltip:Show()
+
+        -- Attach a borderless spell icon directly to the tooltip. The texture
+        -- touches the tooltip edge and uses the space previously consumed by the frame.
+        if spellID and GetSpellTexture then
+            local iconTexture = GetSpellTexture(spellID)
+            if iconTexture then
+                if not T._combatSpellTooltipIcon then
+                    local holder = CreateFrame("Frame", nil, GameTooltip)
+                    holder:SetSize(36, 36)
+                    holder.icon = holder:CreateTexture(nil, "ARTWORK")
+                    holder.icon:SetAllPoints(holder)
+                    holder.icon:SetTexCoord(.06, .94, .06, .94)
+                    GameTooltip:HookScript("OnHide", function() holder:Hide() end)
+                    T._combatSpellTooltipIcon = holder
+                end
+                local holder = T._combatSpellTooltipIcon
+                holder:ClearAllPoints()
+                holder:SetPoint("TOPRIGHT", GameTooltip, "TOPLEFT", 0, 0)
+                holder.icon:SetTexture(iconTexture)
+                holder:Show()
+            end
+        end
+    end)
+    edit:SetScript("OnHyperlinkLeave", function()
+        if T._combatSpellTooltipIcon then T._combatSpellTooltipIcon:Hide() end
+        GameTooltip:Hide()
+    end)
+    edit:SetScript("OnHyperlinkClick", function(self, link, text, button)
+        if type(link) ~= "string" then return end
+        -- Delegate item links to Blizzard's normal hyperlink handler. This gives
+        -- them the same Shift-click-to-chat behavior as item links in chat while
+        -- keeping spell hyperlinks tooltip-only.
+        if link:match("^item:") and type(SetItemRef) == "function" then
+            local refText = text
+            local itemID = tonumber(link:match("^item:(%d+)"))
+            local get = C_Item and C_Item.GetItemInfo or GetItemInfo
+            if get and itemID then
+                local ok, _, itemLink = pcall(get, itemID)
+                if ok and type(itemLink) == "string" and itemLink ~= "" then refText = itemLink end
+            end
+            pcall(SetItemRef, link, refText or ("|H" .. link .. "|h[item]|h"), button or "LeftButton")
+        end
+    end)
+end
+
+function T.SpellTextLink(spellID, spellName, color)
+    local name = tostring(spellName or (spellID and ("Spell " .. tostring(spellID))) or "Ability")
+    local label = (color or "|cffffffff") .. "[" .. name .. "]|r"
+    spellID = tonumber(spellID)
+    if spellID then return "|Hspell:" .. tostring(spellID) .. "|h" .. label .. "|h" end
+    return label
+end
+
+function T.ItemTextLink(itemID, itemName, quality)
+    itemID = tonumber(itemID)
+    local name = tostring(itemName or (itemID and ("Item " .. tostring(itemID))) or "Item")
+    if itemID then
+        local get = C_Item and C_Item.GetItemInfo or GetItemInfo
+        if get then
+            local ok, cachedName, cachedLink, cachedQuality = pcall(get, itemID)
+            if ok then
+                name = cachedName or name
+                quality = cachedQuality or quality
+                -- Only trust Blizzard's cached link when it is a complete, valid
+                -- colored item hyperlink. Some Classic cache states can return
+                -- partial/malformed color markup; feeding that into a multiline
+                -- EditBox leaves literal text such as "|c[Major Healthstone]".
+                if type(cachedLink) == "string" and
+                        cachedLink:match("^|c%x%x%x%x%x%x%x%x|Hitem:") and
+                        cachedLink:find("|h", 1, true) then
+                    return cachedLink
+                end
+            end
+        end
+    end
+
+    -- Use known-good ARGB color strings rather than ITEM_QUALITY_COLORS.hex.
+    -- The shape of that field differs across Classic clients/builds, while the
+    -- quality IDs themselves are stable. This guarantees valid WoW color markup.
+    local qualityHex = {
+        [0] = "ff9d9d9d", -- poor
+        [1] = "ffffffff", -- common
+        [2] = "ff1eff00", -- uncommon
+        [3] = "ff0070dd", -- rare
+        [4] = "ffa335ee", -- epic
+        [5] = "ffff8000", -- legendary
+        [6] = "ffe6cc80", -- artifact
+        [7] = "ff00ccff", -- heirloom
+        [8] = "ff00ccff", -- WoW token / special
+    }
+    local hex = qualityHex[tonumber(quality) or 1] or "ffffffff"
+    local label = "|c" .. hex .. "[" .. name .. "]|r"
+    if itemID then return "|Hitem:" .. tostring(itemID) .. "|h" .. label .. "|h" end
+    return label
+end
+
+function T.CreateCombatLogCopyButton(parent, sourceEdit, getPlainText)
+    if not parent then return nil end
+    local button = CreateFrame("Button", nil, parent)
+    button:SetSize(20, 20)
+    button:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -36, -7)
+    button:SetFrameLevel(parent:GetFrameLevel() + 20)
+    if button.RegisterForClicks then button:RegisterForClicks("LeftButtonUp") end
+
+    button.icon = button:CreateTexture(nil, "ARTWORK")
+    button.icon:SetSize(16, 16)
+    button.icon:SetPoint("CENTER", 0, 0)
+    button.icon:SetTexture("Interface\\AddOns\\Rivals\\Textures\\CopyIcon")
+    button.icon:SetVertexColor(.84, .87, .91, .95)
+
+    button:SetScript("OnEnter", function(self)
+        if self.icon then self.icon:SetVertexColor(1, .90, .66, 1) end
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Select combat log")
+        GameTooltip:AddLine("Select all combat-log text. Press Ctrl+C to copy.", .78, .82, .88, true)
+        GameTooltip:Show()
+    end)
+    button:SetScript("OnLeave", function(self)
+        if self.icon then self.icon:SetVertexColor(.88, .90, .93, 1) end
+        GameTooltip:Hide()
+    end)
+
+    button:SetScript("OnClick", function()
+        if not sourceEdit then return end
+        if sourceEdit.SetFocus then sourceEdit:SetFocus() end
+        if sourceEdit.HighlightText then sourceEdit:HighlightText() end
+    end)
+    return button
+end
