@@ -1,35 +1,8 @@
-## Rivals 1.0.101
+## Rivals 1.0.104
 
-Changes since 1.0.0.
+Changes since 1.0.101.
 
-### History portraits
-
-- Added reconstructed 3D opponent portraits using captured race, sex, and equipment, with saved outfits available after reloads.
-- Rebuilt loading around the selected encounter: only visible portraits load, completed portraits are reused, and switching encounters cancels abandoned work.
-- Removed the dependency on finding a nearby player of the same sex, fixing prolonged waits affecting male Dwarves and other portraits.
-- Improved framing, circular clipping, equipment verification, and animation freezing. A spinner remains visible while a portrait prepares.
-- Added eight stable face, hair, and skin variants per race/sex. Reconstructed features are approximations; exact live appearances are preferred when available.
-
-### Combat Log
-
-- Added selectable, read-only logs and a Copy button that selects the log for Ctrl+C.
-- Added spell tooltips, quality-colored item links, clearer proc highlighting, killing-blow markers, and additional missed/absorbed/resisted attack results.
-- Expanded equipped-item proc recognition and corrected false attribution, including NPC Dazed and normal class abilities such as Disarm.
-- Improved reflected-spell attribution and periodic-effect ownership.
-- Item activations now appear before their resulting effects. Diamond Flask is correctly shown as an item use while retaining its applied-buff entry.
-- Fixed large mousewheel jumps after switching encounters and an error when opening details containing equipped-item procs.
-
-### Encounter tracking
-
-- Keep fights together through Ice Block and Gnomish Mind Control Cap interruptions, including cap backfires.
-- Repair eligible adjacent saved encounter fragments when retained evidence identifies one continuous fight, rebuilding their logs, results, and consumable totals.
-- Added an encounter mouseover roster with class-colored names, known or inferred specs, and Survived/Died status.
-- Improved friendly participant capture and death tracking without treating Feign Death as a real death.
-- Fixed stretched or misplaced exploration overlays on encounter maps.
-
-### Spending and encounter details
-
-- Added lifetime Enemy Gold Spent to the World PvP overview, preserving accumulated spending as older encounters leave rolling History. Nemesis remains available in the Most Killed tooltip.
-- Sort the consumable ledger by spending, with the largest contributors and items first.
-- Added Items & Abilities category help. Reagents remain in consumable costs without separate action rows.
-- Stop counting the passive Supercharged Chronoboon aura as an item use or enemy buff advantage, repair affected saved costs, and price actual Chronoboon uses at the fixed 1-gold vendor cost.
+- Fixed CharacterStatsClassic stats overlapping the Rivals character page. Stats now hide while Rivals is open and return on the character page, without changing saved settings.
+- Added `/rivals toast` to preview the animated 1v3 victory notification without changing encounter history or statistics.
+- Added a once-per-login update notice when a newer Rivals release is detected through guild or group addon messages. Remembers the newest detected version across reloads; this does not check CurseForge directly.
+- Verified that tracked racial abilities appear in Items & Abilities regardless of cooldown length, including when cooldown data is unavailable. Added regression coverage for duel and World PvP tracking and display; existing behavior is unchanged.

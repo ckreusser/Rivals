@@ -1,5 +1,52 @@
 local _, DP = ...
 
+local function InstallCharacterStatsCompatibility(panel)
+    local statsPanel, hiddenByRivals
+
+    local function HideStats()
+        if not statsPanel then
+            -- CSC's panel is anonymous and private to its namespace. Identify
+            -- its two dropdowns only when CSC's compatibility API is present.
+            -- That API also changes saved preferences, so hide the frame itself.
+            if type(CSC_HideStatsPanel) ~= "function" then return end
+            for _, child in ipairs({CharacterFrame:GetChildren()}) do
+                if child.leftStatsDropDown and child.rightStatsDropDown then
+                    statsPanel = child
+                    statsPanel:HookScript("OnShow", function()
+                        if panel:IsShown() then
+                            hiddenByRivals = true
+                            statsPanel:Hide()
+                        else
+                            hiddenByRivals = nil
+                        end
+                    end)
+                    break
+                end
+            end
+        end
+        if statsPanel and statsPanel:IsShown() then
+            hiddenByRivals = true
+            statsPanel:Hide()
+        end
+    end
+
+    local function RestoreStats()
+        -- Native switches can show PaperDollFrame before or after hiding Rivals.
+        -- Keep the pending restore until both conditions hold, including reopen.
+        if hiddenByRivals and not panel:IsShown()
+            and PaperDollFrame and PaperDollFrame:IsShown() then
+            hiddenByRivals = nil
+            if not (UISettingsGlobal and UISettingsGlobal.statsPanelHidden) then
+                statsPanel:Show()
+            end
+        end
+    end
+
+    panel:HookScript("OnShow", HideStats)
+    panel:HookScript("OnHide", RestoreStats)
+    if PaperDollFrame then PaperDollFrame:HookScript("OnShow", RestoreStats) end
+end
+
 function DP.InstallCharacterTab(getRating, getRecords)
     if DP.characterPanel or not CharacterFrame or not CharacterFrameTab5 then return false end
     -- Rivals must not join Blizzard's CharacterFrame tab/subframe registries.
@@ -558,6 +605,7 @@ function DP.InstallCharacterTab(getRating, getRecords)
         LayoutRivalsTab()
     end
     DP.characterPanel = panel
+    InstallCharacterStatsCompatibility(panel)
     DP.RefreshRivalsCharacterTabLabel()
     return true
 end

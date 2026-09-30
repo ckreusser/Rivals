@@ -1,5 +1,5 @@
 local addonName, DP = ...
-local VERSION, TRACE_LIMIT, ACTIVITY_LIMIT = "1.0.101", 1000, 200
+local VERSION, TRACE_LIMIT, ACTIVITY_LIMIT = "1.0.104", 1000, 200
 local frame = CreateFrame("Frame")
 local db, observer, tracker, parsers, ready, rating
 local seasons, selectedPeriod = {}, nil
@@ -757,6 +757,7 @@ local function Initialize()
         end)
     end
     Trace("CAPTURE_LOGIN", observer.build, observer.locale)
+    if DP.Updates then DP.Updates.Initialize(db, VERSION, Say) end
     Say("Local rating " .. string.format("%.1f", rating.rating) .. ". Character pane > Duels, or /rivals.")
     DP.RetryRecovery()
     C_Timer.After(35, DP.RetryRecovery)
@@ -930,6 +931,12 @@ SlashCmdList.RIVALS = function(command)
     if command == "" or command == "rating" then
         if DP.ShowRivalsCharacterPanel then DP.ShowRivalsCharacterPanel()
         else Say("Character pane is not available yet; open it and try again.") end
+    elseif command == "toast" then
+        if DP.WorldPvP and DP.WorldPvP.DevPreview1vNToast then
+            DP.WorldPvP.DevPreview1vNToast()
+        else
+            Say("World PvP toast preview is not available yet.")
+        end
     elseif command == "season start" then
         if tracker.session then Say("Finish or cancel the current duel before starting a season."); return end
         local id = #observer.seasons + 1
@@ -982,6 +989,7 @@ SlashCmdList.RIVALS = function(command)
             (db.traceEnabled and "on" or "off") .. "; session " .. (tracker.session and tracker.session.state or "idle") .. ".")
     else
         Say("/rivals rating | world | graph | history | opponents | classes | leaderboard | lifetime | season | season start | export | status | mode rated | mode casual | verify on | verify off | share on | share off")
+        Say("/rivals toast previews the 1vN victory notification without saving an encounter.")
         Say("/rivals rating opens your local profile. Enable trace only for diagnostics.")
     end
 end

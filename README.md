@@ -2,7 +2,7 @@
 
 **Make every fight part of your story.** Rivals is a World of Warcraft Classic Era addon that adds a personal duel rating, duel history, open-world PvP encounters, and opponent insights to the Character and Inspect windows.
 
-**Current version:** 1.0.101 · **Client:** Classic Era (Interface 11509)
+**Current version:** 1.0.104 · **Client:** Classic Era (Interface 11509)
 
 ## Features
 
@@ -57,6 +57,7 @@ These are conservative reward rules, not accusations of cheating: a legitimate f
 | `/rivals` | Open your duel profile |
 | `/rivals history` | Browse recorded encounters |
 | `/rivals world` | Open the World PvP overview |
+| `/rivals toast` | Preview the animated 1v3 victory notification without saving an encounter |
 | `/rivals graph` | View rating history |
 | `/rivals opponents` | Browse opponent matchups |
 | `/rivals classes` | Browse class matchups |

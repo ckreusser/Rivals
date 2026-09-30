@@ -1,0 +1,15 @@
+Rivals 1.0.104 release validation
+Baseline: ed13a5a (GitHub main, Rivals 1.0.101).
+
+All 58 Lua files compile under Lua 5.1.
+All 20 TOC runtime files exist and match the installed 1.0.104 build.
+
+PASS: character_stats_compatibility.py — visibility, restoration, callback order,
+saved preferences, and optional CharacterStatsClassic loading.
+PASS: racial_usage.py — 176 cases across duel/world tracking and display,
+including short, zero, and unavailable cooldowns; class cutoff preserved.
+PASS: updates.py — version comparison, notices, session deduplication,
+cached discovery, channel selection, malformed messages, and traffic limits.
+
+Tests use simulated WoW APIs. No fresh in-game test was performed.
+Changelog covers changes since 1.0.101; racial behavior is verified, not new.
