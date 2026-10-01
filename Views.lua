@@ -338,14 +338,28 @@ function DP.InstallViews(panel, getRating, getRecords, overview)
     manage:SetAllPoints(panel); manage:Hide()
     local manageTitle = Label(manage, -111, "GameFontNormalLarge")
     manageTitle:SetJustifyH("CENTER"); manageTitle:SetText("Manage Rivals")
-    local sharingTitle = Label(manage, -128, "GameFontNormal")
-    sharingTitle:SetJustifyH("CENTER"); sharingTitle:SetText("PROFILE SHARING")
-    local sharingHelp = Label(manage, -149, "GameFontDisableSmall")
-    sharingHelp:SetJustifyH("CENTER")
-    sharingHelp:SetText("Shares your rating summary only when another Rival inspects you.\nEnabled by default; no duel history is transmitted.")
-    local shareOn = Button(manage, "On", 30, -189, 146, function() if DP.SetProfileSharing then DP.SetProfileSharing(true) end end)
-    local shareOff = Button(manage, "Off", 176, -189, 146, function() if DP.SetProfileSharing then DP.SetProfileSharing(false) end end)
-    local function ScreenshotCheckbox(text, x, y, getEnabled, setEnabled, tooltipTitle, tooltipLine)
+
+    -- Manage is intentionally laid out like a settings sheet rather than a stack
+    -- of centered headings.  Group related controls in a few quiet cards and keep
+    -- labels left-aligned so the eye can scan straight down the page.
+    local function ManageCard(x, y, width, height, title)
+        DP.Theme.Fill(manage, x, y, width, height, .035, .045, .060, .62)
+        DP.Theme.Border(manage, x, y, width, height)
+        local heading = manage:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        heading:SetPoint("TOPLEFT", manage, "TOPLEFT", x + 11, y - 8)
+        heading:SetWidth(width - 22); heading:SetJustifyH("LEFT")
+        heading:SetText(title)
+        return heading
+    end
+    local function ManageRowLabel(text, x, y, width, font)
+        local label = manage:CreateFontString(nil, "OVERLAY", font or "GameFontHighlightSmall")
+        label:SetPoint("TOPLEFT", manage, "TOPLEFT", x, y)
+        label:SetWidth(width or 150); label:SetJustifyH("LEFT")
+        label:SetText(text)
+        return label
+    end
+
+    local function OptionCheckbox(text, x, y, getEnabled, setEnabled, tooltipTitle, tooltipLine)
         local check = CreateFrame("CheckButton", nil, manage, "UICheckButtonTemplate")
         check:SetSize(24, 24)
         check:SetPoint("TOPLEFT", x, y)
@@ -379,31 +393,75 @@ function DP.InstallViews(panel, getRating, getRecords, overview)
         return check
     end
 
-    local screenshotTitle = Label(manage, -220, "GameFontNormal")
-    screenshotTitle:SetJustifyH("CENTER"); screenshotTitle:SetText("AUTOMATIC SCREENSHOTS")
-    local duelScreenshot = ScreenshotCheckbox("Duels", 82, -239,
+    -- PROFILE SHARING -------------------------------------------------------
+    ManageCard(30, -137, 292, 74, "PROFILE SHARING")
+    local sharingHelp = ManageRowLabel("Rating summary only when inspected.\nNo duel history is shared.", 42, -162, 145, "GameFontDisableSmall")
+    local shareOn = Button(manage, "On", 198, -163, 55, function() if DP.SetProfileSharing then DP.SetProfileSharing(true) end end)
+    local shareOff = Button(manage, "Off", 257, -163, 55, function() if DP.SetProfileSharing then DP.SetProfileSharing(false) end end)
+
+    -- HUD & CAPTURE ---------------------------------------------------------
+    ManageCard(30, -221, 292, 142, "HUD & CAPTURE")
+
+    ManageRowLabel("Minimap button", 42, -253, 142)
+    local minimapButton = OptionCheckbox("Show", 228, -250,
+        function() return DP.MinimapButtonShown and DP.MinimapButtonShown() or false end,
+        DP.SetMinimapButtonShown,
+        "Minimap button",
+        "Shows the draggable Rivals faction button around the minimap.")
+
+    ManageRowLabel("Killstreak medals", 42, -281, 142)
+    local killstreaks = OptionCheckbox("Enabled", 228, -278,
+        function() return DP.KillstreaksEnabled and DP.KillstreaksEnabled() or false end,
+        DP.SetKillstreaksEnabled,
+        "Killstreak medals",
+        "Shows the Reach-style rapid-kill medal feed and plays its announcer sounds for player killing blows. Turning this off disables the entire killstreak chain.")
+
+    ManageRowLabel("Screenshots", 42, -309, 82)
+    local duelScreenshot = OptionCheckbox("Duels", 132, -306,
         function() return DP.DuelScreenshotsEnabled and DP.DuelScreenshotsEnabled() or false end,
         DP.SetDuelScreenshots,
         "Duel screenshots",
         "Takes a screenshot when a tracked duel finishes.")
-    local worldScreenshot = ScreenshotCheckbox("World PvP", 194, -239,
+    local worldScreenshot = OptionCheckbox("World PvP", 217, -306,
         function() return DP.WorldPvPScreenshotsEnabled and DP.WorldPvPScreenshotsEnabled() or false end,
         DP.SetWorldPvPScreenshots,
         "World PvP screenshots",
         "Takes one screenshot each time a tracked enemy player dies.")
 
-    local recoveryTitle = Label(manage, -289, "GameFontNormal")
-    recoveryTitle:SetJustifyH("CENTER"); recoveryTitle:SetText("RECOVERY")
-    local recoveryHelp = Label(manage, -289, "GameFontDisableSmall"); recoveryHelp:Hide()
-    local recoveryOpen = Button(manage, "Interrupted duels  >", 30, -309, 292, function() Select("Interrupted") end)
-    local manageOverviewBack = Button(manage, "< Overview", 30, -350, 142, function() Select("Overview") end)
-    local clearProfiles = Button(manage, "Clear Rivals cache", 180, -350, 142, function()
+    -- Keep the Overview shortcut in this card instead of giving it another
+    -- section header.  It is an action row, visually distinct from the toggles.
+    local overviewKeybind = Button(manage, "Overview keybind: Not Bound", 42, -334, 268, function()
+        if DP.OpenOverviewKeybindSettings then DP.OpenOverviewKeybindSettings() end
+    end)
+    overviewKeybind.Refresh = function(self)
+        local binding = DP.GetOverviewKeybindText and DP.GetOverviewKeybindText() or "Not Bound"
+        self:SetText("Overview keybind: " .. binding)
+    end
+    overviewKeybind:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Rivals Overview keybind")
+        GameTooltip:AddLine("Click to open Keybindings > AddOns.", 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    overviewKeybind:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    overviewKeybind:Refresh()
+    if manage.RegisterEvent then manage:RegisterEvent("UPDATE_BINDINGS") end
+    manage:SetScript("OnEvent", function(_, event)
+        if event == "UPDATE_BINDINGS" and overviewKeybind and overviewKeybind.Refresh then overviewKeybind:Refresh() end
+    end)
+
+    -- DATA & RECOVERY -------------------------------------------------------
+    ManageCard(30, -373, 292, 54, "DATA & RECOVERY")
+    local recoveryHelp = Label(manage, -370, "GameFontDisableSmall"); recoveryHelp:Hide()
+    local recoveryOpen = Button(manage, "Interrupted duels  >", 42, -399, 128, function() Select("Interrupted") end)
+    local clearProfiles = Button(manage, "Clear cache", 182, -399, 128, function()
         if StaticPopup_Show then
             StaticPopup_Show("RIVALS_CLEAR_PROFILE_CACHE")
         else
             DP.Inspect.ClearLeaderboard(); page = 1
         end
     end)
+
 
     modeButton:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
@@ -593,6 +651,9 @@ function DP.InstallViews(panel, getRating, getRecords, overview)
         nav = nav,
         shareOn = shareOn,
         shareOff = shareOff,
+        minimapButton = minimapButton,
+        killstreaks = killstreaks,
+        overviewKeybind = overviewKeybind,
         duelScreenshot = duelScreenshot,
         worldScreenshot = worldScreenshot,
         detailTiles = detailTiles,
@@ -659,6 +720,9 @@ function DP.InstallViews(panel, getRating, getRecords, overview)
             local sharing = DP.ProfileSharingEnabled and DP.ProfileSharingEnabled() or false
             DP.Theme.ToggleButton(refreshUI.shareOn, sharing, "On")
             DP.Theme.ToggleButton(refreshUI.shareOff, not sharing, "Off")
+            if refreshUI.minimapButton and refreshUI.minimapButton.Refresh then refreshUI.minimapButton:Refresh() end
+            if refreshUI.killstreaks and refreshUI.killstreaks.Refresh then refreshUI.killstreaks:Refresh() end
+            if refreshUI.overviewKeybind and refreshUI.overviewKeybind.Refresh then refreshUI.overviewKeybind:Refresh() end
             if refreshUI.duelScreenshot and refreshUI.duelScreenshot.Refresh then refreshUI.duelScreenshot:Refresh() end
             if refreshUI.worldScreenshot and refreshUI.worldScreenshot.Refresh then refreshUI.worldScreenshot:Refresh() end
             return
@@ -1131,6 +1195,7 @@ function DP.InstallViews(panel, getRating, getRecords, overview)
         }
     end
     DP.SelectDuelView = Select
+    DP.GetDuelView = function() return current end
     DP.SetHistorySource = function(source)
         historySource = (source == "world" or source == "duels" or source == "starred") and source or "all"
         modeIndex = 1
@@ -1151,7 +1216,7 @@ function DP.InstallViews(panel, getRating, getRecords, overview)
     DP.duelViewControls = {rows = rows, nav = nav, previous = previous, nextPage = nextPage, clear = clear, page = pageLabel,
         historyMode = historyMode, historySource = historySourceButton, matchupSource = matchupSourceButton, boardFilter = boardFilter, boardSort = boardSort, clearProfiles = clearProfiles, scrollbar = scrollbar, body = body,
         details = details, detailsBack = detailsBack, graphBack = graphBack, period = periodButton, overviewPeriod = overviewPeriodButton, mode = modeButton, manageBack = manageBack, empty = empty, classes = classes, matchups = matchups,
-        manage = manage, manageOverviewBack = manageOverviewBack, shareOn = shareOn, shareOff = shareOff, dev1vNToast = dev1vNToast,
-        duelScreenshot = duelScreenshot, worldScreenshot = worldScreenshot, recoveryOpen = recoveryOpen}
+        manage = manage, shareOn = shareOn, shareOff = shareOff,
+        minimapButton = minimapButton, killstreaks = killstreaks, overviewKeybind = overviewKeybind, duelScreenshot = duelScreenshot, worldScreenshot = worldScreenshot, recoveryOpen = recoveryOpen}
     refresh()
 end

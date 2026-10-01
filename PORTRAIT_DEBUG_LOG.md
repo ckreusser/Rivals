@@ -15,7 +15,7 @@ Actor reuse must compare selected display with the actor's bound display BEFORE 
 
 - 1.0.87 trace: female templates `1:3` through `8:3` were retained; a request for male Human `1:2` then waited. No compatible body load started. Waiting for a live player of matching sex was an unbounded dependency.
 - 1.0.88 removed startup template loading and added direct bare ChrRaces display IDs with `useActivePlayerCustomizations=true`.
-- User reports first portrait loaded quickly and correctly, but subsequent portraits appeared as white silhouettes. The reported screenshot showed a white silhouette.
+- User reports first portrait loaded quickly and correctly, but subsequent portraits appeared as white silhouettes. Screenshot: `C:/Users/Ckreu/AppData/Local/Temp/codex-clipboard-c58517ca-5df2-4d92-9e43-4ca0f7a1c6af.png`.
 - User's 10:05 trace: Gnome male display 1563 started at 611266.01, body ready .06, dress started .08, prepared .36 with **0/5 verified**, revealed .51. Human male later prepared with **0/4 verified** and revealed. This is an invalid completed portrait, not simply slow streaming.
 - Bare display rows have no CreatureDisplayInfoExtra skin. The assumption that the active-player customization argument supplies a usable opposite-sex/race skin on Era was wrong. API availability and model bounds were insufficient evidence.
 - The old preparation code unconditionally called FinishPrepare after .28 seconds. It displayed models even when all equipment failed verification.
@@ -39,7 +39,7 @@ WoW writes SavedVariables on reload/logout. After a test, a second `/reload` flu
 Read-only inspector:
 
 ```powershell
-python tests/inspect_portrait_log.py /path/to/SavedVariables/Rivals.lua
+& 'C:/Users/Ckreu/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe' 'C:/Program Files (x86)/World of Warcraft/_classic_era_/Interface/AddOns/Rivals/tests/inspect_portrait_log.py'
 ```
 
 It chooses the newest account SavedVariables file, prints its disk timestamp, then the archived/current traces with binding and gear details. An explicit file path may be supplied. If the report still says 1.0.88, the new session has not been flushed; do not claim it contains results of 1.0.89.

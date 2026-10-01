@@ -2464,7 +2464,11 @@ function W.Combat(playerGUID)
             enemy.level = enemy.level or ResolvePlayerLevel(enemy.guid)
             enemy.died = true; enemy.killedAt = GetTime() - session.startedElapsed
             session.lastKillPosition = PlayerPosition() or session.lastKillPosition
-            if info[4] == playerGUID then session.killingBlows = (session.killingBlows or 0) + 1; enemy.killingBlow = true end
+            if info[4] == playerGUID and not enemy.killingBlow then
+                session.killingBlows = (session.killingBlows or 0) + 1
+                enemy.killingBlow = true
+                if DP.MultiKill and DP.MultiKill.OnKillingBlow then DP.MultiKill.OnKillingBlow() end
+            end
             ScreenshotEnemyDeath(session, enemy, CFG.WPVP_SCREENSHOT_KILL_DELAY)
         end
     elseif event == "UNIT_DIED" or event == "UNIT_DESTROYED" then
@@ -2476,6 +2480,7 @@ function W.Combat(playerGUID)
                 session.playerDied = true
                 session.playerDiedAt = GetTime() - session.startedElapsed
                 session.deathPosition = PlayerPosition() or session.deathPosition
+                if DP.MultiKill and DP.MultiKill.Reset then DP.MultiKill.Reset() end
             elseif session.enemies[info[8]] then
                 local enemy = session.enemies[info[8]]
                 enemy.level = enemy.level or ResolvePlayerLevel(info[8])

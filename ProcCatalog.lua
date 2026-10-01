@@ -247,4 +247,10 @@ DP.ProcCatalog = {
 {27539,22196,"Thick Obsidian Breastplate","Obsidian Armor"},
 {15438,11669,"Naglering","Thorns"},
 {15438,17066,"Drillborer Disk","Thorns"},
+
+-- Triggered combat-log effects, not the passive equip auras. See PROC-CATALOG.md.
+{29164,23238,"Stygian Buckler","Stygian Grasp"},
+{27559,22198,"Jagged Obsidian Shield","Silence"},
+{18817,1168,"Skullflame Shield","Drain Life"},
+{18818,1168,"Skullflame Shield","Flamestrike"},
 }

@@ -377,6 +377,16 @@ local function FindBodyDonors(identity, sex, raceID)
     return sameRace, sameSex, false
 end
 
+local function SuppressPortraitEffects(actor)
+    if not actor then return end
+    -- Equipment particles are separate from the frozen skeletal animation and
+    -- neutral scene lighting. At head-camera distance, fiery shoulder/helm
+    -- emitters can fill the medallion even while the character is paused.
+    Call(actor, "SetParticleOverrideScale", 0)
+    Call(actor, "SetParticlesEnabled", false) -- legacy DressUpModel
+    Call(actor, "SetSpellVisualKit", 0)
+end
+
 local function EnsurePortraitScene(card)
     if not card then return nil end
     if card.portraitScene and card.portraitActor then return card.portraitScene, card.portraitActor end
@@ -443,6 +453,8 @@ local function EnsurePortraitScene(card)
         if okActor then actor = value end
     end
     if not actor then scene:Hide(); return nil end
+    SuppressPortraitEffects(actor)
+    scene._rivalsPortraitActor = actor
     if type(actor.Show) == "function" then pcall(actor.Show, actor) end
 
     card.portraitScene, card.portraitActor = scene, actor
@@ -542,6 +554,7 @@ end
 
 local function HoldActorPortrait(actor, scene)
     if not actor then return end
+    SuppressPortraitEffects(actor)
     -- Scene-level pause is not completely sticky on Classic when a shown
     -- ModelScene is reparented. Pause the actor itself too so the frozen pose
     -- survives parking/attachment without advancing an idle frame.
@@ -569,8 +582,8 @@ end
 local function ReassertPortraitLighting(scene)
     if not scene then return end
     -- OrbitCameraMixin can rewrite ModelScene lighting from its camera-info row
-    -- during OnUpdate on Classic Era. That produces the synchronized red/orange
-    -- pulse seen across otherwise frozen opponent portraits. Keep portrait light
+    -- during OnUpdate on Classic Era. This can tint frozen portraits, but does
+    -- not suppress equipment particle effects. Keep portrait light
     -- deliberately neutral and reassert it after Blizzard's own frame update.
     if type(scene.SetLightVisible) == "function" then pcall(scene.SetLightVisible, scene, true) end
     if type(scene.SetLightAmbientColor) == "function" then pcall(scene.SetLightAmbientColor, scene, .82, .82, .82) end
@@ -601,6 +614,7 @@ local function SetupPortraitLighting(scene)
             local alpha = type(self.GetAlpha) == "function" and self:GetAlpha() or 1
             if alpha and alpha <= 0 then return end
             ReassertPortraitLighting(self)
+            SuppressPortraitEffects(self._rivalsPortraitActor)
         end)
     end
 end
@@ -1328,7 +1342,7 @@ local function SeedBodyEntry(entry, donorUnit, dormant, directOnly)
     if not directOnly and (not entry.requestedDisplayID or UnitGuidEquals(donorUnit, entry.faceGUID)) and
             UnitIsUsablePlayer(donorUnit) and UnitSex(donorUnit) == entry.sex and
             type(actor.SetModelByUnit) == "function" then
-        ok, result = pcall(actor.SetModelByUnit, actor, donorUnit, false, false, false, true, false, entry.raceID)
+        ok, result = pcall(actor.SetModelByUnit, actor, donorUnit, false, false, true, true, false, entry.raceID)
         entry.bindingDiagnostic.unit = {token=donorUnit, ok=ok, result=tostring(result)}
         if ok and result ~= false then entry.bodySource = "unit" end
     end
@@ -1460,7 +1474,7 @@ local function SeedExactBodyEntry(entry, identity, unit, raceID, sex)
     entry.ready = nil
     -- No customRaceID here: the point of this actor is to clone the actual unit's
     -- customization choices, not merely borrow another player's sex/body pipeline.
-    local ok, result = pcall(actor.SetModelByUnit, actor, unit, false, false, false, true, false)
+    local ok, result = pcall(actor.SetModelByUnit, actor, unit, false, false, true, true, false)
     if not ok or result == false then return false end
     entry.donorUnit = unit
     entry.donorKey = DonorKey(unit)
@@ -2235,7 +2249,7 @@ local function ApplyActor(card, identity, snapshot, raceID, sex)
     -- still the highest-fidelity player renderer when the necessary body exists.
     if exactOrSameRace and type(actor.SetModelByUnit) == "function" then
         local override = exact and nil or raceID
-        local ok, result = pcall(actor.SetModelByUnit, actor, exactOrSameRace, false, false, false, true, false, override)
+        local ok, result = pcall(actor.SetModelByUnit, actor, exactOrSameRace, false, false, true, true, false, override)
         if ok and result ~= false then
             return Finish(exact and "exact unit actor" or ("same-race body donor " .. exactOrSameRace))
         end
@@ -2249,7 +2263,7 @@ local function ApplyActor(card, identity, snapshot, raceID, sex)
     -- direct player-display bindings with active customizations. This legacy
     -- unpooled path only handles addressable units.
     if anySameSex and type(actor.SetModelByUnit) == "function" then
-        local ok, result = pcall(actor.SetModelByUnit, actor, anySameSex, false, false, false, true, false, raceID)
+        local ok, result = pcall(actor.SetModelByUnit, actor, anySameSex, false, false, true, true, false, raceID)
         if ok and result ~= false then
             return Finish("race " .. raceID .. " on same-sex donor " .. anySameSex)
         end
@@ -2273,6 +2287,7 @@ local function ApplyLegacyDressUp(card, identity, snapshot, raceID, sex)
     if not ok or result == false then return false end
     model._rivalsAppearance = snapshot
     Dress(model)
+    SuppressPortraitEffects(model)
     model:Show()
     card._portraitDiagnostic = "legacy DressUpModel custom-race path"
     card._portraitGearDiagnostic = model._rivalsGearDiagnostic

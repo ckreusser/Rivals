@@ -1,3 +1,168 @@
+## Rivals 1.0.139
+
+Changes since 1.0.104.
+
+### Opponent portraits
+
+- Suppressed equipment particles and spell visuals that can cause orange-red, fire-like flickering over opponent portraits.
+- Reapply effect suppression when portraits are prepared, reused, or displayed, and hide weapons in live-unit portraits.
+
+### Multi-kill medals
+
+- Added Halo: Reach-style medals and announcer sounds for rapid player killing blows, from Double Kill through Killionaire.
+- Up to four medals appear in a left-side feed, with the newest medal on the left and older medals shifting right.
+- Refined medal size, arrival animation, cyan captions, and fading; removed bright duplicate rings and rotation wobble.
+- Added a Killstreak Medals toggle in Manage Rivals. Disabling it immediately clears the active chain and announcements.
+
+### Minimap and navigation
+
+- Added a draggable faction-themed minimap button. Left-click toggles Rivals; right-click opens a compact menu with Overview and Settings shortcuts.
+- Added a visibility toggle in Manage Rivals and saved minimap positioning across reloads.
+- Refined faction crest alignment, menu styling, hover behavior, and tooltip placement.
+- Added an optional Open Rivals Overview keybinding under Keybindings > AddOns. Press it again on Overview to close Rivals.
+- Added a Manage Rivals shortcut showing the current Overview binding and opening Keybindings directly.
+
+### Settings and combat records
+
+- Reorganized Manage Rivals into Profile Sharing, HUD & Capture, and Data & Recovery groups with clearer spacing and controls.
+- Removed the redundant Overview return button and unused developer control reference.
+- Added equipped-item proc attribution for Stygian Buckler's Stygian Grasp, Jagged Obsidian Shield's Silence, and Skullflame Shield's Drain Life and Flamestrike effects.
+
+## Rivals 1.0.138
+
+- Removed the redundant Overview return button from Manage Rivals; the primary Overview tab already provides the same navigation.
+- Nudged only the Horde minimap faction crest 1 physical pixel to the right; Alliance crest positioning is unchanged.
+
+## Rivals 1.0.137
+
+- Gave Manage Rivals a spacing pass with consistent gaps between settings cards and more breathing room inside each group.
+- Moved the Overview return button into the header, freeing the bottom of the pane so Data & Recovery no longer crowds its heading or neighboring controls.
+- Increased vertical separation between HUD rows and the Overview keybind while preserving the compact settings-sheet layout.
+
+## Rivals 1.0.136
+
+- Rebuilt Manage Rivals as a compact settings sheet with three grouped cards instead of stacked centered headings.
+- Profile Sharing is now a single privacy card with the On/Off control beside its explanation.
+- Minimap, killstreak medals, screenshots, and the Overview keybind are grouped under HUD & Capture.
+- Recovery and cache actions are grouped together under Data & Recovery, with one centered Overview return button at the bottom.
+- Removed the stale developer-toast control reference left behind after the dev control was removed.
+
+## Rivals 1.0.134
+
+- Fixed the Reach medal feed animation: newest medal now appears in the left-most slot and older medals move right.
+- Removed the enlarged additive medal duplicate and rotation that caused bright ghost rings / wobble during the pop.
+- Older medals now retire from the right edge without jumping the remaining medals left.
+- Reduced medal size and changed the arrival to a fast Reach-style snap/pop with a short rightward queue shift.
+
+## Rivals 1.0.133
+
+- Multi-kill medal feed: rebuilt the full presentation to behave like the classic Halo: Reach HUD rather than a centered single-medal popup. The feed now lives on the left side at the vertical midpoint, queues up to four recent medals from left to right, and left-aligns the newest medal caption directly beneath the row.
+- Medal entrance now uses a fast scale/settle with a very slight rotation and a brief additive light burst after the pop, followed by a longer soft fade. Removed the old moving clipped sweep.
+- Caption draw-in now scales subtly from 93% while cooling from near-white into the subdued Reach-style blue, with a restrained dark HUD shadow. Medal art is reduced to a 52px HUD-scale presentation.
+
+## Rivals 1.0.132
+
+- Multi-kill medals: rebuilt the caption treatment around Halo: Reach's actual HUD presentation: narrower 20px Arial Narrow, Reach-like cyan instead of gold, a restrained dark-blue shadow, tighter spacing beneath the medal, title-case medal names, and the Reach-style exclamation mark. Removed the heavy outline and gold highlight layers that made the previous pass look too large and unlike Reach.
+
+## Rivals 1.0.131
+
+- Multi-kill text: fixed the ARIALN font path escaping that caused invalid-font Lua warnings and taint when the announcement frame was created.
+
+
+- Multi-kill medals: updated the kill text to a more Halo-like treatment with blockier sans-serif lettering, a dark shadow layer, richer gold body text, and a pale top highlight.
+
+
+- Multi-kill medals: restored the supplied medal artwork and changed the shrink pipeline to a prefiltered 128px texture rendered at an exact 64px size with trilinear filtering and pixel-snapped layout. Removed the runtime scale pop to avoid a second resampling pass.
+
+
+- Multi-kill medals: replaced the imported medal textures with a new small-display-optimized Rivals set. The symbols are simplified, outlines are thicker, and Triple Kill was rebuilt to read cleanly at in-game size.
+
+
+- Multi-kill medals: rebuilt the medal textures directly from the original PNGs for smoother edges, and changed the light sweep to a thinner feathered pass with a narrow bright core.
+
+
+- Multi-kill medals: removed the incorrect circular mask that hid the medals, changed the light sweep to follow each medal's actual alpha silhouette, and rebuilt the medal textures at higher resolution for sharper rendering.
+
+
+- Multi-kill medals: moved the announcement higher, masked the light sweep to the circular medal instead of a square box, and replaced the medal textures with sharper higher-resolution art.
+
+
+- Multi-kill medals: moved the announcement higher again and replaced the ineffective hand-built sweep with the same clipped diagonal LightSweep system used by Rivals plaques.
+
+
+- Multi-kill medals: moved higher on screen, reduced medal size by 50%, added a quick light sweep on appear, and extended the on-screen hold time before fade.
+
+
+- Added the first-pass rapid multi-kill tracker using the supplied 2-10 kill medal and announcer assets.
+- Added a Manage-screen DEV KB button that feeds the exact same multi-kill counter as a real player killing blow without saving fake encounter stats.
+
+## Rivals 1.0.121
+
+- Manage: added a live Overview keybind button that shows the current binding and opens Keybindings directly to the AddOns section.
+
+
+- Keybinding: pressing Open Rivals Overview now closes Rivals when Overview is already open; from other Rivals screens it returns to Overview.
+- Keybinding UI: added a blank spacer above the Rivals row to match the existing separation below it in the AddOns section.
+
+
+- Keybindings: moved Open Rivals Overview into Blizzard's built-in AddOns section and removed the redundant standalone Rivals header row.
+
+
+- Keybindings: fixed Classic XML warnings by letting WoW auto-load the root Bindings.xml instead of loading it as a normal TOC XML file.
+
+
+- Manage: tightened Recovery/footer spacing and aligned the two bottom actions on a cleaner two-column grid.
+- Keybindings: added an unbound "Open Rivals Overview" action under AddOns > Rivals. It opens Overview without changing the user-selected Duels/World PvP carousel.
+
+
+- Manage: separated the minimap-button toggle into its own section above the screenshot controls.
+
+
+- Minimap menu: narrowed the menu, removed the redundant Open Rivals row, and now shows only the unselected Overview carousel destination plus Settings.
+- Minimap menu: added a short mouse-leave grace period before the menu closes.
+
+
+- Minimap button: moved the pixel-snapped faction crest down 1px while preserving exact horizontal centering.
+- Minimap menu: narrowed the panel, replaced backdrop chrome with exact 1px rails plus an inset dark-grey fill, and changed hover rows to neutral grey with gold text.
+
+
+- Minimap button: rebuilt the visual geometry around a 32px pixel-snapped center so the 22px faction crest, background, highlight, and outer ring all share the same center without manual nudges.
+
+
+- Minimap menu: reduced width, removed the hide action, changed row hover to a cool grey, tightened the top background inset, and made the menu open inward from the minimap button.
+- Minimap button tooltip now opens toward the center of the screen based on which side the minimap is on.
+- Minimap crest moved 1px left.
+
+
+- Minimap button: reduced the faction crest by about 5% and nudged it 1px to the right.
+
+
+- Minimap menu: changed the menu chrome to use an inset masked background so the dark fill fits the gold border cleanly.
+
+
+- Minimap button: shifted the faction crest 1px left and 2px down for a better centered fit inside the ring.
+
+
+- Restored the minimap faction crest to its original 23px size and shifted it one pixel right for better visual centering inside the double ring.
+- Restyled the minimap right-click menu to match the compact ENEMY BUFFS dropdown chrome, attached it directly to the minimap button, and changed the header to the small outlined gold RIVALS treatment used by the 1vN toast.
+
+## Rivals 1.0.107
+
+- Reduced and faction-tuned the minimap crest so the emblem sits cleanly inside the standard ring; the Alliance crest is centered on the lion's face rather than the atlas bounds.
+- Replaced the minimap right-click dropdown dependency with a self-contained Rivals menu so Open Rivals, World PvP, Duels, Settings, and Hide Minimap Button work reliably on Classic Era.
+
+## Rivals 1.0.106
+
+- Added a draggable Rivals minimap button using the gold Alliance or Horde crest from the 1vN victory toast.
+- Left-click toggles the Rivals character panel; right-click opens shortcuts for Rivals, World PvP, Duels, Settings, or hiding the button.
+- Added a Minimap option under Manage Rivals so a hidden button can be restored; its position is saved across reloads.
+
+## Rivals 1.0.105
+
+- Added Stygian Buckler's Stygian Grasp and Jagged Obsidian Shield's Silence to equipped-item proc attribution.
+- Added Skullflame Shield's triggered Drain Life and Flamestrike effects, fixing missing attribution when combat logs report those effect IDs.
+- Added regression coverage for shield proc item links, aura/damage/healing events, older saved records, and exclusion of same-name class abilities and NPC casts.
+
 ## Rivals 1.0.104
 
 Changes since 1.0.101.

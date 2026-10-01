@@ -1,0 +1,5 @@
+<Bindings>
+    <Binding name="RIVALS_OPEN_OVERVIEW" header="BLANK13" category="ADDONS">
+        Rivals_OpenOverview()
+    </Binding>
+</Bindings>

@@ -77,4 +77,31 @@ for _,candidate in ipairs(DP.ProcCatalog) do
  assert(not U.IsKnownProcEffect(candidate[1],candidate[4],npc),'NPC classified as item proc')
 end
 print('PASS: all nine classes, missing cast events, unknown effects, and every proc-catalog row')
+
+local shields = {
+ {29164,23238,'Stygian Grasp','Stygian Buckler',{'SPELL_AURA_APPLIED','SPELL_AURA_REFRESH'}},
+ {27559,22198,'Silence','Jagged Obsidian Shield',{'SPELL_AURA_APPLIED','SPELL_AURA_REFRESH'}},
+ {18817,1168,'Drain Life','Skullflame Shield',{'SPELL_DAMAGE','SPELL_HEAL'}},
+ {18818,1168,'Flamestrike','Skullflame Shield',{'SPELL_DAMAGE'}},
+}
+for _,row in ipairs(shields) do
+ for _,event in ipairs(row[5]) do
+  local proc=entry(row[1],row[3],event); proc.amount=35
+  local rec=record({proc})
+  rec.session.participants[player].portraitAppearance={items={[17]=row[2]}}
+  local resolved=U.ResolveProcItem(row[1],row[3],nil,player,rec)
+  assert(resolved and resolved.itemID==row[2],row[4]..' not resolved')
+  local text=Render(rec)
+  assert(text:find('|Hitem:'..row[2]..'|',1,true),row[4]..' missing item link')
+  assert(text:find('|cffc7a0ff['..row[3]..']',1,true),'proc color missing')
+  -- Old records with an exact unique spell ID must also render without gear snapshots.
+  assert(Render(record({proc})):find('|Hitem:'..row[2]..'|',1,true))
+  assert(not U.ResolveProcItem(row[1],row[3],nil,npc,rec))
+ end
+end
+for _,row in ipairs({{15487,'Silence'},{689,'Drain Life'},{2120,'Flamestrike'}}) do
+ assert(not U.IsKnownProcEffect(row[1],row[2],player),'class spell mistaken for shield proc')
+ assert(not U.ResolveProcItem(row[1],row[2],nil,player))
+end
+print('PASS: Stygian Buckler, Jagged Obsidian Shield, both Skullflame procs, saved records, and same-name class exclusions')
 ''')

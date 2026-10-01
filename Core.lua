@@ -1,5 +1,5 @@
 local addonName, DP = ...
-local VERSION, TRACE_LIMIT, ACTIVITY_LIMIT = "1.0.104", 1000, 200
+local VERSION, TRACE_LIMIT, ACTIVITY_LIMIT = "1.0.139", 1000, 200
 local frame = CreateFrame("Frame")
 local db, observer, tracker, parsers, ready, rating
 local seasons, selectedPeriod = {}, nil
@@ -107,6 +107,31 @@ function DP.SetProfileSharing(enabled)
     db.shareProfile = enabled and true or false
     Say("Profile summary sharing " .. (db.shareProfile and "on" or "off") .. ".")
     if DP.RefreshCharacterTab then DP.RefreshCharacterTab() end
+end
+
+function DP.MinimapButtonShown()
+    return not db or db.showMinimapButton ~= false
+end
+
+function DP.SetMinimapButtonShown(enabled)
+    if not db then return end
+    db.showMinimapButton = enabled and true or false
+    if DP.Minimap and DP.Minimap.RefreshVisibility then DP.Minimap.RefreshVisibility() end
+    if DP.RefreshDuelViews then DP.RefreshDuelViews() end
+end
+
+function DP.KillstreaksEnabled()
+    return not db or db.killstreaksEnabled ~= false
+end
+
+function DP.SetKillstreaksEnabled(enabled)
+    if not db then return end
+    db.killstreaksEnabled = enabled and true or false
+    -- A settings change always starts from a clean chain. In particular,
+    -- turning the feature off immediately removes any visible medal/caption
+    -- and prevents a partially completed chain from resuming if re-enabled.
+    if DP.MultiKill and DP.MultiKill.Reset then DP.MultiKill.Reset() end
+    if DP.RefreshDuelViews then DP.RefreshDuelViews() end
 end
 
 function DP.DuelScreenshotsEnabled()
@@ -582,6 +607,8 @@ local function Initialize()
     -- Sharing is the normal Rivals experience. Preserve an explicit legacy OFF,
     -- but migrate unset installs/settings to the new default.
     if db.shareProfile == nil then db.shareProfile = true end
+    if db.showMinimapButton == nil then db.showMinimapButton = true end
+    if db.killstreaksEnabled == nil then db.killstreaksEnabled = true end
     local player = UnitIdentity("player")
     if not player or not player.guid then Say("Player identity unavailable; capture disabled."); return end
     observer = db.observers[player.guid]
@@ -739,6 +766,7 @@ local function Initialize()
     DP.Inspect.Install()
     DP.InstallPlayerTooltip(function() return rating end)
     DP.InstallCharacterTab(DisplayRating, DisplayRecords)
+    if DP.Minimap and DP.Minimap.Initialize then DP.Minimap.Initialize(db) end
     for _, event in ipairs({"DUEL_REQUESTED", "DUEL_FINISHED", "DUEL_INBOUNDS", "DUEL_OUTOFBOUNDS",
         "DUEL_TO_THE_DEATH_REQUESTED", "CHAT_MSG_SYSTEM", "UI_INFO_MESSAGE", "UI_ERROR_MESSAGE",
         "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED", "PLAYER_TARGET_CHANGED", "UPDATE_MOUSEOVER_UNIT", "NAME_PLATE_UNIT_ADDED", "UNIT_AURA", "UNIT_LEVEL", "GROUP_ROSTER_UPDATE", "PLAYER_ENTERING_WORLD",

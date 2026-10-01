@@ -1,0 +1,19 @@
+Rivals 1.0.139 compared with GitHub main c031980 (1.0.104).
+Lua 5.1 mocked checks; no in-game rendering validation.
+PASS: character_stats_compatibility.py
+PASS: combat_item_classification.py
+PASS: combat_log_scroll.py
+PASS: combat_suspension_regression.py
+PASS: friendly_levels.py
+PASS: keybinding_overview.py
+PASS: mind_control_cap_regression.py
+PASS: multikill.py
+PASS: portrait_effects.py
+PASS: portrait_lifecycle.py
+PASS: portrait_loading.py
+PASS: portrait_test_panel.py
+PASS: portraits.py
+PASS: racial_usage.py
+PASS: updates.py
+PASS: worldpvp_detail_regression.py
+Legacy runners run.py and run_encounter_fixes.py fail identically on unchanged 1.0.104 and this release: verification.lua assertion at line 42; missing SetNormalTexture in old frame mock.

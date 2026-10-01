@@ -587,6 +587,21 @@ function DP.InstallCharacterTab(getRating, getRecords)
         return true
     end
 
+    function DP.ToggleRivalsCharacterPanel()
+        local rivalsVisible = panel:IsShown() and CharacterFrame and CharacterFrame:IsShown()
+        if rivalsVisible then
+            DP.HideRivalsCharacterPanel()
+            if not (InCombatLockdown and InCombatLockdown()) then
+                if HideUIPanel then HideUIPanel(CharacterFrame)
+                elseif CharacterFrame.Hide then CharacterFrame:Hide() end
+            elseif PaperDollFrame and PaperDollFrame.Show then
+                PaperDollFrame:Show()
+            end
+            return false
+        end
+        return DP.ShowRivalsCharacterPanel()
+    end
+
     -- Native tab/subframe switches should dismiss the Rivals overlay, but the
     -- secure Blizzard function itself remains untouched. hooksecurefunc executes
     -- our post-hook without tainting CharacterFrame_ShowSubFrame.
