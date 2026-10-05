@@ -1,0 +1,29 @@
+Rivals 1.0.143 compared with GitHub main c17ed31 (1.0.142).
+Lua 5.1 mocked checks; native visuals reviewed through user-provided screenshots and clips.
+PASS: character_stats_compatibility.py
+PASS: combat_item_classification.py
+PASS: combat_log_scroll.py
+PASS: combat_suspension_regression.py
+PASS: compact_encounters.py
+PASS: duel_portrait_loading.py
+PASS: friendly_levels.py
+PASS: history_categories.py
+PASS: keybinding_overview.py
+PASS: low_health_engagement.py
+PASS: medal_encounter_behavior.py
+PASS: mind_control_cap_regression.py
+PASS: missing_sapper_cost.py
+PASS: multikill.py
+PASS: portrait_effects.py
+PASS: portrait_lifecycle.py
+PASS: portrait_loading.py
+PASS: portrait_test_panel.py
+PASS: portraits.py
+PASS: protection_buff_display.py
+PASS: racial_usage.py
+PASS: spend_chart.py
+PASS: updates.py
+PASS: usage_capacity.py
+PASS: world_log_capacity.py
+PASS: worldpvp_detail_regression.py
+Legacy runners run.py and run_encounter_fixes.py have previously confirmed baseline failures; not used as release gates.

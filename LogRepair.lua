@@ -36,3 +36,20 @@ function DP.RepairConfirmedEncounter(store)
     end
     return changed
 end
+
+-- User-confirmed latest fall death, repaired in memory on reload.
+function DP.RepairColdbullyFall(store)
+    if not store or store.confirmedColdbullyFallRepair then return end
+    local latest
+    for _,record in ipairs(store.encounters or {}) do
+        if record.playerDied and (not latest or (record.timestamp or 0)>(latest.timestamp or 0)) then latest=record end
+    end
+    local enemy=latest and latest.enemies and latest.enemies[1]
+    if latest and latest.playerGUID=="Player-5066-01722C84" and #latest.enemies==1 and
+            enemy and tostring(enemy.name):lower():match("^[^-]+")=="coldbully" then
+        latest.playerDeathCause="FALLING"
+        latest.resultLabel,latest.resultKey="FALL DAMAGE","fall_damage"
+        latest.correctionSource="user-confirmed-fall-damage"
+        store.confirmedColdbullyFallRepair={id=latest.id,timestamp=latest.timestamp}
+    end
+end

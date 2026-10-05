@@ -2669,12 +2669,25 @@ end
 
 local function CreateDuelPortrait(frame)
     frame.portraitFrame=CreateFrame("Frame",nil,frame); frame.portraitFrame:SetSize(64,64)
-    frame.portrait=frame.portraitFrame:CreateTexture(nil,"ARTWORK"); frame.portrait:SetSize(52,52); frame.portrait:SetPoint("CENTER")
+    frame.portrait=frame.portraitFrame:CreateTexture(nil,"ARTWORK"); frame.portrait:SetSize(46,46); frame.portrait:SetPoint("CENTER")
     if frame.portrait.AddMaskTexture and frame.portraitFrame.CreateMaskTexture then
-        frame.portraitMask=frame.portraitFrame:CreateMaskTexture(); frame.portraitMask:SetTexture("Interface\\CharacterFrame\\TempPortraitAlphaMask","CLAMPTOBLACKADDITIVE","CLAMPTOBLACKADDITIVE"); frame.portraitMask:SetSize(52,52); frame.portraitMask:SetPoint("CENTER"); frame.portrait:AddMaskTexture(frame.portraitMask)
+        frame.portraitMask=frame.portraitFrame:CreateMaskTexture(); frame.portraitMask:SetTexture("Interface\\CharacterFrame\\TempPortraitAlphaMask","CLAMPTOBLACKADDITIVE","CLAMPTOBLACKADDITIVE"); frame.portraitMask:SetSize(46,46); frame.portraitMask:SetPoint("CENTER"); frame.portrait:AddMaskTexture(frame.portraitMask)
     end
-    frame.portraitModel=CreateFrame("DressUpModel",nil,frame.portraitFrame); frame.portraitModel:SetPoint("CENTER",0,-1); frame.portraitModel:SetSize(50,50); frame.portraitModel:Hide()
-    frame.portraitRing=frame.portraitFrame:CreateTexture(nil,"OVERLAY"); frame.portraitRing:SetPoint("CENTER"); frame.portraitRing:SetSize(64,64)
+    frame.portraitViewport=CreateFrame("Frame",nil,frame.portraitFrame)
+    frame.portraitViewport:SetSize(46,46); frame.portraitViewport:SetPoint("CENTER")
+    if frame.portraitViewport.SetClipsChildren then frame.portraitViewport:SetClipsChildren(true) end
+    frame.portraitModel=CreateFrame("DressUpModel",nil,frame.portraitViewport); frame.portraitModel:SetPoint("CENTER"); frame.portraitModel:SetSize(46,46); frame.portraitModel:Hide()
+    frame.portraitCoverFrame=CreateFrame("Frame",nil,frame.portraitFrame)
+    frame.portraitCoverFrame:SetAllPoints(frame.portraitFrame); frame.portraitCoverFrame:SetFrameLevel(frame.portraitFrame:GetFrameLevel()+10)
+    if DP.Portraits and DP.Portraits.AddPortraitCover then frame.portraitRoundCover=DP.Portraits.AddPortraitCover(frame.portraitCoverFrame) end
+    frame.portraitSpinnerFrame=CreateFrame("Frame",nil,frame.portraitFrame)
+    frame.portraitSpinnerFrame:SetSize(50,50); frame.portraitSpinnerFrame:SetPoint("CENTER")
+    frame.portraitSpinnerFrame.label=frame.portraitSpinnerFrame:CreateFontString(nil,"OVERLAY","GameFontNormalLarge")
+    frame.portraitSpinnerFrame.label:SetPoint("CENTER"); frame.portraitSpinnerFrame.label:SetText("…")
+    frame.portraitSpinnerFrame:Hide()
+    frame.portraitRingFrame=CreateFrame("Frame",nil,frame.portraitFrame)
+    frame.portraitRingFrame:SetAllPoints(frame.portraitFrame); frame.portraitRingFrame:SetFrameLevel(frame.portraitFrame:GetFrameLevel()+20)
+    frame.portraitRing=frame.portraitRingFrame:CreateTexture(nil,"OVERLAY"); frame.portraitRing:SetPoint("CENTER"); frame.portraitRing:SetSize(56,56)
     local ok=frame.portraitRing.SetAtlas and pcall(frame.portraitRing.SetAtlas,frame.portraitRing,"AdventureMap-combatally-ring",false)
     if not ok then frame.portraitRing:SetTexture("Interface\\Buttons\\UI-Quickslot2") end
     return frame
@@ -2682,6 +2695,9 @@ end
 
 local function ApplyDuelPortrait(frame,record)
     local identity=DuelIdentity(record)
+    -- Shared asynchronous portrait loading uses the card's opponent identity
+    -- to retain pending work and to reject retries after switching records.
+    frame.enemy=identity
     if DP.WorldPvP and DP.WorldPvP.ApplyOpponentPortrait then
         DP.WorldPvP.ApplyOpponentPortrait(frame,identity)
     else

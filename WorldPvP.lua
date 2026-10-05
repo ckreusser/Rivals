@@ -760,22 +760,34 @@ local function EnemyConsumableSpend(record)
     end
 
     local total, pricedCount, unpricedCount = 0, 0, 0
+    local categories = {}
     for _, actor in ipairs(snapshot.actors or {}) do
         local actorName = ShortName(actor.name)
         local isEnemy = (actor.guid and enemyGUIDs[actor.guid]) or
             (actorName and actorName ~= "" and enemyNames[actorName:lower()])
         if isEnemy then
+            for _, item in ipairs(actor.items or {}) do
+                local copper = math.max(0, tonumber(item.totalCopper) or
+                    (tonumber(item.unitCopper) or 0) * (tonumber(item.count) or 1))
+                local key = DP.SpendChart.Category(item)
+                categories[key] = (categories[key] or 0) + copper
+            end
             total = total + math.max(0, tonumber(actor.totalCopper) or 0)
             pricedCount = pricedCount + math.max(0, tonumber(actor.pricedCount) or 0)
             unpricedCount = unpricedCount + math.max(0, tonumber(actor.unpricedCount) or 0)
         end
     end
-    return total, unpricedCount > 0, pricedCount, unpricedCount
+    local categorized = 0
+    for _, copper in pairs(categories) do categorized = categorized + copper end
+    categories.other = (categories.other or 0) + math.max(0, total - categorized)
+    return total, unpricedCount > 0, pricedCount, unpricedCount, categories
 end
 
 local function ArchiveEnemyConsumableSpend(store, record)
     if not store or not record then return end
-    local copper, partial, pricedCount, unpricedCount = EnemyConsumableSpend(record)
+    local copper, partial, pricedCount, unpricedCount, categories = EnemyConsumableSpend(record)
+    store.enemyGoldArchivedCategories = store.enemyGoldArchivedCategories or {}
+    DP.SpendChart.Merge(store.enemyGoldArchivedCategories, categories)
     store.enemyGoldArchivedCopper = math.max(0, tonumber(store.enemyGoldArchivedCopper) or 0) + copper
     store.enemyGoldArchivedPricedCount = math.max(0, tonumber(store.enemyGoldArchivedPricedCount) or 0) + pricedCount
     store.enemyGoldArchivedUnpricedCount = math.max(0, tonumber(store.enemyGoldArchivedUnpricedCount) or 0) + unpricedCount
@@ -1079,7 +1091,8 @@ local function AppendWorldLog(session, info)
     -- The ordinary event budget must never hide the encounter's ending.
     -- Critical lifecycle events can exceed it and remain in chronological order.
     local criticalEvent = event == "PARTY_KILL" or event == "UNIT_DIED" or
-        event == "UNIT_DESTROYED" or event == "SPELL_RESURRECT"
+        event == "UNIT_DESTROYED" or event == "SPELL_RESURRECT" or
+        (event=="ENVIRONMENTAL_DAMAGE" and tonumber(info[14]) and tonumber(info[14])>=0)
     if #session.worldCombatLog >= CFG.MAX_WORLD_LOG and not criticalEvent then
         session.worldCombatTruncated = true
         return
@@ -1162,12 +1175,15 @@ local function AppendWorldLog(session, info)
         end
     elseif event == "SPELL_RESURRECT" then
         text = string.format("%s resurrected %s with %s", sourceName, destName, spellName or ("Spell " .. tostring(spellID)))
+    elseif event == "ENVIRONMENTAL_DAMAGE" then
+        text=string.format("%s took %d %s damage",destName or "Player",tonumber(info[13]) or 0,tostring(info[12] or "environmental"):lower())
     elseif event == "UNIT_DIED" or event == "UNIT_DESTROYED" then
         text = IsUnconsciousDeathEvent(info) and (destName .. " became unconscious") or (destName .. " died")
     end
     if text then
         local amount
-        if event == "SWING_DAMAGE" then amount = tonumber(info[12])
+        if event == "ENVIRONMENTAL_DAMAGE" then amount=tonumber(info[13])
+        elseif event == "SWING_DAMAGE" then amount = tonumber(info[12])
         elseif event == "SPELL_DAMAGE" or event == "RANGE_DAMAGE" or event == "SPELL_PERIODIC_DAMAGE" or
             event == "SPELL_HEAL" or event == "SPELL_PERIODIC_HEAL" then amount = tonumber(info[15]) end
         local overhealing, effectiveAmount
@@ -1176,7 +1192,9 @@ local function AppendWorldLog(session, info)
             effectiveAmount = math.max(0, (tonumber(amount) or 0) - overhealing)
         end
         local overkill, critical
-        if event == "SWING_DAMAGE" then
+        if event == "ENVIRONMENTAL_DAMAGE" then
+            overkill=tonumber(info[14])
+        elseif event == "SWING_DAMAGE" then
             overkill = tonumber(info[13])
             critical = info[18] == true
         elseif event == "SPELL_DAMAGE" or event == "RANGE_DAMAGE" or event == "SPELL_PERIODIC_DAMAGE" then
@@ -1194,6 +1212,7 @@ local function AppendWorldLog(session, info)
             sourceGUID = info[4], sourceName = sourceName,
             destGUID = info[8], destName = destName,
             event = event, spellID = spellID, spellName = spellName,
+            environmentalType = event=="ENVIRONMENTAL_DAMAGE" and info[12] or nil,
             unconscious = IsUnconsciousDeathEvent(info) and true or nil,
             itemID = combatItem and combatItem.itemID or nil, itemName = combatItem and combatItem.name or nil,
             itemQuality = combatItem and combatItem.quality or nil, itemCategory = combatItem and combatItem.category or nil,
@@ -1401,6 +1420,7 @@ function W.CompactEncounterLabel(record, key)
 end
 
 local function Outcome(record)
+    if record.playerDied and record.playerDeathCause=="FALLING" then return "FALL DAMAGE","fall_damage" end
     local enemies = record.enemyCount or 0
     local friendlies = record.friendlyCount or 1
     local kills = record.enemyDeaths or 0
@@ -1476,6 +1496,7 @@ local function HeaderOutcomeText(record)
         victory = "Victory",
         trade = "Trade",
         death = "Death",
+        fall_damage = "FALL DAMAGE",
         low_health_death = "Low-health death",
         disengaged = "Disengaged",
         bubble_hearth = "Bubble Hearthed",
@@ -1539,6 +1560,7 @@ local function ResultColor(key)
         kills = "|cffffd56a", -- gold
         trade = "|cffeb93df", -- pink
         death = "|cffff7070", -- red
+        fall_damage = "|cff92b7d0", -- environmental death
         low_health_death = "|cffffbb91", -- peach
         gank = "|cffc9a0ff", -- purple
         lowbie_gank = "|cffff91bb", -- rose
@@ -1689,6 +1711,7 @@ local function BuildRecord(session, reason)
         enemyDeaths = deaths,
         playerDied = session.playerDied and true or false,
         playerDiedAt = session.playerDiedAt,
+        playerDeathCause = session.playerDeathCause,
         engagementHealthPercent = session.engagementHealthPercent,
         lowHealthEngagement = session.lowHealthEngagement,
         killingBlows = session.killingBlows or 0,
@@ -2069,6 +2092,7 @@ function W.Initialize(observer, db, callbacks)
     -- Block combat drops, including reinforcements joining during the block.
     W.RepairMindControlSplitEncounters(observer.worldPvP)
     if DP.RepairConfirmedEncounter then DP.RepairConfirmedEncounter(observer.worldPvP) end
+    if DP.RepairColdbullyFall then DP.RepairColdbullyFall(observer.worldPvP) end
 
     -- Reclassify older 0.21.x encounters when their saved combat log has
     -- enough evidence to distinguish actual simultaneous opposition from a
@@ -2112,7 +2136,7 @@ function W.Initialize(observer, db, callbacks)
         end
         RebuildPressureEvidence(record)
         RebuildFriendlyContributionEvidence(record)
-        if record.outcomeModelVersion ~= 6 then
+        if record.playerDeathCause=="FALLING" or record.outcomeModelVersion ~= 6 then
             BubbleHearthEnemy(record)
             record.resultLabel, record.resultKey = Outcome(record)
             record.outcomeModelVersion = 6
@@ -2522,6 +2546,9 @@ function W.Combat(playerGUID)
     -- shifting forms). The screenshot is armed only after PARTY_KILL / UNIT_DIED
     -- confirms the opponent actually died below.
     if IsLethalDamageEvent(info) then
+        if info[8]==playerGUID then
+            session.playerDeathCause=event=="ENVIRONMENTAL_DAMAGE" and info[12]=="FALLING" and "FALLING" or nil
+        end
         local lethalEnemy = session.enemies[info[8]]
         if lethalEnemy and info[4] == playerGUID then
             local lethalSpellID, lethalSpellName = CombatSpellInfo(info)
@@ -3575,8 +3602,15 @@ function W.Summary()
         enemyGoldPricedCount = math.max(0, tonumber(store and store.enemyGoldArchivedPricedCount) or 0),
         enemyGoldUnpricedCount = math.max(0, tonumber(store and store.enemyGoldArchivedUnpricedCount) or 0)}
     local streak, rivals, zones, rivalStats = 0, {}, {}, {}
+    summary.enemyGoldCategories = {}
+    DP.SpendChart.Merge(summary.enemyGoldCategories, store and store.enemyGoldArchivedCategories)
+    local archivedCategorized = 0
+    for _, copper in pairs(summary.enemyGoldCategories) do archivedCategorized = archivedCategorized + copper end
+    summary.enemyGoldCategories.other = (summary.enemyGoldCategories.other or 0) +
+        math.max(0, summary.enemyGoldSpentCopper - archivedCategorized)
     for _, record in ipairs(W.GetEncounters()) do
-        local enemyCopper, enemyPartial, enemyPriced, enemyUnpriced = EnemyConsumableSpend(record)
+        local enemyCopper, enemyPartial, enemyPriced, enemyUnpriced, categories = EnemyConsumableSpend(record)
+        DP.SpendChart.Merge(summary.enemyGoldCategories, categories)
         summary.enemyGoldSpentCopper = summary.enemyGoldSpentCopper + enemyCopper
         summary.enemyGoldPricedCount = summary.enemyGoldPricedCount + enemyPriced
         summary.enemyGoldUnpricedCount = summary.enemyGoldUnpricedCount + enemyUnpriced
@@ -3615,12 +3649,12 @@ function W.Summary()
                 -- player. Matchup death credit therefore means the rival was an
                 -- enemy participant in an encounter where you died, consistent
                 -- with the existing World matchup record.
-                if record.playerDied then r.deaths = r.deaths + 1 end
+                if record.playerDied and record.resultKey~="fall_damage" then r.deaths = r.deaths + 1 end
                 local soloContested = record.friendlyCount == 1 and record.enemyCount == 1 and
                     (record.pressureModelVersion ~= 1 or enemy.pressuredPlayer == true) and not GankKind(record, enemy)
                 if soloContested then
                     if enemy.died then r.soloKills = r.soloKills + 1 end
-                    if record.playerDied and record.resultKey ~= "low_health_death" then r.soloDeaths = r.soloDeaths + 1 end
+                    if record.playerDied and record.resultKey ~= "fall_damage" and record.resultKey ~= "low_health_death" then r.soloDeaths = r.soloDeaths + 1 end
                 end
             end
         end
@@ -3628,7 +3662,7 @@ function W.Summary()
         if contesting == nil then contesting = record.enemyCount or 0 end -- legacy records
         if record.friendlyCount == 1 and contesting == 1 then
             if record.resultKey == "victory" then summary.soloWins = summary.soloWins + 1
-            elseif record.playerDied and record.resultKey ~= "low_health_death" then summary.soloLosses = summary.soloLosses + 1 end
+            elseif record.playerDied and record.resultKey ~= "fall_damage" and record.resultKey ~= "low_health_death" then summary.soloLosses = summary.soloLosses + 1 end
         end
         if record.resultKey == "outnumbered_victory" then
             summary.outnumberedVictories = summary.outnumberedVictories + 1
@@ -3659,19 +3693,8 @@ function W.Summary()
         summary.favoriteZoneKills = best.kills
     end
 
-    local mostKilled, nemesis
-    for _, r in pairs(rivalStats) do
-        if r.kills > 0 and (not mostKilled or r.kills > mostKilled.kills or
-            (r.kills == mostKilled.kills and r.encounters > mostKilled.encounters) or
-            (r.kills == mostKilled.kills and r.encounters == mostKilled.encounters and r.lastAt > mostKilled.lastAt)) then
-            mostKilled = r
-        end
-        if r.deaths > 0 and (not nemesis or r.deaths > nemesis.deaths or
-            (r.deaths == nemesis.deaths and r.encounters > nemesis.encounters) or
-            (r.deaths == nemesis.deaths and r.encounters == nemesis.encounters and r.lastAt > nemesis.lastAt)) then
-            nemesis = r
-        end
-    end
+    summary.topMostKilled,summary.topNemeses=DP.RivalChart.Rank(rivalStats)
+    local mostKilled,nemesis=summary.topMostKilled[1],summary.topNemeses[1]
     if mostKilled then
         summary.mostKilledName, summary.mostKilledClass = mostKilled.name, mostKilled.class
         summary.mostKilledKills, summary.mostKilledDeaths = mostKilled.kills, mostKilled.deaths
@@ -3704,12 +3727,12 @@ function W.BuildMatchups()
             if enemy.spec and enemy.spec.label and (record.timestamp or 0) >= (entry.lastAt or 0) then entry.spec = enemy.spec.label end
             entry.lastAt = math.max(entry.lastAt, record.timestamp or 0)
             if enemy.died then entry.kills = entry.kills + 1 end
-            if record.playerDied then entry.deaths = entry.deaths + 1 end
+            if record.playerDied and record.resultKey~="fall_damage" then entry.deaths = entry.deaths + 1 end
             local soloContested = record.friendlyCount == 1 and record.enemyCount == 1 and
                 (record.pressureModelVersion ~= 1 or enemy.pressuredPlayer == true) and not GankKind(record, enemy)
             if soloContested then
                 if enemy.died then entry.soloKills = entry.soloKills + 1 end
-                if record.playerDied and record.resultKey ~= "low_health_death" then entry.soloDeaths = entry.soloDeaths + 1 end
+                if record.playerDied and record.resultKey ~= "fall_damage" and record.resultKey ~= "low_health_death" then entry.soloDeaths = entry.soloDeaths + 1 end
             end
             data.byOpponent[key] = data.byOpponent[key] or {}
             data.byOpponent[key][#data.byOpponent[key] + 1] = record
@@ -3720,7 +3743,7 @@ function W.BuildMatchups()
             class.encounters = class.encounters + 1
             class.rivals[key] = true
             if enemy.died then class.kills = class.kills + 1 end
-            if record.playerDied then class.deaths = class.deaths + 1 end
+            if record.playerDied and record.resultKey~="fall_damage" then class.deaths = class.deaths + 1 end
             data.byClass[classKey] = data.byClass[classKey] or {}
             data.byClass[classKey][#data.byClass[classKey] + 1] = record
         end
@@ -4236,33 +4259,18 @@ function W.InstallOverview(overview, duelPage)
         GameTooltip:AddLine("Kills against lower-level players.", 1, 1, 1, true)
         GameTooltip:AddLine(string.format("%d total • %d were 5+ levels below", summary.ganks or 0, summary.lowbieGanks or 0), 1, .68, .40)
     end)
-    StatTooltip(mostBox, "Most Killed", function(summary)
-        if summary.mostKilledName then
-            GameTooltip:AddLine(DP.Theme.ClassName(summary.mostKilledName, summary.mostKilledClass), 1, 1, 1)
-            GameTooltip:AddLine(string.format("World PvP |cff65e6ad%d|r-|cffff8888%d|r    Solo |cff65e6ad%d|r-|cffff8888%d|r    %d %s",
-                summary.mostKilledKills or 0, summary.mostKilledDeaths or 0,
-                summary.mostKilledSoloKills or 0, summary.mostKilledSoloDeaths or 0,
-                summary.mostKilledEncounters or 0, (summary.mostKilledEncounters or 0) == 1 and "encounter" or "encounters"), .72, .76, .82)
-        else
-            GameTooltip:AddLine("No rival kills recorded yet.", .72, .76, .82)
-        end
-        GameTooltip:AddLine(" ")
-        GameTooltip:AddLine("Nemesis", 1, .82, 0)
-        if summary.nemesisName then
-            GameTooltip:AddLine(DP.Theme.ClassName(summary.nemesisName, summary.nemesisClass), 1, 1, 1)
-            GameTooltip:AddLine(string.format("World PvP |cff65e6ad%d|r-|cffff8888%d|r    Solo |cff65e6ad%d|r-|cffff8888%d|r    %d %s",
-                summary.nemesisKills or 0, summary.nemesisDeaths or 0,
-                summary.nemesisSoloKills or 0, summary.nemesisSoloDeaths or 0,
-                summary.nemesisEncounters or 0, (summary.nemesisEncounters or 0) == 1 and "encounter" or "encounters"), .72, .76, .82)
-            GameTooltip:AddLine("Deaths may be encounter-relative.", .62, .66, .72)
-        else
-            GameTooltip:AddLine("No World PvP deaths recorded yet.", .72, .76, .82)
-        end
-    end, 1, .82, 0)
-    StatTooltip(goldBox, "Enemy gold spent", function(summary)
-        GameTooltip:AddLine("Estimated value of tracked consumables used by enemy Rivals against you.", 1, 1, 1, true)
-        GameTooltip:AddLine(string.format("Lifetime total: %s", EnemyGoldText(summary.enemyGoldSpentCopper, summary.enemyGoldSpentPartial, false)), 1, .82, .42)
+    mostBox:SetScript("OnEnter",function(self)
+        GameTooltip:Hide();DP.RivalChart.Show(self,W.Summary())
     end)
+    mostBox:SetScript("OnLeave",DP.RivalChart.Hide)
+    mostBox:SetScript("OnHide",DP.RivalChart.Hide)
+    goldBox:SetScript("OnEnter", function(self)
+        GameTooltip:Hide()
+        local summary = W.Summary()
+        DP.SpendChart.Show(self, summary.enemyGoldCategories, summary.enemyGoldSpentCopper)
+    end)
+    goldBox:SetScript("OnLeave", DP.SpendChart.Hide)
+    goldBox:SetScript("OnHide", DP.SpendChart.Hide)
     W.overviewLowerCard = lowerCard
 
     local note = world:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
