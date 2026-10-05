@@ -3,15 +3,15 @@ local V = {}
 DP.Views = V
 
 function V.Mode(record)
-    if record.modelVersion ~= 3 then return "Legacy" end
-    if record.duelMode == "rated" then return "Rated" end
-    if record.modeReason == "Casual preference" then return "Casual" end
-    return "Unconfirmed"
+    if record.modelVersion == 3 and record.duelMode == "rated" then return "Rated" end
+    -- Unconfirmed and legacy observations remain history-only casual records;
+    -- grouping them here does not change rating eligibility or saved evidence.
+    return "Casual"
 end
 
 function V.RecordTotals(records)
     local totals = {}
-    for _, label in ipairs({"Rated", "Casual", "Unconfirmed", "Legacy"}) do totals[label] = {wins = 0, losses = 0} end
+    for _, label in ipairs({"Rated", "Casual"}) do totals[label] = {wins = 0, losses = 0} end
     for _, record in ipairs(records) do
         if (record.modelVersion == 1 or record.modelVersion == 2 or record.modelVersion == 3) and record.status == "matched-request-history-only" then
             local bucket = totals[V.Mode(record)]
@@ -38,7 +38,7 @@ end
 
 function V.ModeDetails(records)
     local totals, lines = V.RecordTotals(records), {}
-    for _, mode in ipairs({"Rated", "Casual", "Unconfirmed", "Legacy"}) do
+    for _, mode in ipairs({"Rated", "Casual"}) do
         local t = totals[mode]
         lines[#lines + 1] = string.format("%s: %d-%d", mode, t.wins, t.losses)
     end
@@ -247,7 +247,7 @@ function DP.InstallViews(panel, getRating, getRecords, overview)
     local body = CreateFrame("Frame", nil, panel)
     body:SetAllPoints(panel)
     local current, page, filter, filterLabel, filterSource = "Overview", 1
-    local modes, modeIndex, establishedOnly, leaderboardSort = {"All", "Rated", "Casual", "Unconfirmed", "Legacy"}, 1, false, "rating"
+    local modes, modeIndex, establishedOnly, leaderboardSort = {"All", "Rated", "Casual"}, 1, false, "rating"
     local historySource, matchupSource = "all", "duels"
     local cached, cachedCount, cachedRating
     local nav, rows = {}, {}
@@ -315,7 +315,7 @@ function DP.InstallViews(panel, getRating, getRecords, overview)
     local detailsTitle = Label(details, -111, "GameFontNormal")
     detailsTitle:SetText("Record details")
     local detailTiles = {}
-    for i, name in ipairs({"Rated", "Casual", "Unconfirmed", "Legacy"}) do
+    for i, name in ipairs({"Rated", "Casual"}) do
         local x, y = 30 + ((i - 1) % 2) * 150, -144 - math.floor((i - 1) / 2) * 57
         DP.Theme.Fill(details, x, y, 142, 51, .055, .075, .095)
         DP.Theme.Border(details, x, y, 142, 51)
@@ -409,7 +409,18 @@ function DP.InstallViews(panel, getRating, getRecords, overview)
         "Minimap button",
         "Shows the draggable Rivals faction button around the minimap.")
 
-    ManageRowLabel("Killstreak medals", 42, -281, 142)
+    ManageRowLabel("Killstreak medals", 42, -281, 108)
+    local killstreakPosition = Button(manage, "Move", 154, -278, 66, function()
+        if DP.MultiKill and DP.MultiKill.TogglePositioning then DP.MultiKill.TogglePositioning() end
+    end)
+    killstreakPosition:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Move killstreak medals")
+        GameTooltip:AddLine("Opens a lightweight HUD editor using the real medal feed as a preview. Drag it anywhere on screen, then right-click the preview to finish.", 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    killstreakPosition:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
     local killstreaks = OptionCheckbox("Enabled", 228, -278,
         function() return DP.KillstreaksEnabled and DP.KillstreaksEnabled() or false end,
         DP.SetKillstreaksEnabled,
@@ -480,17 +491,15 @@ function DP.InstallViews(panel, getRating, getRecords, overview)
     -- one shared grid instead of leaving the tabs inset farther than the rows.
     local matchups = DP.Theme.DataTab(body, "Opponents", 18, -137, 147, function() Select("Opponents") end)
     local classes = DP.Theme.DataTab(body, "Classes", 165, -137, 146, function() Select("Classes") end)
-    local modeLabels = {All = "All modes", Rated = "Rated", Casual = "Casual",
-        Unconfirmed = "Unconfirmed", Legacy = "Legacy"}
+    local modeLabels = {All = "All modes", Rated = "Rated", Casual = "Casual"}
     local historySourceButton = DP.Theme.DropDown(body, 30, -104, 142,
         function()
-            return {{text = "All encounters", value = "all"}, {text = "World PvP", value = "world"},
-                {text = "Starred", value = "starred"}, {text = "All duels", value = "duels"}, {text = "Rated duels", value = "rated"},
-                {text = "Casual duels", value = "casual"}, {text = "Unconfirmed duels", value = "unconfirmed"},
-                {text = "Legacy duels", value = "legacy"}}
+            return {{text = "All encounters", value = "all"}, {text = "Starred", value = "starred"},
+                {text = "World PvP", value = "world"}, {text = "All duels", value = "duels"},
+                {text = "Rated duels", value = "rated"}, {text = "Casual duels", value = "casual"}}
         end,
         function(value)
-            local modeFor = {duels = "All", rated = "Rated", casual = "Casual", unconfirmed = "Unconfirmed", legacy = "Legacy"}
+            local modeFor = {duels = "All", rated = "Rated", casual = "Casual"}
             if value == "world" or value == "all" or value == "starred" then
                 historySource, modeIndex = value, 1
             else
@@ -653,6 +662,7 @@ function DP.InstallViews(panel, getRating, getRecords, overview)
         shareOff = shareOff,
         minimapButton = minimapButton,
         killstreaks = killstreaks,
+        killstreakPosition = killstreakPosition,
         overviewKeybind = overviewKeybind,
         duelScreenshot = duelScreenshot,
         worldScreenshot = worldScreenshot,
@@ -818,7 +828,7 @@ function DP.InstallViews(panel, getRating, getRecords, overview)
         if duelHistoryLike then items = V.FilterHistory(items, modes[modeIndex]) end
         refreshUI.historySourceButton:SetShown(current == "History")
         if refreshUI.historySourceButton.SetAnchor and current == "History" then
-            refreshUI.historySourceButton:SetAnchor(18, -104)
+            refreshUI.historySourceButton:SetAnchor(30, -104)
         end
         local historyFilterValue, historyFilterLabel = historySource, "All encounters"
         if historySource == "world" then
@@ -827,8 +837,8 @@ function DP.InstallViews(panel, getRating, getRecords, overview)
             historyFilterValue, historyFilterLabel = "starred", "Starred"
         elseif historySource == "duels" then
             local mode = modes[modeIndex]
-            local valueFor = {All = "duels", Rated = "rated", Casual = "casual", Unconfirmed = "unconfirmed", Legacy = "legacy"}
-            local labelFor = {All = "All duels", Rated = "Rated duels", Casual = "Casual duels", Unconfirmed = "Unconfirmed duels", Legacy = "Legacy duels"}
+            local valueFor = {All = "duels", Rated = "rated", Casual = "casual"}
+            local labelFor = {All = "All duels", Rated = "Rated duels", Casual = "Casual duels"}
             historyFilterValue, historyFilterLabel = valueFor[mode] or "duels", labelFor[mode] or "All duels"
         end
         refreshUI.historySourceButton:SetSelectedValue(historyFilterValue, historyFilterLabel)
@@ -887,7 +897,7 @@ function DP.InstallViews(panel, getRating, getRecords, overview)
         refreshUI.clear:SetShown(current == "MatchupDetail")
         local slice, total
         local pageSize = (current == "Interrupted" or current == "Accepted") and 3 or
-            worldMatchupDetail and 4 or current == "History" and (historySource == "duels" and 6 or 4) or 5
+            worldMatchupDetail and 3 or current == "History" and (historySource == "duels" and 6 or 4) or 5
         page = math.max(1, math.min(page, math.max(1, #items - pageSize + 1)))
         slice = {}
         for j = page, math.min(#items, page + pageSize - 1) do slice[#slice + 1] = items[j] end
@@ -927,7 +937,7 @@ function DP.InstallViews(panel, getRating, getRecords, overview)
                 worldMatchupDetail and 188 or matchupTabs and 159 or 168
             local roomyHistory = current == "History" and historySource ~= "duels"
             local roomyWorldDetail = worldMatchupDetail
-            local rowStep = roomyHistory and 60 or roomyWorldDetail and 50 or (current == "History" or current == "Leaderboard" or matchupTabs) and 39 or 42
+            local rowStep = roomyHistory and 60 or roomyWorldDetail and 56 or (current == "History" or current == "Leaderboard" or matchupTabs) and 39 or 42
             local historyRow = current == "History"
             -- History and Matchups use the same left guide. Matchups was visibly
             -- shifted right relative to the rest of the pane, especially once the
@@ -937,15 +947,15 @@ function DP.InstallViews(panel, getRating, getRecords, overview)
             -- Keep the plaque right edge at the established guide. With the
             -- scrollbar at x=313 this leaves a small, even visual seam
             -- instead of the oversized gap visible in the previous build.
-            local rowRight = 311
+            local rowRight = worldMatchupDetail and #items <= pageSize and 331 or 311
             local rowWidth = rowRight - rowX
             row:SetPoint("TOPLEFT", rowX, -firstRowY - (i - 1) * rowStep)
-            row:SetSize(rowWidth, roomyHistory and 58 or roomyWorldDetail and 48 or 40)
+            row:SetSize(rowWidth, roomyHistory and 58 or roomyWorldDetail and 54 or 40)
             row.first:ClearAllPoints(); row.first:SetPoint("TOPLEFT", 8, -6)
-            row.second:ClearAllPoints(); row.second:SetPoint("TOPLEFT", 8, roomyWorldDetail and -21 or -25)
+            row.second:ClearAllPoints(); row.second:SetPoint("TOPLEFT", 8, roomyWorldDetail and -22 or -25)
             row.first:SetWidth(rowWidth - 16); row.second:SetWidth(rowWidth - 16)
             if current == "Interrupted" or current == "Accepted" then row.second:ClearAllPoints(); row.second:SetPoint("TOPLEFT", 8, -17) end
-            row.mode:ClearAllPoints(); row.mode:SetPoint("TOPLEFT", 8, roomyWorldDetail and -35 or -29); row.mode:SetWidth(rowWidth - 16); row.mode:SetJustifyH("LEFT")
+            row.mode:ClearAllPoints(); row.mode:SetPoint("TOPLEFT", 8, roomyWorldDetail and -38 or -29); row.mode:SetWidth(rowWidth - 16); row.mode:SetJustifyH("LEFT")
             local item = slice[i]
             row:SetShown(item ~= nil)
             row.destination = nil
@@ -980,7 +990,7 @@ function DP.InstallViews(panel, getRating, getRecords, overview)
                     end
                     row.starButton:Show()
                     StyleHistoryStar(row.starButton.icon, item)
-                    row.first:SetText(DP.WorldPvP and DP.WorldPvP.HistoryOpponentLine and DP.WorldPvP.HistoryOpponentLine(item) or
+                    row.first:SetText(DP.WorldPvP and DP.WorldPvP.HistoryOpponentLine and DP.WorldPvP.HistoryOpponentLine(item, current == "MatchupDetail" and filter and filter.world and filter.kind == "opponent" and filter.key or nil) or
                         (color .. (item.resultLabel or "WORLD PVP") .. "|r"))
                     row.amount:SetText("")
                     local headcount = DP.WorldPvP and DP.WorldPvP.EncounterHeadcount and DP.WorldPvP.EncounterHeadcount(item) or string.format("%dv%d", item.friendlyCount or 1, item.enemyCount or 0)
@@ -1217,6 +1227,6 @@ function DP.InstallViews(panel, getRating, getRecords, overview)
         historyMode = historyMode, historySource = historySourceButton, matchupSource = matchupSourceButton, boardFilter = boardFilter, boardSort = boardSort, clearProfiles = clearProfiles, scrollbar = scrollbar, body = body,
         details = details, detailsBack = detailsBack, graphBack = graphBack, period = periodButton, overviewPeriod = overviewPeriodButton, mode = modeButton, manageBack = manageBack, empty = empty, classes = classes, matchups = matchups,
         manage = manage, shareOn = shareOn, shareOff = shareOff,
-        minimapButton = minimapButton, killstreaks = killstreaks, overviewKeybind = overviewKeybind, duelScreenshot = duelScreenshot, worldScreenshot = worldScreenshot, recoveryOpen = recoveryOpen}
+        minimapButton = minimapButton, killstreaks = killstreaks, killstreakPosition = killstreakPosition, overviewKeybind = overviewKeybind, duelScreenshot = duelScreenshot, worldScreenshot = worldScreenshot, recoveryOpen = recoveryOpen}
     refresh()
 end

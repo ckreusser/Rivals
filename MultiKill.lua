@@ -3,7 +3,7 @@ local _, DP = ...
 local M = {}
 DP.MultiKill = M
 
-local WINDOW_SECONDS = 8
+local WINDOW_SECONDS = 12
 
 -- Reach-style medal feed presentation.
 -- The newest medal always occupies the LEFT-most slot, matching Reach: the
@@ -20,6 +20,7 @@ local MEDAL_FADE_START = 3.25
 local CAPTION_LIFETIME = 2.50
 local CAPTION_FADE_START = 1.90
 local KILL_FONT = "Fonts\\ARIALN.TTF"
+local DEFAULT_POSITION_X, DEFAULT_POSITION_Y = 56, 0
 
 -- Reach's cool blue HUD text.
 local TEXT_R, TEXT_G, TEXT_B = 0.36, 0.66, 0.82
@@ -38,7 +39,17 @@ local medals = {
 }
 
 local count, lastKillAt = 0, nil
+local eligibleCount, lastEligibleKillAt = 0, nil
 local announcement
+
+function M.IsEligibleLevel(level, playerLevel)
+    level, playerLevel = tonumber(level), tonumber(playerLevel)
+    if not level or level <= 0 or not playerLevel or playerLevel <= 0 then return false end
+    local gray = playerLevel <= 5 and 0 or playerLevel <= 39 and
+        (playerLevel - math.floor(playerLevel / 10) - 5) or
+        (playerLevel - math.floor(playerLevel / 5) - 1)
+    return level > gray
+end
 
 local function TexturePath(asset)
     return "Interface\\AddOns\\Rivals\\Textures\\MultiKill\\" .. asset .. ".tga"
@@ -80,6 +91,21 @@ local function ResetMedalSlot(slot, index)
     slot:Hide()
 end
 
+local function SavedPosition()
+    if DP.GetKillstreakPosition then
+        local x, y = DP.GetKillstreakPosition()
+        if type(x) == "number" and type(y) == "number" then return x, y end
+    end
+    return DEFAULT_POSITION_X, DEFAULT_POSITION_Y
+end
+
+local function ApplyPosition(frame)
+    if not frame or not UIParent then return end
+    local x, y = SavedPosition()
+    frame:ClearAllPoints()
+    frame:SetPoint("LEFT", UIParent, "LEFT", x, y)
+end
+
 local function EnsureAnnouncement()
     if announcement or not UIParent then return announcement end
 
@@ -87,10 +113,14 @@ local function EnsureAnnouncement()
 
     local frame = CreateFrame("Frame", "RivalsMultiKillAnnouncement", UIParent)
     frame:SetSize(rowWidth + 8, 76)
-    -- The complete medal/caption unit sits on the left side, vertically centered.
-    frame:SetPoint("LEFT", UIParent, "LEFT", 56, 0)
+    -- Default is the Reach-like left/mid-screen placement, but the user may
+    -- reposition the complete medal/caption unit with Rivals' lightweight HUD
+    -- position editor.
+    ApplyPosition(frame)
     frame:SetFrameStrata("DIALOG")
     frame:SetFrameLevel(120)
+    frame:SetMovable(true)
+    if frame.SetClampedToScreen then frame:SetClampedToScreen(true) end
     frame:EnableMouse(false)
     frame.activeMedals = {}
     frame.medalSlots = {}
@@ -140,6 +170,71 @@ local function EnsureAnnouncement()
     frame.label:SetJustifyV("TOP")
     frame.label:SetFont(KILL_FONT, 20, "")
     frame.label:SetTextColor(TEXT_R, TEXT_G, TEXT_B, 1)
+
+    -- Lightweight Rivals-specific Edit Mode.  It deliberately edits the exact
+    -- live announcement frame rather than a detached proxy, so the saved point
+    -- is precisely where the real medals will appear.
+    frame.positionOverlay = CreateFrame("Frame", nil, frame)
+    frame.positionOverlay:SetAllPoints(frame)
+    frame.positionOverlay:SetFrameLevel(frame:GetFrameLevel() + 8)
+    frame.positionOverlay:EnableMouse(true)
+    frame.positionOverlay:RegisterForDrag("LeftButton")
+    frame.positionOverlay:Hide()
+
+    local overlayBg = frame.positionOverlay:CreateTexture(nil, "BACKGROUND")
+    overlayBg:SetPoint("TOPLEFT", frame.positionOverlay, "TOPLEFT", -7, 7)
+    overlayBg:SetPoint("BOTTOMRIGHT", frame.positionOverlay, "BOTTOMRIGHT", 7, -7)
+    overlayBg:SetColorTexture(0.02, 0.10, 0.14, 0.28)
+
+    local function Edge(point1, point2, x1, y1, x2, y2, width, height)
+        local edge = frame.positionOverlay:CreateTexture(nil, "OVERLAY")
+        edge:SetColorTexture(0.35, 0.86, 1.0, 0.95)
+        edge:SetPoint(point1, frame.positionOverlay, point1, x1, y1)
+        if point2 then
+            edge:SetPoint(point2, frame.positionOverlay, point2, x2, y2)
+        else
+            edge:SetSize(width, height)
+        end
+        return edge
+    end
+    Edge("TOPLEFT", "TOPRIGHT", -7, 7, 7, 7, nil, nil):SetHeight(1)
+    Edge("BOTTOMLEFT", "BOTTOMRIGHT", -7, -7, 7, -7, nil, nil):SetHeight(1)
+    Edge("TOPLEFT", "BOTTOMLEFT", -7, 7, -7, -7, nil, nil):SetWidth(1)
+    Edge("TOPRIGHT", "BOTTOMRIGHT", 7, 7, 7, -7, nil, nil):SetWidth(1)
+
+    frame.positionOverlay.title = frame.positionOverlay:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    frame.positionOverlay.title:SetPoint("BOTTOMLEFT", frame.positionOverlay, "TOPLEFT", -5, 10)
+    frame.positionOverlay.title:SetText("KILLSTREAK MEDALS")
+
+    frame.positionOverlay.help = frame.positionOverlay:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    frame.positionOverlay.help:SetPoint("TOPLEFT", frame.positionOverlay, "BOTTOMLEFT", -5, -10)
+    frame.positionOverlay.help:SetText("Drag to move  •  Right-click to finish")
+
+    local function SaveDraggedPosition(self)
+        local owner = self:GetParent()
+        if not owner or not UIParent then return end
+        owner:StopMovingOrSizing()
+        local left = owner:GetLeft()
+        local _, centerY = owner:GetCenter()
+        local parentLeft = UIParent:GetLeft() or 0
+        local _, parentCenterY = UIParent:GetCenter()
+        parentCenterY = parentCenterY or ((UIParent:GetHeight() or 0) * 0.5)
+        if left and centerY and DP.SetKillstreakPosition then
+            DP.SetKillstreakPosition(left - parentLeft, centerY - parentCenterY)
+        end
+        ApplyPosition(owner)
+    end
+
+    frame.positionOverlay:SetScript("OnDragStart", function(self)
+        local owner = self:GetParent()
+        if owner and owner.editingPosition then owner:StartMoving() end
+    end)
+    frame.positionOverlay:SetScript("OnDragStop", SaveDraggedPosition)
+    frame.positionOverlay:SetScript("OnMouseUp", function(self, button)
+        if button == "RightButton" and self:GetParent().editingPosition then
+            M.EndPositioning()
+        end
+    end)
 
     local function RefreshSlots(self, now)
         local active = self.activeMedals
@@ -245,6 +340,7 @@ local function EnsureAnnouncement()
     end
 
     frame:SetScript("OnUpdate", function(self)
+        if self.editingPosition then return end
         if not GetTime then return end
         local now = GetTime()
         RefreshSlots(self, now)
@@ -264,6 +360,12 @@ local function ShowMedal(medal)
     if not medal then return end
     local frame = EnsureAnnouncement()
     if not frame then return end
+    -- A real killing blow takes precedence over position editing. Keep the
+    -- just-saved location, close the editor, and show the real medal there.
+    if frame.editingPosition then
+        M.EndPositioning()
+        frame = EnsureAnnouncement()
+    end
 
     local now = GetTime and GetTime() or 0
     local active = frame.activeMedals
@@ -289,10 +391,75 @@ local function ShowMedal(medal)
     end
 end
 
+function M.ApplySavedPosition()
+    local frame = EnsureAnnouncement()
+    ApplyPosition(frame)
+end
+
+function M.IsPositioning()
+    return announcement and announcement.editingPosition and true or false
+end
+
+function M.BeginPositioning()
+    local frame = EnsureAnnouncement()
+    if not frame then return end
+    if frame.editingPosition then return end
+
+    M.Reset()
+    ApplyPosition(frame)
+    frame.editingPosition = true
+    frame:EnableMouse(false)
+
+    -- Static preview: newest medal on the left with older medals to the right,
+    -- exactly matching the real feed's footprint. No sounds or animation fire.
+    local preview = {medals[5], medals[4], medals[3]}
+    for i = 1, MAX_VISIBLE_MEDALS do
+        local slot = frame.medalSlots[i]
+        ResetMedalSlot(slot, i)
+        local medal = preview[i]
+        if medal then
+            slot.icon:SetTexture(TexturePath(medal.asset), nil, nil, "TRILINEAR")
+            slot:SetScale(1)
+            slot:SetAlpha(1)
+            slot:Show()
+        end
+    end
+    frame.labelShadow:SetText(medals[5].name)
+    frame.label:SetText(medals[5].name)
+    frame.labelAnchor:SetAlpha(1)
+    frame.labelAnchor:Show()
+    frame.positionOverlay:Show()
+    frame:Show()
+end
+
+function M.EndPositioning()
+    local frame = announcement
+    if not frame or not frame.editingPosition then return end
+    frame.editingPosition = false
+    if frame.positionOverlay then frame.positionOverlay:Hide() end
+    frame:EnableMouse(false)
+    M.Reset()
+end
+
+function M.TogglePositioning()
+    if M.IsPositioning() then M.EndPositioning() else M.BeginPositioning() end
+end
+
+function M.ResetPosition()
+    if DP.ResetKillstreakPosition then DP.ResetKillstreakPosition() end
+    if announcement and announcement.editingPosition then
+        ApplyPosition(announcement)
+    end
+end
+
 function M.Reset()
     count = 0
     lastKillAt = nil
+    eligibleCount, lastEligibleKillAt = 0, nil
     if announcement then
+        announcement.editingPosition = false
+        if announcement.positionOverlay then announcement.positionOverlay:Hide() end
+        announcement:EnableMouse(false)
         announcement.activeMedals = {}
         announcement.captionStartedAt = nil
         for i = 1, #(announcement.medalSlots or {}) do
@@ -308,7 +475,7 @@ function M.GetCount()
     return count
 end
 
-function M.OnKillingBlow()
+function M.OnKillingBlow(level, playerLevel, persist)
     -- This is the single gate for the entire killstreak feature: chain
     -- tracking, Reach medal feed, captions, and announcer sounds.
     if DP.KillstreaksEnabled and not DP.KillstreaksEnabled() then return 0 end
@@ -321,8 +488,33 @@ function M.OnKillingBlow()
     end
     lastKillAt = now
 
+    -- Persist a separate chain containing only known, non-gray victims.
+    -- Gray kills still animate, but cannot bridge or inflate earned medals.
+    if persist and M.IsEligibleLevel(level, playerLevel) then
+        eligibleCount = lastEligibleKillAt and (now - lastEligibleKillAt) <= WINDOW_SECONDS and (eligibleCount + 1) or 1
+        lastEligibleKillAt = now
+        local earned = medals[eligibleCount]
+        if earned and DP.RecordMedal then DP.RecordMedal(earned.asset) end
+    else
+        eligibleCount, lastEligibleKillAt = 0, nil
+    end
+
     local medal = medals[count]
     if medal then ShowMedal(medal) end
     return count
+end
+
+function M.Combat(playerGUID)
+    local inInstance, kind = IsInInstance()
+    if not inInstance or kind ~= "pvp" or not CombatLogGetCurrentEventInfo then return end
+    local info = {CombatLogGetCurrentEventInfo()}
+    if info[2] == "PARTY_KILL" and info[4] == playerGUID and info[8] and
+            info[8]:match("^Player%-") then
+        local level
+        local unit = DP.WorldPvP and DP.WorldPvP.VisibleUnitForGUID(info[8])
+        if unit and UnitLevel then level = UnitLevel(unit) end
+        -- Battlegrounds have transient animations only, no persistent tracking.
+        M.OnKillingBlow(level, UnitLevel("player"), false)
+    end
 end
 

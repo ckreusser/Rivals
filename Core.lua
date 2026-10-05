@@ -1,11 +1,17 @@
 local addonName, DP = ...
-local VERSION, TRACE_LIMIT, ACTIVITY_LIMIT = "1.0.139", 1000, 200
+local VERSION, TRACE_LIMIT, ACTIVITY_LIMIT = "1.0.142", 1000, 200
 local frame = CreateFrame("Frame")
 local db, observer, tracker, parsers, ready, rating
 local seasons, selectedPeriod = {}, nil
 local Say
 local verifier
 local recovery
+
+function DP.RecordMedal(asset)
+    if not observer or type(asset) ~= "string" then return end
+    observer.medalCounts = observer.medalCounts or {}
+    observer.medalCounts[asset] = (tonumber(observer.medalCounts[asset]) or 0) + 1
+end
 
 function DP.InterruptedItems() return recovery and recovery:Items() or {} end
 function DP.RecoveryStatus() return recovery and recovery.status or "Target the previous opponent and retry recovery." end
@@ -132,6 +138,31 @@ function DP.SetKillstreaksEnabled(enabled)
     -- and prevents a partially completed chain from resuming if re-enabled.
     if DP.MultiKill and DP.MultiKill.Reset then DP.MultiKill.Reset() end
     if DP.RefreshDuelViews then DP.RefreshDuelViews() end
+end
+
+-- Killstreak HUD position is stored as offsets from UIParent's left edge and
+-- vertical center.  Keeping the data here lets MultiKill own the presentation
+-- while the normal Rivals settings database owns persistence.
+function DP.GetKillstreakPosition()
+    local position = db and db.killstreakPosition
+    local x = position and tonumber(position.x) or 56
+    local y = position and tonumber(position.y) or 0
+    return x, y
+end
+
+function DP.SetKillstreakPosition(x, y)
+    if not db then return end
+    x, y = tonumber(x), tonumber(y)
+    if not x or not y then return end
+    db.killstreakPosition = {x = math.floor(x + 0.5), y = math.floor(y + 0.5)}
+end
+
+function DP.ResetKillstreakPosition()
+    if not db then return end
+    db.killstreakPosition = nil
+    if DP.MultiKill and DP.MultiKill.ApplySavedPosition then
+        DP.MultiKill.ApplySavedPosition()
+    end
 end
 
 function DP.DuelScreenshotsEnabled()
@@ -800,11 +831,15 @@ frame:SetScript("OnEvent", function(_, event, ...)
         return
     end
     if event == "COMBAT_LOG_EVENT_UNFILTERED" then
+        if DP.MultiKill and DP.MultiKill.Combat then DP.MultiKill.Combat(UnitGUID("player")) end
         if tracker.session then DP.Usage.Combat(tracker.session, UnitGUID("player")) end
         if DP.WorldPvP and DP.WorldPvP.Combat then DP.WorldPvP.Combat(UnitGUID("player")) end
         return
     end
     if DP.WorldPvP and DP.WorldPvP.Event then DP.WorldPvP.Event(event, ...) end
+    if event == "PLAYER_DEAD" or event == "PLAYER_ENTERING_WORLD" then
+        if DP.MultiKill and DP.MultiKill.Reset then DP.MultiKill.Reset() end
+    end
     if event == "BAG_UPDATE_DELAYED" or event == "PLAYER_EQUIPMENT_CHANGED" or event == "GET_ITEM_INFO_RECEIVED" then
         DP.Usage.Scan(); return
     end
@@ -964,6 +999,12 @@ SlashCmdList.RIVALS = function(command)
             DP.WorldPvP.DevPreview1vNToast()
         else
             Say("World PvP toast preview is not available yet.")
+        end
+    elseif command == "kb" then
+        -- Silent developer-style preview. This advances only the in-memory
+        -- rapid-kill chain; it does not create or modify encounter/history data.
+        if DP.MultiKill and DP.MultiKill.OnKillingBlow then
+            DP.MultiKill.OnKillingBlow()
         end
     elseif command == "season start" then
         if tracker.session then Say("Finish or cancel the current duel before starting a season."); return end

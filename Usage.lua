@@ -595,7 +595,12 @@ local function WorldUsageEvent(session, event)
             end
         end
     end
-    if #events >= 128 then session.worldUsage.truncated = true; return false end
+    -- Keep a generous budget for gadget/cooldown history, but never let it
+    -- discard consumable or reagent evidence needed by the cost ledger.
+    if #events >= 2000 and not U.IsConsumableWorldEvent(event) then
+        session.worldUsage.truncated = true
+        return false
+    end
     events[#events + 1] = event
     return true
 end
@@ -745,6 +750,17 @@ local CONSUMABLE_NAME_TERMS = {
     "crystal ward", "crystal yield", "crystal spire", "food", "drink",
 }
 
+local REUSABLE_ENGINEERING_ITEMS = {[10587]=true, [11825]=true}
+local EXPENDABLE_ENGINEERING_ITEMS = {
+    [10646]=true, [4395]=true, [1178]=true,
+    [4392]=true, [16023]=true, [4366]=true,
+    [16040]=true, [10514]=true, [5859]=true, [10562]=true,
+    [4365]=true, [4370]=true, [4394]=true, [10830]=true,
+    [15993]=true, [16005]=true, [18641]=true, [18588]=true,
+    [10507]=true, [6714]=true, [4852]=true, [4358]=true,
+    [4360]=true, [4374]=true, [4390]=true,
+}
+
 local function LowerName(entry, itemName)
     return tostring(itemName or entry.itemName or entry.name or ""):lower()
 end
@@ -772,8 +788,14 @@ function U.IsConsumableWorldEvent(entry)
     -- "Flask", but it is reusable equipment and must never become encounter spend.
     local known = Catalog(tonumber(entry.spellID or entry.sourceSpellID))
     if entry.category == "equipment" or (known and known.category == "equipment") then return false end
+    if REUSABLE_ENGINEERING_ITEMS[tonumber(entry.itemID)] then return false end
+    if EXPENDABLE_ENGINEERING_ITEMS[tonumber(entry.itemID)] then return true end
+    if known and known.category == "engineering" and
+            (known.name:find("Rocket Cluster", 1, true) or known.name:match(" Rocket$")) then return true end
     if entry.kind == "reagent" or entry.category == "reagents" then return true end
     if entry.consumable == true then return true end
+    -- Sappers are expended, regardless of item-cache equipment metadata.
+    if tonumber(entry.itemID) == 10646 then return true end
 
     local itemName, equipLoc, classID = ItemConsumptionMeta(entry.itemID)
     -- Anything with an equipment location is reusable gear even if the use spell
@@ -1478,6 +1500,8 @@ function U.NeedsLegacyConsumableBackfill(record)
         end
     end
     if not cost.backfilled then
+        local usage = ReconstructLegacyWorldUsage(record, record.session or {})
+        if usage and LegacyUsageFingerprint(usage) ~= SnapshotFingerprint(cost) then return true end
         -- Old live recordings could freeze a false zero before aura inference
         -- existed. Preserve all nonempty market snapshots, including unpriced ones.
         if (tonumber(cost.pricedCount) or 0) > 0 or (tonumber(cost.unpricedCount) or 0) > 0 or
@@ -1502,6 +1526,17 @@ end
 function U.CaptureLegacyWorldConsumableCost(record, capturedAt, priceCache, force)
     if type(record) ~= "table" then return nil end
     if record.consumableCost and not force then return record.consumableCost end
+    -- Fill missing usage without repricing items already frozen in this record.
+    local preservedPrices = {}
+    for id, price in pairs(priceCache or {}) do preservedPrices[id] = price end
+    for _, actor in ipairs(record.consumableCost and record.consumableCost.actors or {}) do
+        for _, item in ipairs(actor.items or {}) do
+            if item.itemID and item.unitCopper ~= nil then
+                preservedPrices[tonumber(item.itemID)] = {item.unitCopper, item.priceSource,
+                    item.priceSourceKey, item.priceAgeDays, item.priceProxyItemID, item.priceProxyItemName}
+            end
+        end
+    end
     local saved = type(record.session) == "table" and record.session or {}
     local legacyUsage, reconstructed, reconstructedFrom, inferredAuraCount = ReconstructLegacyWorldUsage(record, saved)
     local legacySession = {
@@ -1515,7 +1550,7 @@ function U.CaptureLegacyWorldConsumableCost(record, capturedAt, priceCache, forc
     }
     local snapshot = U.CaptureWorldConsumableCost(legacySession, {
         capturedAt = capturedAt,
-        priceCache = priceCache,
+        priceCache = preservedPrices,
         backfilled = true,
         originalEncounterTimestamp = record.timestamp,
     })

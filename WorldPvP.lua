@@ -18,7 +18,7 @@ local CFG = {
     ALL_ENEMIES_DEAD_GRACE = 6,
     ENEMY_PRESSURE_WINDOW = 12,
     MAX_ENCOUNTERS = 250,
-    MAX_WORLD_LOG = 160,
+    MAX_WORLD_LOG = 2000,
     WPVP_SCREENSHOT_KILL_DELAY = 0.20,
     BAND = bit and bit.band or bit32 and bit32.band,
     DIVINE_SHIELD_SPELLS = {[642] = true, [1020] = true},
@@ -128,9 +128,9 @@ local WORLD_BUFF_NAMES = {}
 for _, name in pairs(WORLD_BUFFS) do WORLD_BUFF_NAMES[name] = true end
 
 -- Long-lived class buffs belong in ENEMY BUFFS too, but this stays deliberately
--- curated instead of dumping every helpful aura. A tracked class buff is only
--- shown when an aura snapshot reports a real duration of at least five minutes;
--- that excludes forms/stances/aspects with indefinite client durations and short
+-- curated instead of dumping every helpful aura. Known long buffs may be
+-- observed only through combat-log removal events, without a duration snapshot.
+-- The allowlist excludes forms/stances/aspects with indefinite durations and short
 -- in-fight effects such as Power Word: Shield, Blessing of Freedom/Protection,
 -- Regrowth, etc. The exact-name list is rank-agnostic because UnitAura returns
 -- the base spell name rather than the rank text.
@@ -170,8 +170,10 @@ local LONG_CLASS_BUFF_NAMES = {
 
 local function IsLongClassBuff(entry)
     if not entry or not LONG_CLASS_BUFF_NAMES[entry.name] then return false end
-    local duration = tonumber(entry.duration) or 0
-    return duration >= 300
+    local duration = tonumber(entry.duration)
+    -- CLEU removal events have no duration. The curated spell list still
+    -- identifies long class buffs when no UnitAura snapshot was available.
+    return not duration or duration >= 300
 end
 
 local function LooksLikeConsumableBuff(name)
@@ -386,6 +388,9 @@ local function IsShortTermConsumableAura(entry)
         name == "Flask of Petrification" then return true end
     local known = entry.spellID and DP.UsageCatalog and DP.UsageCatalog[entry.spellID]
     if not (known and known.category == "potions") then return false end
+    -- Protection shields are meaningful enemy buffs even when the only
+    -- evidence is their removal on death, with no duration snapshot available.
+    if (known.name or name):find("Protection Potion", 1, true) then return false end
     if entry.duration and entry.duration > 0 then return entry.duration <= 120 end
     return not IsLongDurationConsumableName(known.name or name)
 end
@@ -488,8 +493,8 @@ local function SortedOpponentBuffs(enemy)
     end
 
     -- The header is a curated enemy-buff view, not a generic aura dump. Keep
-    -- world/consumable intelligence, then add only known class buffs whose aura
-    -- snapshot proves a duration of at least five minutes. This preserves useful
+    -- world/consumable intelligence, then add known long class buffs, including
+    -- removal-only observations without a duration snapshot. This preserves useful
     -- pre-fight/self-buff context without filling the card with forms, HoTs,
     -- shields, short blessings, or temporary combat cooldowns.
     for _, entry in pairs(detected and detected.world or {}) do Add(entry) end
@@ -511,6 +516,21 @@ local function SortedOpponentBuffs(enemy)
 end
 
 W.GetOpponentBuffsForDetail = SortedOpponentBuffs
+
+function W.OpponentBuffIcon(entry)
+    if entry.itemID then
+        local reader = C_Item and C_Item.GetItemIconByID or GetItemIcon
+        if reader then
+            local ok, texture = pcall(reader, entry.itemID)
+            if ok and texture then return texture end
+        end
+        if GetItemInfoInstant then
+            local ok, _, _, _, _, texture = pcall(GetItemInfoInstant, entry.itemID)
+            if ok and texture then return texture end
+        end
+    end
+    return entry.icon or SpellIcon(entry.spellID) or "Interface\\Icons\\INV_Misc_QuestionMark"
+end
 
 local function HasFlag(flags, mask)
     if type(flags) ~= "number" or type(mask) ~= "number" then return false end
@@ -1055,11 +1075,15 @@ end
 
 local function AppendWorldLog(session, info)
     session.worldCombatLog = session.worldCombatLog or {}
-    if #session.worldCombatLog >= CFG.MAX_WORLD_LOG then
+    local event = info[2]
+    -- The ordinary event budget must never hide the encounter's ending.
+    -- Critical lifecycle events can exceed it and remain in chronological order.
+    local criticalEvent = event == "PARTY_KILL" or event == "UNIT_DIED" or
+        event == "UNIT_DESTROYED" or event == "SPELL_RESURRECT"
+    if #session.worldCombatLog >= CFG.MAX_WORLD_LOG and not criticalEvent then
         session.worldCombatTruncated = true
         return
     end
-    local event = info[2]
     local sourceName, destName = ShortName(info[5]), ShortName(info[9])
     local spellID, spellName = CombatSpellInfo(info)
     local combatItem = DP.Usage and DP.Usage.ResolveCombatItem and DP.Usage.ResolveCombatItem(spellID, session, info[4], spellName) or nil
@@ -1136,7 +1160,9 @@ local function AppendWorldLog(session, info)
         else
             text = string.format("%s killed %s", sourceName, destName)
         end
-    elseif event == "UNIT_DIED" then
+    elseif event == "SPELL_RESURRECT" then
+        text = string.format("%s resurrected %s with %s", sourceName, destName, spellName or ("Spell " .. tostring(spellID)))
+    elseif event == "UNIT_DIED" or event == "UNIT_DESTROYED" then
         text = IsUnconsciousDeathEvent(info) and (destName .. " became unconscious") or (destName .. " died")
     end
     if text then
@@ -1298,7 +1324,7 @@ local function EncounterComposition(record)
         local gap = LevelGap(record, enemy)
         if gap and gap >= 5 then lowbies = lowbies + 1 else others = others + 1 end
     end
-    if lowbies > 0 and others > 0 then return "Mixed-Level Fight", "mixed_level" end
+    if lowbies > 0 and others > 0 then return "MIXED-LEVEL FIGHT", "mixed_level" end
     return nil, nil
 end
 
@@ -1366,11 +1392,23 @@ local function BubbleHearthEnemy(record)
     return nil
 end
 
+function W.CompactEncounterLabel(record, key)
+    key = key or record.resultKey
+    local suffix = ({outnumbered_victory="VICTORY", outnumbered_escape="ESCAPE", outnumbered_partial="FIGHT"})[key]
+    if not suffix then return nil end
+    local n = record.completedSoloSweep or record.peakContestingEnemies or record.contestingEnemyCount or record.enemyCount or 2
+    return string.format("1v%d %s", math.max(2, n), suffix)
+end
+
 local function Outcome(record)
     local enemies = record.enemyCount or 0
     local friendlies = record.friendlyCount or 1
     local kills = record.enemyDeaths or 0
+    if record.playerDied and record.lowHealthEngagement and (record.enemyDeaths or 0) == 0 then
+        return "LOW-HEALTH DEATH", "low_health_death"
+    end
     local survived = not record.playerDied
+    if survived and record.completedSoloSweep then return W.CompactEncounterLabel(record, "outnumbered_victory"), "outnumbered_victory" end
     -- "Outnumbered" means multiple enemy players were simultaneously applying
     -- meaningful pressure to the player, not merely that several unique enemy
     -- names appeared during a long encounter. This prevents sequential ganks of
@@ -1384,9 +1422,9 @@ local function Outcome(record)
     local outnumbered = friendlies == 1 and peakPressure >= 2
     local contestedOneOnOne = friendlies == 1 and enemies == 1 and contesting == 1
 
-    if outnumbered and survived and contesting > 0 and contestingDeaths >= contesting then return "OUTNUMBERED VICTORY", "outnumbered_victory" end
-    if outnumbered and survived and contestingDeaths > 0 then return "OUTNUMBERED ESCAPE", "outnumbered_escape" end
-    if outnumbered and record.playerDied and contestingDeaths > 0 then return "OUTNUMBERED FIGHT", "outnumbered_partial" end
+    if outnumbered and survived and contesting > 0 and contestingDeaths >= contesting then return W.CompactEncounterLabel(record, "outnumbered_victory"), "outnumbered_victory" end
+    if outnumbered and survived and contestingDeaths > 0 then return W.CompactEncounterLabel(record, "outnumbered_escape"), "outnumbered_escape" end
+    if outnumbered and record.playerDied and contestingDeaths > 0 then return W.CompactEncounterLabel(record, "outnumbered_partial"), "outnumbered_partial" end
     -- A level-advantaged solo kill is called what it is. A max-level (60)
     -- player killing downward is a gank; any 5+ level gap is a lowbie gank.
     -- This is descriptive only and never affects Duel Rating.
@@ -1410,7 +1448,7 @@ local function EncounterHeadcount(record)
     local enemies = record.enemyCount or 0
     local contesting = record.contestingEnemyCount
     if contesting == nil then contesting = enemies end
-    local peak = record.peakContestingEnemies or contesting
+    local peak = record.completedSoloSweep or record.peakContestingEnemies or contesting
     if friendlies > 1 then return string.format("%d vs %d", friendlies, enemies) end
     if peak >= 2 then return string.format("1 vs %d", peak) end
     if enemies == 1 and contesting == 1 then return "1 vs 1" end
@@ -1427,6 +1465,8 @@ end
 
 local function HeaderOutcomeText(record)
     local key = record and record.resultKey
+    local compact = record and W.CompactEncounterLabel(record)
+    if compact then return compact end
     local labels = {
         outnumbered_victory = "Outnumbered Victory",
         outnumbered_escape = "Outnumbered Escape",
@@ -1436,6 +1476,7 @@ local function HeaderOutcomeText(record)
         victory = "Victory",
         trade = "Trade",
         death = "Death",
+        low_health_death = "Low-health death",
         disengaged = "Disengaged",
         bubble_hearth = "Bubble Hearthed",
     }
@@ -1490,15 +1531,21 @@ local function EnemyNames(record, limit)
 end
 
 local function ResultColor(key)
-    if key == "outnumbered_victory" then return "|cffffce70" end
-    if key == "victory" or key == "outnumbered_escape" then return "|cff65e6ad" end
-    if key == "gank" then return "|cffffad66" end
-    if key == "lowbie_gank" then return "|cffff8888" end
-    if key == "kills" then return "|cffffce70" end
-    if key == "death" then return "|cffff8888" end
-    if key == "trade" or key == "outnumbered_partial" then return "|cffffad66" end
-    if key == "bubble_hearth" then return "|cffffce70" end
-    return "|cffadb5c2"
+    local colors = {
+        outnumbered_victory = "|cff74e6ff", -- cyan
+        victory = "|cff65e6ad", -- green
+        outnumbered_escape = "|cff8fafff", -- blue
+        outnumbered_partial = "|cffffa35c", -- orange
+        kills = "|cffffd56a", -- gold
+        trade = "|cffeb93df", -- pink
+        death = "|cffff7070", -- red
+        low_health_death = "|cffffbb91", -- peach
+        gank = "|cffc9a0ff", -- purple
+        lowbie_gank = "|cffff91bb", -- rose
+        bubble_hearth = "|cffb9c7ff", -- lavender
+        mixed_level = "|cffd8b6ff",
+    }
+    return colors[key] or "|cffadb5c2"
 end
 
 W.ResultColor = ResultColor
@@ -1622,7 +1669,7 @@ local function BuildRecord(session, reason)
         modelVersion = 1,
         pressureModelVersion = 1,
         friendlyContributionModelVersion = 1,
-        outcomeModelVersion = 5,
+        outcomeModelVersion = 6,
         timestamp = session.startedAt or time(),
         endedAt = time(),
         startedAt = session.startedAt,
@@ -1642,6 +1689,8 @@ local function BuildRecord(session, reason)
         enemyDeaths = deaths,
         playerDied = session.playerDied and true or false,
         playerDiedAt = session.playerDiedAt,
+        engagementHealthPercent = session.engagementHealthPercent,
+        lowHealthEngagement = session.lowHealthEngagement,
         killingBlows = session.killingBlows or 0,
         honorableKills = session.honorableKills or 0,
         consumableCost = consumableCost,
@@ -1978,7 +2027,7 @@ function W.RepairMindControlSplitEncounters(store)
         first.friendlyContributionModelVersion = nil
         RebuildPressureEvidence(first)
         RebuildFriendlyContributionEvidence(first)
-        first.outcomeModelVersion = 5
+        first.outcomeModelVersion = 6
         first.resultLabel, first.resultKey = Outcome(first)
         SortEnemiesByRelevance(first)
 
@@ -2019,6 +2068,7 @@ function W.Initialize(observer, db, callbacks)
     -- 3 covers both the earlier Mind Control Cap split and full-duration Ice
     -- Block combat drops, including reinforcements joining during the block.
     W.RepairMindControlSplitEncounters(observer.worldPvP)
+    if DP.RepairConfirmedEncounter then DP.RepairConfirmedEncounter(observer.worldPvP) end
 
     -- Reclassify older 0.21.x encounters when their saved combat log has
     -- enough evidence to distinguish actual simultaneous opposition from a
@@ -2062,11 +2112,12 @@ function W.Initialize(observer, db, callbacks)
         end
         RebuildPressureEvidence(record)
         RebuildFriendlyContributionEvidence(record)
-        if record.outcomeModelVersion ~= 5 then
+        if record.outcomeModelVersion ~= 6 then
             BubbleHearthEnemy(record)
             record.resultLabel, record.resultKey = Outcome(record)
-            record.outcomeModelVersion = 5
+            record.outcomeModelVersion = 6
         end
+        record.resultLabel = W.CompactEncounterLabel(record) or record.resultLabel
         SortEnemiesByRelevance(record)
     end
     local function BackfillLegacyConsumablePrices(attempt)
@@ -2150,6 +2201,23 @@ function W.SetStarred(record, starred)
     if W.callbacks and W.callbacks.changed then W.callbacks.changed() end
 end
 
+-- Capture only an enemy opening against the player, before its damage.
+function W.CaptureEngagementHealth(session, info)
+    if not info or info[4] == session.playerGUID or info[8] ~= session.playerGUID or
+            not IsPlayer(info[6]) or not IsHostile(info[6]) or not IsPressureEvent(info[2]) or
+            not UnitHealth or not UnitHealthMax then return end
+    local health, maximum = UnitHealth("player"), UnitHealthMax("player")
+    if not maximum or maximum <= 0 or not health then return end
+    local damage = info[2] == "SWING_DAMAGE" and tonumber(info[12]) or
+        (info[2] == "SPELL_DAMAGE" or info[2] == "SPELL_PERIODIC_DAMAGE" or info[2] == "RANGE_DAMAGE") and tonumber(info[15]) or 0
+    -- CLEU may arrive after health updates. Adding the opening hit is a
+    -- conservative upper bound; a healthy target cannot become a low-health
+    -- engagement merely because this first hit was large.
+    health = math.min(maximum, health + math.max(0, damage or 0))
+    session.engagementHealthPercent = 100 * health / maximum
+    session.lowHealthEngagement = session.engagementHealthPercent <= 50 or nil
+end
+
 function W.Start(playerGUID, info)
     if not W.Enabled() or not InOpenWorld() or (DP.HasActiveDuel and DP.HasActiveDuel()) then return nil end
     local playerName = UnitName("player")
@@ -2176,6 +2244,7 @@ function W.Start(playerGUID, info)
         killingBlows = 0,
         combatSuspensions = {},
     }
+    W.CaptureEngagementHealth(session, info)
     local player = AddParticipant(session, "friendlies", playerGUID, playerName, COMBATLOG_OBJECT_AFFILIATION_MINE)
     session.participants[playerGUID] = player
     AddPosition(session)
@@ -2187,6 +2256,7 @@ function W.Start(playerGUID, info)
             local now = GetTime()
             ScanVisibleEnemyBuffs(active)
             local quiet = now - (active.lastActivity or now)
+            if W.CompletedEnemyGrace(active, now) then W.Finish("all-enemies-dead"); return end
             local allEnemiesDead, enemyCount = true, 0
             for _, enemy in pairs(active.enemies or {}) do
                 enemyCount = enemyCount + 1
@@ -2203,6 +2273,29 @@ function W.Start(playerGUID, info)
         end)
     end
     return session
+end
+
+-- NPC guards and corpse aura removals must not postpone a completed PvP fight.
+-- Allow the existing six-second grace for resurrection before sealing it.
+function W.CompletedEnemyGrace(session, now)
+    local latest, total = 0, 0
+    for _, enemy in pairs(session.enemies or {}) do
+        if not enemy.died or not enemy.killedAt then return false end
+        total = total + 1
+        latest = math.max(latest, enemy.killedAt)
+    end
+    return total > 0 and not session.playerDied and
+        now - session.startedElapsed - latest >= CFG.ALL_ENEMIES_DEAD_GRACE
+end
+
+function W.ObserveEnemyRevival(session, info)
+    local event = info[2]
+    local revived = event == "SPELL_RESURRECT" and session.enemies[info[8]] or
+        event == "SPELL_CAST_SUCCESS" and session.enemies[info[4]] or
+        (event == "SWING_DAMAGE" or event == "SWING_MISSED") and session.enemies[info[4]]
+    if revived and revived.died then
+        revived.died, revived.killedAt, revived.killingBlow = nil, nil, nil
+    end
 end
 
 local function MarkInteraction(session, info)
@@ -2374,6 +2467,10 @@ function W.Combat(playerGUID)
     local info = {CombatLogGetCurrentEventInfo()}
     local event = info[2]
     local session = W.active
+    if session and W.CompletedEnemyGrace(session, GetTime()) then
+        W.Finish("all-enemies-dead")
+        session = nil
+    end
     local boundarySpellID, boundarySpellName = CombatSpellInfo(info)
     if session and W.IsMindControlCapSpell(boundarySpellID, boundarySpellName) then
         session.mindControlGraceUntil = math.max(tonumber(session.mindControlGraceUntil) or 0, GetTime() + CFG.MIND_CONTROL_GRACE)
@@ -2412,6 +2509,10 @@ function W.Combat(playerGUID)
         end
     end
 
+    -- Explicit resurrection, or a dead enemy actively casting again, reopens
+    -- that life while the encounter is still unfinished. Periodic damage and
+    -- corpse aura removals are not evidence of resurrection.
+    W.ObserveEnemyRevival(session, info)
     MarkInteraction(session, info)
     TrackSpecialEscape(session, info)
 
@@ -2467,7 +2568,7 @@ function W.Combat(playerGUID)
             if info[4] == playerGUID and not enemy.killingBlow then
                 session.killingBlows = (session.killingBlows or 0) + 1
                 enemy.killingBlow = true
-                if DP.MultiKill and DP.MultiKill.OnKillingBlow then DP.MultiKill.OnKillingBlow() end
+                if DP.MultiKill and DP.MultiKill.OnKillingBlow then DP.MultiKill.OnKillingBlow(enemy.level, session.playerLevel, true) end
             end
             ScreenshotEnemyDeath(session, enemy, CFG.WPVP_SCREENSHOT_KILL_DELAY)
         end
@@ -3014,7 +3115,7 @@ function W.DevPreview1vNToast()
         enemyDeaths = 3,
         playerDied = false,
         resultKey = "outnumbered_victory",
-        resultLabel = "OUTNUMBERED VICTORY",
+        resultLabel = "1v3 VICTORY",
         enemies = {
             {name = "Frostmage", class = "MAGE", level = 60, died = true, killingBlow = true, spec = {label = "Frost"}},
             {name = "Backstabber", class = "ROGUE", level = 60, died = true, killingBlow = true, spec = {label = "Subtlety"}},
@@ -3092,7 +3193,7 @@ function W.ShowResultToast(record)
         local best = 0
         for _, prior in ipairs(W.GetEncounters()) do
             if prior ~= record and prior.id ~= skipId and prior.resultKey == "outnumbered_victory" then
-                best = math.max(best, prior.peakContestingEnemies or prior.enemyCount or 0)
+                best = math.max(best, prior.completedSoloSweep or prior.peakContestingEnemies or prior.enemyCount or 0)
             end
         end
         return best
@@ -3136,7 +3237,7 @@ function W.ShowResultToast(record)
         end)
     end
 
-    local enemyCount = math.max(record.peakContestingEnemies or record.contestingEnemyCount or record.enemyCount or 2, 2)
+    local enemyCount = math.max(record.completedSoloSweep or record.peakContestingEnemies or record.contestingEnemyCount or record.enemyCount or 2, 2)
     local kills = record.enemyDeaths or 0
     local survival = record.playerDied and "Died" or "Survived"
     local survivalColor = record.playerDied and "|cffff8888" or "|cff65e6ad"
@@ -3339,10 +3440,24 @@ function W.Finish(reason)
     if W.ticker then W.ticker:Cancel(); W.ticker = nil end
     if Count(session.enemies) == 0 then return end
     local record = BuildRecord(session, reason)
+    -- Full solo sweeps may involve staggered pressure, but every opponent must
+    -- fight back and be killed by this player on the same surviving life.
+    if reason == "all-enemies-dead" and not record.playerDied and record.friendlyCount == 1 and
+            record.enemyCount >= 2 and record.contestingEnemyDeaths == record.enemyCount then
+        local sweep = true
+        for _, enemy in ipairs(record.enemies) do if not enemy.killingBlow then sweep = false end end
+        if sweep then
+            record.completedSoloSweep = record.enemyCount
+            record.resultLabel, record.resultKey = W.CompactEncounterLabel(record, "outnumbered_victory"), "outnumbered_victory"
+        end
+    end
     local store = W.observer.worldPvP
     record.id = store.nextSequence
     store.nextSequence = store.nextSequence + 1
     store.encounters[#store.encounters + 1] = record
+    if DP.RecordMedal and (record.resultKey == "outnumbered_victory" or record.resultKey == "outnumbered_escape") then
+        DP.RecordMedal(record.resultKey .. "_1v" .. tostring(record.completedSoloSweep or record.peakContestingEnemies or 2))
+    end
     TrimEncounterStore(store)
     W.ShowResultToast(record)
     if W.callbacks and W.callbacks.saved then W.callbacks.saved(record) end
@@ -3350,6 +3465,9 @@ function W.Finish(reason)
 end
 
 function W.Event(event, ...)
+    if W.active and event == "PLAYER_DEAD" and W.CompletedEnemyGrace(W.active, GetTime()) then
+        W.Finish("all-enemies-dead")
+    end
     if W.active and event == "GROUP_ROSTER_UPDATE" then W.RefreshFriendlyLevels(W.active) end
     if W.active and UnitGUID and (event == "PLAYER_TARGET_CHANGED" or event == "UPDATE_MOUSEOVER_UNIT" or event == "NAME_PLATE_UNIT_ADDED" or event == "UNIT_AURA" or event == "UNIT_LEVEL") then
         local unit = (event == "NAME_PLATE_UNIT_ADDED" or event == "UNIT_AURA" or event == "UNIT_LEVEL") and (...) or event == "UPDATE_MOUSEOVER_UNIT" and "mouseover" or "target"
@@ -3502,7 +3620,7 @@ function W.Summary()
                     (record.pressureModelVersion ~= 1 or enemy.pressuredPlayer == true) and not GankKind(record, enemy)
                 if soloContested then
                     if enemy.died then r.soloKills = r.soloKills + 1 end
-                    if record.playerDied then r.soloDeaths = r.soloDeaths + 1 end
+                    if record.playerDied and record.resultKey ~= "low_health_death" then r.soloDeaths = r.soloDeaths + 1 end
                 end
             end
         end
@@ -3510,11 +3628,11 @@ function W.Summary()
         if contesting == nil then contesting = record.enemyCount or 0 end -- legacy records
         if record.friendlyCount == 1 and contesting == 1 then
             if record.resultKey == "victory" then summary.soloWins = summary.soloWins + 1
-            elseif record.playerDied then summary.soloLosses = summary.soloLosses + 1 end
+            elseif record.playerDied and record.resultKey ~= "low_health_death" then summary.soloLosses = summary.soloLosses + 1 end
         end
         if record.resultKey == "outnumbered_victory" then
             summary.outnumberedVictories = summary.outnumberedVictories + 1
-            summary.longestOutnumbered = math.max(summary.longestOutnumbered, record.peakContestingEnemies or record.enemyCount or 0)
+            summary.longestOutnumbered = math.max(summary.longestOutnumbered, record.completedSoloSweep or record.peakContestingEnemies or record.enemyCount or 0)
         end
         -- Streak is a kill streak, not an encounter streak. Disengaging from a
         -- fight without dying does not erase it; only a recorded player death
@@ -3591,7 +3709,7 @@ function W.BuildMatchups()
                 (record.pressureModelVersion ~= 1 or enemy.pressuredPlayer == true) and not GankKind(record, enemy)
             if soloContested then
                 if enemy.died then entry.soloKills = entry.soloKills + 1 end
-                if record.playerDied then entry.soloDeaths = entry.soloDeaths + 1 end
+                if record.playerDied and record.resultKey ~= "low_health_death" then entry.soloDeaths = entry.soloDeaths + 1 end
             end
             data.byOpponent[key] = data.byOpponent[key] or {}
             data.byOpponent[key][#data.byOpponent[key] + 1] = record
@@ -4049,6 +4167,7 @@ function W.InstallOverview(overview, duelPage)
     end
     SlabTooltip(left, "Solo 1v1", function(summary)
         GameTooltip:AddLine("Unassisted fights where one opponent contested you.", 1, 1, 1, true)
+        GameTooltip:AddLine("Low-health deaths (engaged at 50% health or less) are excluded from solo losses.", .75, .78, .84, true)
         GameTooltip:AddLine(string.format("Record: %d-%d", summary.soloWins or 0, summary.soloLosses or 0), .4, .9, .68)
     end)
     SlabTooltip(right, "Solo 1vN", function(summary)
@@ -4143,10 +4262,6 @@ function W.InstallOverview(overview, duelPage)
     StatTooltip(goldBox, "Enemy gold spent", function(summary)
         GameTooltip:AddLine("Estimated value of tracked consumables used by enemy Rivals against you.", 1, 1, 1, true)
         GameTooltip:AddLine(string.format("Lifetime total: %s", EnemyGoldText(summary.enemyGoldSpentCopper, summary.enemyGoldSpentPartial, false)), 1, .82, .42)
-        if (summary.enemyGoldUnpricedCount or 0) > 0 then
-            GameTooltip:AddLine(string.format("%d tracked consumable%s had no captured price and are not included in the value.",
-                summary.enemyGoldUnpricedCount or 0, (summary.enemyGoldUnpricedCount or 0) == 1 and "" or "s"), .62, .66, .72, true)
-        end
     end)
     W.overviewLowerCard = lowerCard
 
@@ -7220,6 +7335,14 @@ local function SetSummaryCardLift(card, active)
     end)
 end
 
+function W.OpenOpponentMatchup(enemy)
+    if not enemy or not DP.SelectDuelView then return end
+    if DP.ShowRivalsCharacterPanel and DP.ShowRivalsCharacterPanel() == false then return end
+    if DP.SetMatchupSource then DP.SetMatchupSource("world") end
+    DP.SelectDuelView("MatchupDetail", {kind="opponent", key=enemy.guid or enemy.name, world=true}, enemy.name, "Opponents")
+    if GameTooltip then GameTooltip:Hide() end
+end
+
 local function EnsureSummaryRivalCard(window, index)
     local card = window.summaryRivalCards[index]
     if card then return card end
@@ -7400,6 +7523,9 @@ local function EnsureSummaryRivalCard(window, index)
     card.status = card.content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall"); card.status:SetPoint("TOPLEFT", 8, -17); card.status:SetWidth(318); card.status:SetJustifyH("LEFT"); card.status:SetWordWrap(false)
     card.record = card.content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall"); card.record:SetPoint("TOPLEFT", 8, -30); card.record:SetWidth(318); card.record:SetJustifyH("LEFT"); card.record:SetWordWrap(false)
     card:EnableMouse(true); card:EnableMouseWheel(true)
+    card:SetScript("OnMouseUp", function(self, button)
+        if button == "LeftButton" and self.kind == "player" then W.OpenOpponentMatchup(self.enemy) end
+    end)
     if card.SetHitRectInsets then card:SetHitRectInsets(-5, -5, -4, -4) end
     card:SetScript("OnMouseWheel", function(_, delta) if window.summaryRivalsScroll and window.summaryRivalsScroll.ScrollByWheel then window.summaryRivalsScroll:ScrollByWheel(delta) end end)
     card:SetScript("OnEnter", function(self)
@@ -8409,7 +8535,7 @@ function W.RefreshHeaderBuffs()
         icon:ClearAllPoints()
         icon:SetPoint("TOPLEFT", window.buffBody, "TOPLEFT", col * (iconSize + columnGap), -row * (iconSize + rowGap))
         icon.entry = entry
-        icon.icon:SetTexture(entry.icon or SpellIcon(entry.spellID) or "Interface\\Icons\\INV_Misc_QuestionMark")
+        icon.icon:SetTexture(W.OpponentBuffIcon(entry))
         icon:Show()
     end
     for index = #buffs + 1, #(window.buffIcons or {}) do
@@ -8581,16 +8707,24 @@ function W.HistoryHeadcount(record)
     return EncounterHeadcount(record)
 end
 
-function W.HistoryOpponentLine(record)
+function W.HistoryOpponentLine(record, selectedOpponentKey)
     local enemies = record and record.enemies or {}
-    local enemy = PrimaryOpponent(record) or enemies[1]
-    if not enemy then return "Unknown opponent" end
-    local level = enemy.level and ("Lv " .. tostring(enemy.level)) or "Lv ?"
-    local first = DP.Theme.ClassName(ShortName(enemy.name), enemy.class) .. "  |cffadb5c2• " .. level .. " " .. W.ClassLabel(enemy.class) .. "|r"
-    -- Keep multi-opponent context compact enough that the identity line does not
-    -- start ellipsizing. Full participant details are available in Summary.
-    if #enemies > 1 then first = first .. string.format("  |cffadb5c2+%d|r", #enemies - 1) end
-    return first
+    if #enemies == 0 then return "Unknown opponent" end
+    local names = {}
+    -- Display ordering only: preserve the encounter's participant ordering.
+    if selectedOpponentKey then
+        for _, enemy in ipairs(enemies) do
+            if (enemy.guid or enemy.name) == selectedOpponentKey then
+                names[#names + 1] = DP.Theme.ClassName(ShortName(enemy.name), enemy.class)
+            end
+        end
+    end
+    for _, enemy in ipairs(enemies) do
+        if (enemy.guid or enemy.name) ~= selectedOpponentKey then
+            names[#names + 1] = DP.Theme.ClassName(ShortName(enemy.name), enemy.class)
+        end
+    end
+    return table.concat(names, "|cffadb5c2, |r")
 end
 
 function W.HistoryNvN(record)
@@ -8602,10 +8736,10 @@ end
 function W.HistoryResultLine(record)
     local color = ResultColor(record and record.resultKey)
     local label = W.HistoryOutcomeLabel(record)
-    -- History cards always reserve their limited space for the short synopsis
-    -- first and the NvN second. Kill/survival/gank detail lives in Summary and
-    -- the tooltip rather than being squeezed into an ellipsis here.
-    return string.format("%s%s|r  •  |cffffce70%s|r", color, label, W.HistoryNvN(record))
+    local killingBlows = math.max(0, tonumber(record and record.killingBlows) or 0)
+    local detail = killingBlows > 0 and string.format("%d KB%s", killingBlows, killingBlows == 1 and "" or "s") or
+        (record and record.playerDied and "Died" or "Survived")
+    return string.format("%s%s|r  |cffadb5c2•  %s|r", color, label, detail)
 end
 
 function W.HistoryMeta(record)
@@ -8621,6 +8755,10 @@ end
 function W.ShowHistoryTooltip(owner, record)
     GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
     GameTooltip:SetText((ResultColor(record.resultKey) .. W.HistoryOutcomeLabel(record) .. "|r"))
+    if record.lowHealthEngagement and record.engagementHealthPercent then
+        GameTooltip:AddLine(string.format("Enemy engaged you at approximately %.0f%% health.", record.engagementHealthPercent), 1, .68, .4, true)
+        if record.resultKey == "low_health_death" then GameTooltip:AddLine("Excluded from solo-loss records.", .75, .78, .84, true) end
+    end
     GameTooltip:AddLine(string.format("%s • %d %s • %s", W.HistoryHeadcount(record), record.enemyDeaths or 0,
         (record.enemyDeaths or 0) == 1 and "kill" or "kills", SurvivalText(record)), 1, 1, 1)
     if record.location then GameTooltip:AddLine((record.location.zone or "Unknown") .. (record.location.subzone and record.location.subzone ~= "" and (" • " .. record.location.subzone) or ""), .7, .75, .82) end
