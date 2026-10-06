@@ -2836,6 +2836,8 @@ local function EnsureDetailWindow()
     window.bg=window:CreateTexture(nil,"BACKGROUND"); window.bg:SetPoint("TOPLEFT",1,-1); window.bg:SetPoint("BOTTOMRIGHT",-1,1); window.bg:SetTexture("Interface\\FrameGeneral\\UI-Background-Rock"); window.bg:SetVertexColor(.28,.30,.33,.97)
     local border=DP.Theme.Border(window,0,0,650,DUEL_DETAIL_HEIGHT); border:ClearAllPoints(); border:SetAllPoints(window); border:EnableMouse(false)
     local header=DP.Theme.PlaqueHeader(window,360,"Duel Details","GameFontNormal"); header:SetPoint("BOTTOM",window,"TOP",0,-4); header:EnableMouse(true); header:RegisterForDrag("LeftButton")
+    if header.leftTrim and header.leftTrim.SetVertexColor then header.leftTrim:SetVertexColor(.93, .72, .44, .98) end
+    if header.rightTrim and header.rightTrim.SetVertexColor then header.rightTrim:SetVertexColor(.93, .72, .44, .98) end
     header:SetScript("OnDragStart",function() window:StartMoving() end); header:SetScript("OnDragStop",function() window:StopMovingOrSizing() end); window.header=header
     local close=CreateFrame("Button",nil,window,"UIPanelCloseButton"); close:SetPoint("TOPRIGHT",-2,-2); close:SetScript("OnClick",function() window:Hide() end); window.close=close
     window:SetScript("OnHide",function(self) self.activeTab="summary"; GameTooltip:Hide(); U.HideHistoryTooltip() end)

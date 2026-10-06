@@ -12,6 +12,15 @@ function C.RankZones(zones)
     return list
 end
 function C.AddBuffs(summary,record,known)
+    if record.archivedBuffs then
+        for name,buff in pairs(record.archivedBuffs) do
+            local bucket=summary.worldBuffsRemoved[name]
+            if not bucket then bucket={name=name,spellID=buff.spellID,icon=buff.icon,count=0};summary.worldBuffsRemoved[name]=bucket end
+            bucket.count=bucket.count+(buff.count or 0)
+            summary.worldBuffRemovalCount=summary.worldBuffRemovalCount+(buff.count or 0)
+        end
+        return
+    end
     local names={}
     for _,name in pairs(known) do names[name]=true end
     local function BuffName(id,name) return known[id] or (names[name] and name) end

@@ -642,6 +642,42 @@ local function ResolvePlayerLevel(guid)
     return nil
 end
 
+-- Snapshot an opponent's Classic PvP/Honor rank whenever the client gives us a
+-- usable unit token. Keep the raw UnitPVPRank index as well as Blizzard's
+-- localized title/number so future UI can choose either representation without
+-- having to reinterpret old encounters. A zero index is still meaningful: it
+-- records that we actually observed the player and they had no visible rank.
+function W.CaptureOpponentPVPRank(identity, unit)
+    if not identity or not unit or not UnitGUID or UnitGUID(unit) ~= identity.guid or not UnitPVPRank then return false end
+    local ok, rawRank = pcall(UnitPVPRank, unit)
+    if not ok or type(rawRank) ~= "number" or rawRank < 0 then return false end
+
+    local changed = identity.pvpRankIndex ~= rawRank or not identity.pvpRankObserved
+    identity.pvpRankObserved = true
+    identity.pvpRankIndex = rawRank
+    identity.pvpRankCapturedAt = time and time() or 0
+
+    if GetPVPRankInfo then
+        local infoOK, title, rankNumber = pcall(GetPVPRankInfo, rawRank, unit)
+        if not infoOK then infoOK, title, rankNumber = pcall(GetPVPRankInfo, rawRank) end
+        if infoOK then
+            if type(title) == "string" and title ~= "" then
+                if identity.pvpRankTitle ~= title then changed = true end
+                identity.pvpRankTitle = title
+            elseif rawRank == 0 then
+                identity.pvpRankTitle = nil
+            end
+            if type(rankNumber) == "number" then
+                if identity.pvpRankNumber ~= rankNumber then changed = true end
+                identity.pvpRankNumber = rankNumber
+            elseif rawRank == 0 then
+                identity.pvpRankNumber = nil
+            end
+        end
+    end
+    return changed
+end
+
 function W.RefreshFriendlyLevels(session)
     if not session then return end
     for guid, friendly in pairs(session.friendlies or {}) do
@@ -729,7 +765,10 @@ local function CopyIdentity(guid, name, flags)
     local identity = {guid = guid, name = name or "Unknown", class = class, race = race, raceFile = raceFile,
         sex = sex, level = ResolvePlayerLevel(guid), flags = flags}
     local unit = W.VisibleUnitForGUID(guid)
-    if unit then W.CaptureOpponentPortrait(identity, unit) end
+    if unit then
+        W.CaptureOpponentPVPRank(identity, unit)
+        W.CaptureOpponentPortrait(identity, unit)
+    end
     return identity
 end
 
@@ -805,6 +844,7 @@ local function TrimEncounterStore(store)
                 -- ages out. The Overview lifetime total therefore survives the
                 -- rolling 250 unstarred-record History cap.
                 ArchiveEnemyConsumableSpend(store, record)
+                DP.OverviewArchive.Add(store,record,WORLD_BUFFS)
                 table.remove(encounters, index)
                 removed = true
                 break
@@ -1011,7 +1051,10 @@ local function AddParticipant(session, bucketName, guid, name, flags)
     if not tonumber(identity.level) or tonumber(identity.level) <= 0 then identity.level = ResolvePlayerLevel(guid) end
     if bucketName == "enemies" then
         local unit = W.VisibleUnitForGUID(guid)
-        if unit then W.CaptureOpponentPortrait(identity, unit) end
+        if unit then
+            W.CaptureOpponentPVPRank(identity, unit)
+            W.CaptureOpponentPortrait(identity, unit)
+        end
     end
     return identity
 end
@@ -1694,6 +1737,7 @@ local function BuildRecord(session, reason)
     for guid, enemy in pairs(session.enemies or {}) do
         local unit = W.VisibleUnitForGUID(guid)
         if unit then
+            W.CaptureOpponentPVPRank(enemy, unit)
             W.CaptureOpponentPortrait(enemy, unit)
             if DP.Portraits then DP.Portraits.Capture(enemy, unit, true) end
         end
@@ -2225,6 +2269,7 @@ function W.Initialize(observer, db, callbacks)
         end
     end
 
+    DP.OverviewArchive.Recover(observer.worldPvP,observer.guid or (UnitGUID and UnitGUID("player")))
     TrimEncounterStore(observer.worldPvP)
     -- World PvP tracking is now a core Rivals feature rather than a user-toggleable mode.
     -- Force legacy profiles that previously disabled it back on during initialization.
@@ -3555,6 +3600,7 @@ function W.Event(event, ...)
         local enemy = guid and W.active.enemies and W.active.enemies[guid]
         if enemy then
             enemy.level = enemy.level or ResolvePlayerLevel(guid)
+            W.CaptureOpponentPVPRank(enemy, unit)
             W.CaptureOpponentPortrait(enemy, unit)
             ScanEnemyUnitBuffs(W.active, unit)
         else
@@ -3639,7 +3685,7 @@ function W.Summary()
     local store = W.observer and W.observer.worldPvP or nil
     local summary = {kills = 0, deaths = 0, soloWins = 0, soloLosses = 0, outnumberedVictories = 0,
         honorableKills = 0, ganks = 0, lowbieGanks = 0, longestOutnumbered = 0, encounters = 0, rivals = 0,
-        currentStreak = 0, longestStreak = 0, favoriteZone = nil, favoriteZoneKills = 0,
+        currentStreak = 0, longestStreak = 0, outnumberedBySize = {}, favoriteZone = nil, favoriteZoneKills = 0,
         mostKilledName = nil, mostKilledClass = nil, mostKilledKills = 0, mostKilledDeaths = 0,
         mostKilledSoloKills = 0, mostKilledSoloDeaths = 0, mostKilledEncounters = 0,
         nemesisName = nil, nemesisClass = nil, nemesisDeaths = 0, nemesisKills = 0,
@@ -3660,13 +3706,15 @@ function W.Summary()
     for _, copper in pairs(summary.enemyGoldCategories) do archivedCategorized = archivedCategorized + copper end
     summary.enemyGoldCategories.other = (summary.enemyGoldCategories.other or 0) +
         math.max(0, summary.enemyGoldSpentCopper - archivedCategorized)
-    for _, record in ipairs(W.GetEncounters()) do
-        local enemyCopper, enemyPartial, enemyPriced, enemyUnpriced, categories = EnemyConsumableSpend(record)
-        DP.SpendChart.Merge(summary.enemyGoldCategories, categories)
-        summary.enemyGoldSpentCopper = summary.enemyGoldSpentCopper + enemyCopper
-        summary.enemyGoldPricedCount = summary.enemyGoldPricedCount + enemyPriced
-        summary.enemyGoldUnpricedCount = summary.enemyGoldUnpricedCount + enemyUnpriced
-        if enemyPartial then summary.enemyGoldSpentPartial = true end
+    for _, record in ipairs(DP.OverviewArchive.Records(store)) do
+        if not record.overviewArchived then
+            local enemyCopper, enemyPartial, enemyPriced, enemyUnpriced, categories = EnemyConsumableSpend(record)
+            DP.SpendChart.Merge(summary.enemyGoldCategories, categories)
+            summary.enemyGoldSpentCopper = summary.enemyGoldSpentCopper + enemyCopper
+            summary.enemyGoldPricedCount = summary.enemyGoldPricedCount + enemyPriced
+            summary.enemyGoldUnpricedCount = summary.enemyGoldUnpricedCount + enemyUnpriced
+            if enemyPartial then summary.enemyGoldSpentPartial = true end
+        end
         DP.OverviewCharts.AddBuffs(summary,record,WORLD_BUFFS)
         summary.encounters = summary.encounters + 1
         local recordKills = record.enemyDeaths or 0
@@ -3723,7 +3771,9 @@ function W.Summary()
         end
         if record.resultKey == "outnumbered_victory" then
             summary.outnumberedVictories = summary.outnumberedVictories + 1
-            summary.longestOutnumbered = math.max(summary.longestOutnumbered, record.completedSoloSweep or record.peakContestingEnemies or record.enemyCount or 0)
+            local multikillSize = math.max(2, tonumber(record.completedSoloSweep or record.peakContestingEnemies or record.enemyCount) or 2)
+            summary.longestOutnumbered = math.max(summary.longestOutnumbered, multikillSize)
+            summary.outnumberedBySize[multikillSize] = (summary.outnumberedBySize[multikillSize] or 0) + 1
         end
         -- Streak is a kill streak, not an encounter streak. Disengaging from a
         -- fight without dying does not erase it; only a recorded player death
@@ -4206,25 +4256,73 @@ function W.InstallOverview(overview, duelPage)
     local headline = world:CreateFontString(nil, "OVERLAY", "GameFontNormalHuge")
     headline:SetPoint("TOPLEFT", 26, -146); headline:SetWidth(300); headline:SetJustifyH("CENTER")
     W.overviewHeadline = headline
-    local subtitle = world:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    subtitle:SetPoint("TOPLEFT", 26, -178); subtitle:SetWidth(300); subtitle:SetJustifyH("CENTER")
-    subtitle:SetText("Open-world record")
-    W.overviewSubtitle = subtitle
-    local currentStreak = world:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    currentStreak:SetPoint("TOPLEFT", 38, -198); currentStreak:SetWidth(124); currentStreak:SetJustifyH("CENTER")
-    local bestStreak = world:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    bestStreak:SetPoint("TOPLEFT", 190, -198); bestStreak:SetWidth(124); bestStreak:SetJustifyH("CENTER")
+    -- With HKs/ganks moved to hover, use the lower half of the plaque for the
+    -- two streak numbers that actually define the current run. The separate
+    -- value/label strings create hierarchy without increasing the card height.
+    local currentStreak = world:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    currentStreak:SetPoint("TOPLEFT", 38, -179); currentStreak:SetWidth(124); currentStreak:SetJustifyH("CENTER")
+    local currentStreakLabel = world:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    currentStreakLabel:SetPoint("TOPLEFT", 38, -198); currentStreakLabel:SetWidth(124); currentStreakLabel:SetJustifyH("CENTER")
+    currentStreakLabel:SetText("CURRENT STREAK")
+    currentStreakLabel:SetTextColor(.58, .61, .66)
+    local bestStreak = world:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    bestStreak:SetPoint("TOPLEFT", 190, -179); bestStreak:SetWidth(124); bestStreak:SetJustifyH("CENTER")
+    local bestStreakLabel = world:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    bestStreakLabel:SetPoint("TOPLEFT", 190, -198); bestStreakLabel:SetWidth(124); bestStreakLabel:SetJustifyH("CENTER")
+    bestStreakLabel:SetText("BEST STREAK")
+    bestStreakLabel:SetTextColor(.58, .61, .66)
+    W.overviewSubtitle = nil
     W.overviewCurrentStreak, W.overviewBestStreak = currentStreak, bestStreak
+    W.overviewCurrentStreakLabel, W.overviewBestStreakLabel = currentStreakLabel, bestStreakLabel
+
+    do
+        local function CreateHeadlineFlourish(mirrored)
+            local flourish = world:CreateTexture(nil, "OVERLAY")
+            local shadow = world:CreateTexture(nil, "ARTWORK")
+            flourish:SetVertexColor(.93, .72, .44, .98)
+            shadow:SetVertexColor(0, 0, 0, .35)
+            if flourish.SetAtlas then
+                flourish:SetAtlas("PetJournal-PetBattleAchievementBG", true)
+                shadow:SetAtlas("PetJournal-PetBattleAchievementBG", true)
+                local w, h = flourish:GetWidth(), flourish:GetHeight()
+                if not w or w <= 0 or not h or h <= 0 then w, h = 18, 18 end
+                local scale = 13 / h
+                local fw, fh = math.max(11, w * scale), 13
+                flourish:SetSize(fw, fh)
+                shadow:SetSize(fw, fh)
+            else
+                flourish:SetTexture("Interface\\Buttons\\WHITE8X8")
+                shadow:SetTexture("Interface\\Buttons\\WHITE8X8")
+                flourish:SetSize(13, 13)
+                shadow:SetSize(13, 13)
+            end
+            if mirrored then
+                flourish:SetTexCoord(1, 0, 0, 1)
+                shadow:SetTexCoord(1, 0, 0, 1)
+            end
+            shadow:SetPoint("CENTER", flourish, "CENTER", 1, -1)
+            flourish.shadow = shadow
+            flourish:Hide()
+            shadow:Hide()
+            return flourish
+        end
+        W.overviewHeadlineFiligree = nil
+        W.overviewHeadlineFlourishLeft = CreateHeadlineFlourish(false)
+        W.overviewHeadlineFlourishRight = CreateHeadlineFlourish(true)
+    end
 
     local left = DP.Theme.StatSlab(world, 26, -240, 140, 58, false)
     local right = DP.Theme.StatSlab(world, 186, -240, 140, 58, true)
     W.overviewSlabDivider = DP.Theme.StatDivider(world, 176, -269, 46)
+    if W.overviewSlabDivider and W.overviewSlabDivider.SetVertexColor then
+        W.overviewSlabDivider:SetVertexColor(.93, .72, .44, .96)
+    end
     local soloTop = left:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     soloTop:SetPoint("TOPLEFT", left, "TOPLEFT", 8, -8); soloTop:SetPoint("TOPRIGHT", left, "TOPRIGHT", -8, -8); soloTop:SetJustifyH("CENTER")
     local soloMid = left:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     soloMid:SetPoint("TOPLEFT", left, "TOPLEFT", 8, -24); soloMid:SetPoint("TOPRIGHT", left, "TOPRIGHT", -8, -24); soloMid:SetJustifyH("CENTER")
     local soloBot = left:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    soloBot:SetPoint("TOPLEFT", left, "TOPLEFT", 8, -40); soloBot:SetPoint("TOPRIGHT", left, "TOPRIGHT", -8, -40); soloBot:SetJustifyH("CENTER")
+    soloBot:SetPoint("TOPLEFT", left, "TOPLEFT", 8, -40); soloBot:SetPoint("TOPRIGHT", left, "TOPRIGHT", -8, -40); soloBot:SetJustifyH("CENTER"); soloBot:SetTextColor(.58, .61, .66)
     W.overviewSoloTop, W.overviewSoloMid, W.overviewSoloBot = soloTop, soloMid, soloBot
 
     local outTop = right:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
@@ -4232,7 +4330,7 @@ function W.InstallOverview(overview, duelPage)
     local outMid = right:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     outMid:SetPoint("TOPLEFT", right, "TOPLEFT", 8, -24); outMid:SetPoint("TOPRIGHT", right, "TOPRIGHT", -8, -24); outMid:SetJustifyH("CENTER")
     local outBot = right:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    outBot:SetPoint("TOPLEFT", right, "TOPLEFT", 8, -40); outBot:SetPoint("TOPRIGHT", right, "TOPRIGHT", -8, -40); outBot:SetJustifyH("CENTER")
+    outBot:SetPoint("TOPLEFT", right, "TOPLEFT", 8, -40); outBot:SetPoint("TOPRIGHT", right, "TOPRIGHT", -8, -40); outBot:SetJustifyH("CENTER"); outBot:SetTextColor(.58, .61, .66)
     W.overviewOutTop, W.overviewOutMid, W.overviewOutBot = outTop, outMid, outBot
 
     local function SlabTooltip(frame, title, build)
@@ -4246,16 +4344,49 @@ function W.InstallOverview(overview, duelPage)
         end)
         frame:SetScript("OnLeave", function() GameTooltip:Hide() end)
     end
+    local function InstallOverviewGreyHover(frame, ...)
+        local targets = {...}
+        frame:HookScript("OnEnter", function()
+            for _, target in ipairs(targets) do
+                if target and target.SetTextColor then target:SetTextColor(.40, .90, .68) end
+            end
+        end)
+        frame:HookScript("OnLeave", function()
+            for _, target in ipairs(targets) do
+                if target and target.SetTextColor then target:SetTextColor(.58, .61, .66) end
+            end
+        end)
+    end
+
     SlabTooltip(left, "Solo 1v1", function(summary)
         GameTooltip:AddLine("Unassisted fights where one opponent contested you.", 1, 1, 1, true)
         GameTooltip:AddLine("Low-health deaths (engaged at 50% health or less) are excluded from solo losses.", .75, .78, .84, true)
         GameTooltip:AddLine(string.format("Record: %d-%d", summary.soloWins or 0, summary.soloLosses or 0), .4, .9, .68)
     end)
-    SlabTooltip(right, "Solo Multikill", function(summary)
+    SlabTooltip(right, "Solo Multikills", function(summary)
         local best = (summary.longestOutnumbered or 0) >= 2 and ("1v" .. tostring(summary.longestOutnumbered)) or "—"
-        GameTooltip:AddLine("Solo wins against overlapping pressure from 2+ enemies.", 1, 1, 1, true)
-        GameTooltip:AddLine(string.format("Wins: %d • Best: %s", summary.outnumberedVictories or 0, best), 1, .82, .42)
+        GameTooltip:AddLine("Unassisted victories where multiple enemies applied overlapping pressure to you.", 1, 1, 1, true)
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddDoubleLine("Victories", tostring(summary.outnumberedVictories or 0), .75, .78, .84, 1, .82, .42)
+        GameTooltip:AddDoubleLine("Largest solo sweep", best, .75, .78, .84, .4, .9, .68)
+        local breakdown = summary.outnumberedBySize or {}
+        local sizes = {}
+        for size, count in pairs(breakdown) do
+            if count and count > 0 then sizes[#sizes + 1] = tonumber(size) or size end
+        end
+        table.sort(sizes, function(a, b) return tonumber(a) < tonumber(b) end)
+        if #sizes > 0 then
+            GameTooltip:AddLine(" ")
+            GameTooltip:AddLine("VICTORIES BY SIZE", 1, .82, .42)
+            for _, size in ipairs(sizes) do
+                GameTooltip:AddDoubleLine("1v" .. tostring(size), tostring(breakdown[size] or 0), .75, .78, .84, 1, 1, 1)
+            end
+        else
+            GameTooltip:AddLine("Your first solo 1v2+ victory will start this record.", .60, .66, .74, true)
+        end
     end)
+    InstallOverviewGreyHover(left, soloBot)
+    InstallOverviewGreyHover(right, outBot)
 
     -- Full-width secondary 2x2 plaque. Keep a single bronze frame here so the
     -- double-border treatment remains unique to the main headline plaque.
@@ -4272,20 +4403,89 @@ function W.InstallOverview(overview, duelPage)
     bottom:SetPoint("TOPLEFT", lowerCard, "TOPLEFT", 2, -2)
     bottom:SetSize(296, 74)
 
-    -- Bronze quadrant rules live entirely inside the recessed field.
-    local vRule = bottom:CreateTexture(nil, "ARTWORK")
-    vRule:SetColorTexture(.84, .56, .31, .28)
-    vRule:SetPoint("TOP", bottom, "TOP", 0, -7); vRule:SetPoint("BOTTOM", bottom, "BOTTOM", 0, 7); vRule:SetWidth(1)
-    local hRule = bottom:CreateTexture(nil, "ARTWORK")
-    hRule:SetColorTexture(.84, .56, .31, .28)
-    hRule:SetPoint("LEFT", bottom, "LEFT", 9, 0); hRule:SetPoint("RIGHT", bottom, "RIGHT", -9, 0); hRule:SetHeight(1)
+    -- Replace the flat one-pixel rules with Blizzard metal-frame art so the
+    -- quadrant split looks like a deliberate cross instead of drawn lines.
+    do
+        local bronze = {.93, .72, .44, .98}
+        local hThickness, vThickness = 6, 6
+        local endpointW, endpointH = 10, 8
+        local hInset, vInset = 12, 8
+
+        local function Unsnap(tex)
+            if tex.SetSnapToPixelGrid then tex:SetSnapToPixelGrid(false) end
+            if tex.SetTexelSnappingBias then tex:SetTexelSnappingBias(0) end
+        end
+
+        -- Keep the working battlefield-minimap trim, but give it enough native
+        -- height to show its bronze highlights. A faint additive duplicate
+        -- lifts the dark source pixels without changing the cross geometry.
+        local hBar = bottom:CreateTexture(nil, "BORDER")
+        if hBar.SetAtlas then
+            hBar:SetAtlas("battlefieldminimap-border-bottom", false)
+        else
+            hBar:SetTexture("Interface\\Buttons\\WHITE8X8")
+        end
+        Unsnap(hBar)
+        hBar:SetVertexColor(.97, .77, .49, 1)
+        hBar:SetPoint("LEFT", bottom, "LEFT", hInset, 0)
+        hBar:SetPoint("RIGHT", bottom, "RIGHT", -hInset, 0)
+        hBar:SetHeight(hThickness)
+
+        local hGlow = bottom:CreateTexture(nil, "ARTWORK")
+        if hGlow.SetAtlas then
+            hGlow:SetAtlas("battlefieldminimap-border-bottom", false)
+        else
+            hGlow:SetTexture("Interface\\Buttons\\WHITE8X8")
+        end
+        Unsnap(hGlow)
+        hGlow:SetVertexColor(.98, .76, .48, .42)
+        if hGlow.SetBlendMode then hGlow:SetBlendMode("ADD") end
+        hGlow:SetPoint("LEFT", hBar, "LEFT", 0, 0)
+        hGlow:SetPoint("RIGHT", hBar, "RIGHT", 0, 0)
+        hGlow:SetHeight(hThickness)
+
+        local vBar = bottom:CreateTexture(nil, "BORDER")
+        if vBar.SetAtlas then
+            vBar:SetAtlas("battlefieldminimap-border-right", false)
+        else
+            vBar:SetTexture("Interface\\Buttons\\WHITE8X8")
+        end
+        Unsnap(vBar)
+        vBar:SetVertexColor(bronze[1], bronze[2], bronze[3], bronze[4])
+        vBar:SetPoint("TOP", bottom, "TOP", 0, -vInset)
+        vBar:SetPoint("BOTTOM", bottom, "BOTTOM", 0, vInset)
+        vBar:SetWidth(vThickness)
+
+        local function Endpoint(relativeTo, relativePoint, dx, dy, rotation)
+            local tex = bottom:CreateTexture(nil, "OVERLAY")
+            if tex.SetAtlas then
+                tex:SetAtlas("GarrMission_EncounterBar-End", false)
+            else
+                tex:SetTexture("Interface\\Buttons\\WHITE8X8")
+            end
+            Unsnap(tex)
+            tex:SetVertexColor(bronze[1], bronze[2], bronze[3], bronze[4])
+            tex:SetSize(endpointW, endpointH)
+            tex:SetPoint("CENTER", relativeTo, relativePoint, dx or 0, dy or 0)
+            if rotation and tex.SetRotation then tex:SetRotation(rotation) end
+            return tex
+        end
+
+        local overlap = 2
+        local topEndpointX = .5
+        local bottomEndpointX = 0
+        Endpoint(hBar, "LEFT", overlap, 0, 0)
+        Endpoint(hBar, "RIGHT", -overlap, 0, math.pi)
+        Endpoint(vBar, "TOP", topEndpointX, -overlap, math.pi * .5)
+        Endpoint(vBar, "BOTTOM", bottomEndpointX, overlap, -math.pi * .5)
+    end
 
     local function quadrant(x, y)
         local holder = CreateFrame("Frame", nil, bottom)
         holder:SetPoint("TOPLEFT", bottom, "TOPLEFT", x, y)
         holder:SetSize(148, 37)
         local label = holder:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-        label:SetPoint("CENTER", holder, "CENTER", 0, 8); label:SetWidth(132); label:SetJustifyH("CENTER")
+        label:SetPoint("CENTER", holder, "CENTER", 0, 8); label:SetWidth(132); label:SetJustifyH("CENTER"); label:SetTextColor(.58, .61, .66)
         local value = holder:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         value:SetPoint("CENTER", holder, "CENTER", 0, -6); value:SetWidth(132); value:SetJustifyH("CENTER")
         holder:EnableMouse(true)
@@ -4325,6 +4525,10 @@ function W.InstallOverview(overview, duelPage)
     end)
     goldBox:SetScript("OnLeave", DP.SpendChart.Hide)
     goldBox:SetScript("OnHide", DP.SpendChart.Hide)
+    InstallOverviewGreyHover(mostBox, mostL)
+    InstallOverviewGreyHover(hkBox, hkL)
+    InstallOverviewGreyHover(gankBox, gankL)
+    InstallOverviewGreyHover(goldBox, goldL)
     W.overviewLowerCard = lowerCard
 
     local note = world:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
@@ -4333,22 +4537,57 @@ function W.InstallOverview(overview, duelPage)
 
     -- Deaths and K/D are useful history, but not the identity of this page. Keep
     -- them one hover away rather than making them the headline.
+    local function ShowRecordTooltip(owner)
+        local summary = W.Summary()
+        GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
+        GameTooltip:SetText("World PvP record")
+        GameTooltip:AddDoubleLine("Kills", tostring(summary.kills or 0), .75, .78, .84, .4, .9, .68)
+        GameTooltip:AddDoubleLine("Deaths", tostring(summary.deaths or 0), .75, .78, .84, 1, .45, .45)
+        GameTooltip:AddDoubleLine("K/D", string.format("%.2f", (summary.kills or 0) / math.max(1, summary.deaths or 0)), .75, .78, .84, 1, .82, .42)
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddDoubleLine("Honorable kills", tostring(summary.honorableKills or 0), .75, .78, .84, 1, .82, .42)
+        GameTooltip:AddDoubleLine("Ganks", tostring(summary.ganks or 0), .75, .78, .84, 1, .68, .40)
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddDoubleLine("Fights recorded", tostring(summary.encounters or 0), .75, .78, .84, 1, 1, 1)
+        GameTooltip:Show()
+    end
+
     local cardHover = CreateFrame("Button", nil, world)
     cardHover:SetSize(300, 96); cardHover:SetPoint("TOPLEFT", 26, -130)
     cardHover:SetFrameLevel(world:GetFrameLevel() + 8)
-    cardHover:SetScript("OnEnter", function(self)
-        local summary = W.Summary()
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText("World PvP record")
-        GameTooltip:AddLine(string.format("Kills  %d", summary.kills or 0), .4, .9, .68)
-        GameTooltip:AddLine(string.format("Deaths  %d", summary.deaths or 0), 1, .45, .45)
-        GameTooltip:AddLine(string.format("K/D  %.2f", (summary.kills or 0) / math.max(1, summary.deaths or 0)), 1, .82, .42)
-        GameTooltip:AddLine(string.format("Fights recorded  %d   Rivals  %d", summary.encounters or 0, summary.rivals or 0), .75, .78, .84)
-        GameTooltip:AddLine(string.format("Honorable kills  %d • Ganks  %d (%d lowbie)",summary.honorableKills or 0,summary.ganks or 0,summary.lowbieGanks or 0),1,.82,.42)
-        GameTooltip:Show()
-    end)
+    cardHover:SetScript("OnEnter", function(self) ShowRecordTooltip(self) end)
     cardHover:SetScript("OnLeave", function() GameTooltip:Hide() end)
     W.overviewCardHover = cardHover
+
+    -- Give the two streak fields independent hover zones above the broad card
+    -- hover so each grey label can react on its own.
+    local currentStreakHover = CreateFrame("Button", nil, world)
+    currentStreakHover:SetPoint("TOPLEFT", 38, -176)
+    currentStreakHover:SetSize(124, 39)
+    currentStreakHover:SetFrameLevel(world:GetFrameLevel() + 9)
+    currentStreakHover:SetScript("OnEnter", function(self)
+        currentStreakLabel:SetTextColor(.40, .90, .68)
+        ShowRecordTooltip(self)
+    end)
+    currentStreakHover:SetScript("OnLeave", function()
+        currentStreakLabel:SetTextColor(.58, .61, .66)
+        GameTooltip:Hide()
+    end)
+
+    local bestStreakHover = CreateFrame("Button", nil, world)
+    bestStreakHover:SetPoint("TOPLEFT", 190, -176)
+    bestStreakHover:SetSize(124, 39)
+    bestStreakHover:SetFrameLevel(world:GetFrameLevel() + 9)
+    bestStreakHover:SetScript("OnEnter", function(self)
+        bestStreakLabel:SetTextColor(.40, .90, .68)
+        ShowRecordTooltip(self)
+    end)
+    bestStreakHover:SetScript("OnLeave", function()
+        bestStreakLabel:SetTextColor(.58, .61, .66)
+        GameTooltip:Hide()
+    end)
+    W.overviewCurrentStreakHover = currentStreakHover
+    W.overviewBestStreakHover = bestStreakHover
 
     -- History already has a first-class top navigation tab. Keep Overview's
     -- footer for an action unique to this page instead of a redundant shortcut.
@@ -4472,11 +4711,25 @@ function W.RefreshOverview()
     if not W.overviewFrame then return end
     local s = W.Summary()
     W.overviewHeadline:SetText(string.format("|cff65e6ad%d KILLS|r", s.kills or 0))
-    if W.overviewSubtitle then
-        W.overviewSubtitle:SetText(string.format("|cffffce70%d|r honorable kills  •  |cffffad66%d|r ganks",s.honorableKills or 0,s.ganks or 0))
+    do
+        local left = W.overviewHeadlineFlourishLeft
+        local right = W.overviewHeadlineFlourishRight
+        if left and right and W.overviewHeadline then
+            local width = W.overviewHeadline.GetStringWidth and W.overviewHeadline:GetStringWidth() or 0
+            local half = math.max(0, width * 0.5)
+            local pad = 8
+            left:ClearAllPoints()
+            left:SetPoint("RIGHT", W.overviewHeadline, "CENTER", -(half + pad), -2)
+            right:ClearAllPoints()
+            right:SetPoint("LEFT", W.overviewHeadline, "CENTER", half + pad, -2)
+            left:Show()
+            right:Show()
+            if left.shadow then left.shadow:Show() end
+            if right.shadow then right.shadow:Show() end
+        end
     end
-    if W.overviewCurrentStreak then W.overviewCurrentStreak:SetText(string.format("|cff65e6ad%d|r current streak", s.currentStreak or 0)) end
-    if W.overviewBestStreak then W.overviewBestStreak:SetText(string.format("|cffffce70%d|r best streak", s.longestStreak or 0)) end
+    if W.overviewCurrentStreak then W.overviewCurrentStreak:SetText(string.format("|cffffce70%d|r", s.currentStreak or 0)) end
+    if W.overviewBestStreak then W.overviewBestStreak:SetText(string.format("|cffffce70%d|r", s.longestStreak or 0)) end
 
     if W.overviewSoloTop then W.overviewSoloTop:SetText(string.format("|cff65e6ad%d|r—|cffff8888%d|r", s.soloWins or 0, s.soloLosses or 0)) end
     if W.overviewSoloMid then W.overviewSoloMid:SetText("Solo 1v1") end
@@ -4487,7 +4740,7 @@ function W.RefreshOverview()
 
     local largest = (s.longestOutnumbered or 0) >= 2 and ("1v" .. tostring(s.longestOutnumbered)) or "—"
     if W.overviewOutTop then W.overviewOutTop:SetText(string.format("|cffffce70%d|r", s.outnumberedVictories or 0)) end
-    if W.overviewOutMid then W.overviewOutMid:SetText("Solo Multikill") end
+    if W.overviewOutMid then W.overviewOutMid:SetText("Solo Multikills") end
     if W.overviewOutBot then W.overviewOutBot:SetText("Best " .. largest) end
 
     local L = W.overviewStatLabels or {}

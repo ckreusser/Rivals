@@ -3,35 +3,33 @@ local P = {url = "https://www.curseforge.com/wow/addons/rivals"}
 DP.Promos = P
 
 P.messages = {
-    "They killed you once. You killed them six times after. Rivals remembers the part that matters.",
+    "You remember the name. Rivals remembers the score. Track every World PvP encounter, every rematch, every streak, and every player who keeps coming back.",
 
-    "World PvP has a memory now. Track every fight, every rematch, every streak, and every player who keeps showing up.",
+    "World PvP finally has a history. Rivals records who you fought, who won, what happened, and how the rivalry develops over time.",
 
-    "DOUBLE KILL. TRIPLE KILL. Keep going. Rivals brings Reach-style killstreak medals to Classic World PvP.",
+    "That wasn’t just a kill. It was the start of a rivalry. Build a permanent record against the players you encounter in the open world.",
 
-    "That 1v3 wasn't just another fight. Rivals records outnumbered victories and keeps the proof.",
+    "How long can you keep it going? Track your current and best World PvP killstreaks—and get Reach-inspired medals as the bodies pile up.",
 
-    "Know exactly what they used to survive. Enemy buffs, consumables, gadgets, cooldowns, and estimated gold burned—all captured with the encounter.",
+    "Winning a 1v1 is expected. Winning a 1v3 gets remembered. Rivals tracks solo multikills and your best outnumbered victories.",
 
-    "Some names stop being random. Rivals builds a history against the players you keep running into.",
+    "Rivals knows when the fight wasn’t fair—and when you won anyway. Track outnumbered World PvP victories, ganks, streaks, and repeat opponents.",
 
-    "You remember winning. Rivals remembers how. Open the encounter for killing blows, damage exchange, buffs, consumables, items, abilities, and the combat log.",
+    "The fight ends. The evidence doesn’t. Review damage exchange, killing blows, abilities, items, enemy buffs, consumables, and the full combat log after the encounter.",
 
-    "Dueling someone again? Check the receipts. See your record, previous fights, matchup history, and what happened last time.",
+    "Wonder what they had running when you fought them? Rivals snapshots enemy buffs so you can see exactly what you were up against.",
 
-    "That guy again. Rivals tracks repeat opponents across World PvP so recurring enemies actually become rivals.",
+    "How expensive was that fight? Rivals tracks consumables used in World PvP and estimates what they cost at the time of the encounter.",
 
-    "Your best killstreak deserves more than scrolling combat text. Earn medals as the bodies pile up—and put the medal feed wherever you want it.",
+    "Some players are random encounters. Others become Rivals. See who you fight most, who keeps killing you, and who keeps showing up in your history.",
 
-    "The fight cost them more than a corpse run. Rivals estimates the gold value of consumables burned during the encounter.",
+    "Your World PvP résumé writes itself. Streaks, encounters, solo multikills, outnumbered wins, rival history, and detailed fight records—all captured automatically.",
 
-    "Classic PvP already creates rivalries. Rivals just keeps score.",
+    "Settle it again. Rivals keeps the receipts. Track your duel record against individual players and see exactly how the matchup has gone over time.",
 
-    "Won while outnumbered? Rivals knows the difference between a kill and a story worth remembering.",
+    "Rivals Verified means both sides were there. When both duelists run Rivals, the match becomes part of a shared competitive record.",
 
-    "A screenshot, the opponents, the buffs, the combat log, the result. Rivals keeps the whole encounter instead of just adding another kill to a counter.",
-
-    "Rated duel or open-world grudge match, the history follows the player. Rivals keeps both sides of your PvP life in one place.",
+    "Whether it happens outside Orgrimmar or somewhere you absolutely weren’t supposed to survive, Rivals remembers it. World PvP and duels become a searchable history instead of another forgotten combat log.",
 }
 function P.Click(_, button)
     if button ~= "LeftButton" or not IsControlKeyDown or not IsShiftKeyDown or

@@ -177,6 +177,6 @@ local old={enemies={{name='Harambae'}},consumableCost={actors={{name='Harambae',
 local copper,_,_,_,buckets=EnemyConsumableSpend(old)
 assert(copper==900 and buckets.other==900)
 ''')
-assert 'SpendChart.lua\nRivalChart.lua\nOverviewCharts.lua\nWorldPvP.lua' in (root/'Rivals.toc').read_text()
+assert 'SpendChart.lua\nRivalChart.lua\nOverviewCharts.lua\nOverviewArchive.lua\nOverviewRecovery.lua\nWorldPvP.lua' in (root/'Rivals.toc').read_text()
 assert (root/'Textures/SpendPieSurface.tga').exists()
 print('PASS spending categories, enemy-only totals, archive accumulation, exact angles, textured geometry, slice pops, animation, gold-only display, screen placement, every-hover restart and reuse')

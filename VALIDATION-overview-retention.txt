@@ -1,0 +1,9 @@
+Overview retention fix
+
+Cause: rolling 250 unstarred encounter cap discarded records used to compute Overview stats. Starred records account for history counts above 250.
+
+Fix: persist compact overview records before trimming; preserve zones, kills, deaths, solo results, rivals, streaks and world buffs. Existing enemy-gold archive remains authoritative and is not counted twice. History still retains 250 unstarred records plus starred records.
+
+Local recovery: OverviewRecovery.lua contains compact records from the October 5 pre-trim saved snapshot for Zurker. Import only missing IDs older than the oldest retained unstarred ID; one-time and duplicate-safe. SavedVariables files were not edited.
+
+Validation: 31 standalone regression checks passed. Actual snapshot replay reproduced Maraudon falling from 83 to 44; recovery restored 83 with seven aged-out encounters, and a repeated import did not change the total.

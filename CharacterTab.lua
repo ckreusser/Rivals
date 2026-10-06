@@ -278,6 +278,47 @@ function DP.InstallCharacterTab(getRating, getRecords)
         return label
     end
     local number = Text(-146, "GameFontNormalHuge")
+    number:ClearAllPoints()
+    number:SetPoint("TOP", ratingCard, "TOP", -3, -16)
+    number:SetWidth(120)
+    number:SetJustifyH("CENTER")
+    do
+        local function AddNumberFlourish(side, mirrored)
+            local flourish = duelPage:CreateTexture(nil, "OVERLAY")
+            local shadow = duelPage:CreateTexture(nil, "ARTWORK")
+            flourish:SetVertexColor(.84, .56, .31, .96)
+            shadow:SetVertexColor(0, 0, 0, .35)
+            if flourish.SetAtlas then
+                flourish:SetAtlas("PetJournal-PetBattleAchievementBG", true)
+                shadow:SetAtlas("PetJournal-PetBattleAchievementBG", true)
+                local w, h = flourish:GetWidth(), flourish:GetHeight()
+                if not w or w <= 0 or not h or h <= 0 then w, h = 18, 18 end
+                local scale = 13 / h
+                local fw, fh = math.max(11, w * scale), 13
+                flourish:SetSize(fw, fh)
+                shadow:SetSize(fw, fh)
+            else
+                flourish:SetTexture("Interface\\Buttons\\WHITE8X8")
+                shadow:SetTexture("Interface\\Buttons\\WHITE8X8")
+                flourish:SetSize(13, 13)
+                shadow:SetSize(13, 13)
+            end
+            if mirrored then
+                flourish:SetTexCoord(1, 0, 0, 1)
+                shadow:SetTexCoord(1, 0, 0, 1)
+            end
+            if side == "left" then
+                flourish:SetPoint("CENTER", number, "CENTER", -40, -2)
+            else
+                flourish:SetPoint("CENTER", number, "CENTER", 42, -2)
+            end
+            shadow:SetPoint("CENTER", flourish, "CENTER", 1, -1)
+            flourish.shadow = shadow
+            return flourish
+        end
+        panel.numberFlourishLeft = AddNumberFlourish("left", false)
+        panel.numberFlourishRight = AddNumberFlourish("right", true)
+    end
     local placement = Text(-179, "GameFontHighlightSmall")
     promotion = DP.Theme.EstablishedPromotion(duelPage, ratingCard, placement)
     panel.establishedPromotion = promotion
@@ -294,6 +335,96 @@ function DP.InstallCharacterTab(getRating, getRecords)
     peak:SetAllPoints(rightSlab); peak:SetJustifyH("CENTER"); peak:SetJustifyV("MIDDLE")
     local last = Text(-304, "GameFontHighlightSmall")
     last:SetHeight(38); last:SetJustifyV("MIDDLE")
+
+    -- Overview hover zones keep the face of the Duel Rating page compact while
+    -- exposing the meaning and supporting numbers behind each headline stat.
+    local function OverviewTooltip(frame, title, build)
+        frame:EnableMouse(true)
+        frame:SetScript("OnEnter", function(self)
+            local r = getRating()
+            if not r then return end
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText(title)
+            build(r)
+            GameTooltip:Show()
+        end)
+        frame:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    end
+
+    local ratingHover = CreateFrame("Frame", nil, duelPage)
+    ratingHover:SetPoint("TOPLEFT", 26, -130); ratingHover:SetSize(300, 96)
+    ratingHover:SetFrameLevel(duelPage:GetFrameLevel() + 8)
+    OverviewTooltip(ratingHover, "Duel Rating", function(r)
+        local placements = DP.Rating.PlacementCount(r)
+        GameTooltip:AddDoubleLine("Current rating", string.format("%.1f", r.rating or 0), .75, .78, .84, 1, .82, .42)
+        GameTooltip:AddDoubleLine("Status", DP.Rating.Provisional(r) and "Provisional" or "Established", .75, .78, .84,
+            DP.Rating.Provisional(r) and 1 or .40, DP.Rating.Provisional(r) and .79 or .90, DP.Rating.Provisional(r) and .40 or .68)
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddDoubleLine("Placement duels", string.format("%d / 10", math.min(10, placements)), .75, .78, .84, .47, .74, 1)
+        GameTooltip:AddDoubleLine("Distinct opponents", string.format("%d / 5", math.min(5, r.distinct or 0)), .75, .78, .84, .90, .72, 1)
+        if DP.Rating.Provisional(r) then
+            GameTooltip:AddLine("Complete both placement requirements to establish your rating.", .60, .66, .74, true)
+        else
+            GameTooltip:AddLine("Established from your locally recorded eligible duels.", .60, .66, .74, true)
+        end
+    end)
+
+    OverviewTooltip(leftSlab, "Rated Record", function(r)
+        local totals = DP.Views.RecordTotals(getRecords())
+        local rated = totals.Rated or {wins = 0, losses = 0}
+        local games = (rated.wins or 0) + (rated.losses or 0)
+        GameTooltip:AddDoubleLine("Wins", tostring(rated.wins or 0), .75, .78, .84, .40, .90, .68)
+        GameTooltip:AddDoubleLine("Losses", tostring(rated.losses or 0), .75, .78, .84, 1, .53, .53)
+        GameTooltip:AddDoubleLine("Win rate", games > 0 and string.format("%.1f%%", (rated.wins or 0) * 100 / games) or "—", .75, .78, .84, 1, .82, .42)
+        GameTooltip:AddLine("Only rated duels are included in this record.", .60, .66, .74, true)
+    end)
+
+    OverviewTooltip(rightSlab, "Personal Best", function(r)
+        GameTooltip:AddDoubleLine("Current rating", string.format("%.1f", r.rating or 0), .75, .78, .84, 1, 1, 1)
+        GameTooltip:AddDoubleLine("Highest rating", string.format("%.1f", r.peak or r.rating or 0), .75, .78, .84, 1, .82, .42)
+        local gap = math.max(0, (tonumber(r.peak) or 0) - (tonumber(r.rating) or 0))
+        if gap > 0 then
+            GameTooltip:AddDoubleLine("Below personal best", string.format("%.1f", gap), .65, .70, .76, 1, .70, .50)
+        else
+            GameTooltip:AddLine("You are currently at your personal best.", .40, .90, .68, true)
+        end
+    end)
+
+    local duelProgressHover = CreateFrame("Frame", nil, duelPage)
+    duelProgressHover:SetPoint("TOPLEFT", 38, -190); duelProgressHover:SetSize(124, 40)
+    duelProgressHover:SetFrameLevel(duelPage:GetFrameLevel() + 8)
+    OverviewTooltip(duelProgressHover, "Placement Duels", function(r)
+        local placements = math.min(10, DP.Rating.PlacementCount(r))
+        GameTooltip:AddDoubleLine("Completed", string.format("%d / 10", placements), .75, .78, .84, .47, .74, 1)
+        GameTooltip:AddLine("Eligible rated duels count toward establishing your profile.", .60, .66, .74, true)
+    end)
+
+    local opponentProgressHover = CreateFrame("Frame", nil, duelPage)
+    opponentProgressHover:SetPoint("TOPLEFT", 190, -190); opponentProgressHover:SetSize(124, 40)
+    opponentProgressHover:SetFrameLevel(duelPage:GetFrameLevel() + 8)
+    OverviewTooltip(opponentProgressHover, "Placement Opponents", function(r)
+        GameTooltip:AddDoubleLine("Distinct opponents", string.format("%d / 5", math.min(5, r.distinct or 0)), .75, .78, .84, .90, .72, 1)
+        GameTooltip:AddLine("Facing different players is required before Rivals marks the profile Established.", .60, .66, .74, true)
+    end)
+
+    local lastHover = CreateFrame("Frame", nil, duelPage)
+    lastHover:SetPoint("TOPLEFT", 26, -304); lastHover:SetSize(300, 38)
+    lastHover:SetFrameLevel(duelPage:GetFrameLevel() + 8)
+    OverviewTooltip(lastHover, "Latest Duel", function(r)
+        if r.last then
+            local d = r.applied and r.applied[r.last.id] or nil
+            GameTooltip:AddDoubleLine("Opponent", tostring(r.last.opponent or "Unknown"), .75, .78, .84, 1, 1, 1)
+            GameTooltip:AddDoubleLine("Result", r.last.won and "Win" or "Loss", .75, .78, .84,
+                r.last.won and .40 or 1, r.last.won and .90 or .45, r.last.won and .68 or .45)
+            if d then
+                GameTooltip:AddDoubleLine("Rating change", string.format("%+.2f", d.delta or 0), .75, .78, .84, 1, .82, .42)
+                if DP.Views and DP.Views.Reason then GameTooltip:AddLine(DP.Views.Reason(d), .60, .66, .74, true) end
+            end
+        else
+            GameTooltip:AddLine("No completed duel has been recorded yet.", .60, .66, .74, true)
+        end
+    end)
+
     local note = Text(-378, "GameFontDisableSmall")
     note:SetText("Local estimates from your recorded duels.\nEarlier diagnostic captures do not affect rating.")
     local button = DP.Theme.Button(duelPage, "Record details", 30, -395, 94)
@@ -387,6 +518,25 @@ function DP.InstallCharacterTab(getRating, getRecords)
         local r = getRating()
         if not r then return end
         number:SetText(string.format("%.1f", r.rating))
+        do
+            local left = panel.numberFlourishLeft
+            local right = panel.numberFlourishRight
+            if left and right then
+                local width = number.GetStringWidth and number:GetStringWidth() or 0
+                local half = math.max(0, width * 0.5)
+                local leftHalf = (left:GetWidth() or 0) * 0.5
+                local rightHalf = (right:GetWidth() or 0) * 0.5
+                local pad = 8
+                local leftBias = 2
+                local rightBias = 0
+                local leftCenterOffset = half + leftHalf + pad - leftBias
+                local rightCenterOffset = half + rightHalf + pad + rightBias
+                left:ClearAllPoints()
+                left:SetPoint("CENTER", number, "CENTER", -leftCenterOffset, -2)
+                right:ClearAllPoints()
+                right:SetPoint("CENTER", number, "CENTER", rightCenterOffset, -2)
+            end
+        end
         note:SetText("Local estimate • " .. (DP.DisplayPeriodName and DP.DisplayPeriodName() or "Lifetime"))
         placement:SetText(DP.Rating.Provisional(r) and "|cffffca67Provisional|r" or "|cff65e6adEstablished|r")
         local effective = math.min(10, DP.Rating.PlacementCount(r))

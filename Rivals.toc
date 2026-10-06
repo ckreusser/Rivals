@@ -3,7 +3,7 @@
 ## IconTexture: Interface\AddOns\Rivals\Textures\Rivals_Icon.tga
 ## Notes: Classic Era duel rating, open-world PvP encounters, records, and rivalry tracking.
 ## Author: Ckreu
-## Version: 1.0.144
+## Version: 1.0.173
 ## SavedVariables: RivalsDB
 
 Bindings.lua
@@ -24,6 +24,8 @@ LogRepair.lua
 SpendChart.lua
 RivalChart.lua
 OverviewCharts.lua
+OverviewArchive.lua
+OverviewRecovery.lua
 WorldPvP.lua
 Views.lua
 Promos.lua

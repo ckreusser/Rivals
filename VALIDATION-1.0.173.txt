@@ -1,0 +1,16 @@
+Rivals 1.0.173 release validation - October 6, 2026
+Baseline: GitHub main b686eac (1.0.144)
+Source: installed Classic Era Rivals 1.0.173
+
+PASS: 30 standalone Python regression scripts, including overview retention, chart behavior, medals, portraits, encounter classifications, item costs, capacity, and update notices.
+PASS: Lua 5.1 syntax compilation of all 67 Lua files.
+PASS: every Rivals.toc file exists; TOC and Core version are 1.0.173.
+PASS: staged diff whitespace check.
+
+Known test limitations:
+- tests/run.py fails verification.lua line 42 identically on baseline 1.0.144 and current 1.0.173.
+- tests/run_encounter_fixes.py has an incomplete module list on both builds; adding the modules exposes missing SetNormalTexture support in its UI mock. Production files load through Rivals.toc, which includes the required modules. No production code was changed to accommodate the stale harness.
+- tests/inspect_portrait_log.py requires a SavedVariables file at its expected location; none is available there.
+- No in-game smoke test was performed.
+
+Includes the installed character-specific OverviewRecovery.lua snapshot. Its import is limited to the matching player GUID and missing records older than retained unstarred History.

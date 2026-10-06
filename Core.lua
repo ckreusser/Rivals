@@ -1,5 +1,5 @@
 local addonName, DP = ...
-local VERSION, TRACE_LIMIT, ACTIVITY_LIMIT = "1.0.144", 1000, 200
+local VERSION, TRACE_LIMIT, ACTIVITY_LIMIT = "1.0.173", 1000, 200
 local frame = CreateFrame("Frame")
 local db, observer, tracker, parsers, ready, rating
 local seasons, selectedPeriod = {}, nil
@@ -442,10 +442,17 @@ local function UnitIdentity(unit)
     local faction = UnitFactionGroup and UnitFactionGroup(unit)
     local sex = UnitSex and UnitSex(unit)
     local displayID = UnitCreatureDisplayID and UnitCreatureDisplayID(unit)
-    return {name = name .. "-" .. realm, guid = UnitGUID(unit), class = class,
+    local identity = {name = name .. "-" .. realm, guid = UnitGUID(unit), class = class,
         level = UnitLevel(unit), race = raceFile or localizedRace, localizedRace = localizedRace,
         raceFile = raceFile, faction = faction, sex = sex, portraitSex = sex,
         portraitDisplayID = displayID, whisperBlocked = not DP.CanWhisperUnit(unit)}
+    -- Reuse the encounter rank snapshotter so formal duel identities retain the
+    -- same PvP/Honor rank fields as World PvP opponents. The identity table is
+    -- carried into the saved duel record through record.session.identity.
+    if DP.WorldPvP and DP.WorldPvP.CaptureOpponentPVPRank then
+        DP.WorldPvP.CaptureOpponentPVPRank(identity, unit)
+    end
+    return identity
 end
 
 local function FindIdentity(name)
