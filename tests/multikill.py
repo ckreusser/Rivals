@@ -30,7 +30,7 @@ assert 'DEV KB' not in views and 'DevKillingBlow' not in views
 assert 'KillstreaksEnabled' in views and 'SetKillstreaksEnabled' in views
 assert 'if DP.KillstreaksEnabled and not DP.KillstreaksEnabled() then return 0 end' in mk
 assert 'MultiKill.lua' in toc and toc.index('MultiKill.lua') < toc.index('WorldPvP.lua')
-assert '## Version: 1.0.143' in toc
+assert '## Version: 1.0.144' in toc
 
 for asset, count in expected:
     assert f'[{count}]' in mk and asset in mk

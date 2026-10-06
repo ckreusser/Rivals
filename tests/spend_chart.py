@@ -62,7 +62,7 @@ function methods:SetTexelSnappingBias(v) self.bias=v end
 function methods:CreateTexture() return CreateFrame() end
 function methods:CreateLine() return CreateFrame() end
 function methods:CreateFontString() return CreateFrame() end
-for _,k in ipairs({'SetFrameStrata','EnableMouse','SetClampedToScreen','SetBackdrop','SetBackdropColor','SetPoint','SetHeight','SetWidth','SetJustifyH','SetAllPoints','SetTexCoord','SetThickness','SetScale','SetTextColor','SetShadowColor','SetShadowOffset','SetFont','SetStartPoint','ClearAllPoints'}) do methods[k]=function() end end
+for _,k in ipairs({'SetParent','SetFrameStrata','EnableMouse','SetClampedToScreen','SetBackdrop','SetBackdropColor','SetPoint','SetHeight','SetWidth','SetJustifyH','SetAllPoints','SetTexCoord','SetThickness','SetScale','SetTextColor','SetShadowColor','SetShadowOffset','SetFont','SetStartPoint','ClearAllPoints'}) do methods[k]=function() end end
 function CreateFrame(_,name)
  local f=setmetatable({scripts={}},{__index=methods}); objects[#objects+1]=f
  if name then _G[name]=f end
@@ -140,16 +140,16 @@ clock=10;C.Show({}, {topMostKilled=killed,topNemeses=nemeses})
 local f=RivalsMostKilledTooltip
 assert(f.width==280 and f.rows[1].target==252 and f.rows[6].count.text=='8 deaths')
 assert(f.rows[1].name.text=='Enemy8' and f.rows[1].count.text=='8 KBs')
-assert(f.rows[1].bar.color[1]==.25*.72 and f.rows[6].bar.color[1]==.72)
+assert(f.rows[1].bar.color[1]==.25 and f.rows[6].bar.color[1]==1)
 assert(not f.sections[1].shown and f.sections[2].text=='NEMESES')
-assert(not f.rows[1].track and f.rows[1].height==26 and f.rows[1].rule.height==1)
+assert(f.rows[1].track and f.rows[1].height==26 and f.rows[1].rule.height==1)
 clock=10.375;f:GetScript('OnUpdate')(f)
 clock=10.75;f:GetScript('OnUpdate')(f)
 assert(not f:GetScript('OnUpdate'))
 C.Hide();clock=11;C.Show({}, {topMostKilled=killed,topNemeses=nemeses})
 assert(f:GetScript('OnUpdate') and not f.rows[1].bar.shown)
 C.Hide();C.Show({}, {topMostKilled={},topNemeses={}})
-assert(f.empty.shown and f.height==107 and not f:GetScript('OnUpdate'))
+assert(f.empty.shown and f.height==82 and not f:GetScript('OnUpdate'))
 C.Hide()
 ''')
 
@@ -177,6 +177,6 @@ local old={enemies={{name='Harambae'}},consumableCost={actors={{name='Harambae',
 local copper,_,_,_,buckets=EnemyConsumableSpend(old)
 assert(copper==900 and buckets.other==900)
 ''')
-assert 'SpendChart.lua\nRivalChart.lua\nWorldPvP.lua' in (root/'Rivals.toc').read_text()
+assert 'SpendChart.lua\nRivalChart.lua\nOverviewCharts.lua\nWorldPvP.lua' in (root/'Rivals.toc').read_text()
 assert (root/'Textures/SpendPieSurface.tga').exists()
 print('PASS spending categories, enemy-only totals, archive accumulation, exact angles, textured geometry, slice pops, animation, gold-only display, screen placement, every-hover restart and reuse')

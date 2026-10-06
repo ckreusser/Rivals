@@ -253,11 +253,12 @@ local function EnsureTooltip()
     f:Hide();tooltip=f;return f
 end
 -- UIParent coordinates; reserve a visible margin even on short screens.
-function S.Placement(screenWidth,screenHeight,ownerLeft,ownerRight,ownerTop,height)
+function S.Placement(screenWidth,screenHeight,ownerLeft,ownerRight,ownerTop,height,requestedWidth)
     local margin=16
+    local tooltipWidth=requestedWidth or WIDTH
     local scale=math.min(1,math.max(1,screenHeight-2*margin)/height,
-        math.max(1,screenWidth-2*margin)/WIDTH)
-    local width,height=WIDTH*scale,height*scale
+        math.max(1,screenWidth-2*margin)/tooltipWidth)
+    local width,height=tooltipWidth*scale,height*scale
     local x=ownerRight+10
     if x+width>screenWidth-margin and ownerLeft-width-10>=margin then
         x=ownerLeft-width-10

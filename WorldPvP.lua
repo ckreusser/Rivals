@@ -122,7 +122,7 @@ local WORLD_BUFFS = {
     [1216566] = "Traces of Silithyst",
     -- Anniversary/alternate-era variants still count when present on an Era
     -- client.  Exact-name fallback below also catches future spell-ID variants.
-    [1278762] = "Unrelenting Rallying Cry of the Dragonslayer",
+
 }
 local WORLD_BUFF_NAMES = {}
 for _, name in pairs(WORLD_BUFFS) do WORLD_BUFF_NAMES[name] = true end
@@ -1092,7 +1092,8 @@ local function AppendWorldLog(session, info)
     -- Critical lifecycle events can exceed it and remain in chronological order.
     local criticalEvent = event == "PARTY_KILL" or event == "UNIT_DIED" or
         event == "UNIT_DESTROYED" or event == "SPELL_RESURRECT" or
-        (event=="ENVIRONMENTAL_DAMAGE" and tonumber(info[14]) and tonumber(info[14])>=0)
+        (event=="ENVIRONMENTAL_DAMAGE" and tonumber(info[14]) and tonumber(info[14])>=0) or
+        (event=="SPELL_DISPEL" and info[4]==session.playerGUID and WORLD_BUFFS[tonumber(info[15])])
     if #session.worldCombatLog >= CFG.MAX_WORLD_LOG and not criticalEvent then
         session.worldCombatTruncated = true
         return
@@ -1175,6 +1176,8 @@ local function AppendWorldLog(session, info)
         end
     elseif event == "SPELL_RESURRECT" then
         text = string.format("%s resurrected %s with %s", sourceName, destName, spellName or ("Spell " .. tostring(spellID)))
+    elseif event == "SPELL_DISPEL" then
+        text=string.format("%s removed %s from %s",sourceName or "Player",tostring(info[16] or "buff"),destName or "Player")
     elseif event == "ENVIRONMENTAL_DAMAGE" then
         text=string.format("%s took %d %s damage",destName or "Player",tonumber(info[13]) or 0,tostring(info[12] or "environmental"):lower())
     elseif event == "UNIT_DIED" or event == "UNIT_DESTROYED" then
@@ -1213,6 +1216,7 @@ local function AppendWorldLog(session, info)
             destGUID = info[8], destName = destName,
             event = event, spellID = spellID, spellName = spellName,
             environmentalType = event=="ENVIRONMENTAL_DAMAGE" and info[12] or nil,
+            removedSpellID = event=="SPELL_DISPEL" and tonumber(info[15]) or nil,
             unconscious = IsUnconsciousDeathEvent(info) and true or nil,
             itemID = combatItem and combatItem.itemID or nil, itemName = combatItem and combatItem.name or nil,
             itemQuality = combatItem and combatItem.quality or nil, itemCategory = combatItem and combatItem.category or nil,
@@ -1419,6 +1423,28 @@ function W.CompactEncounterLabel(record, key)
     return string.format("1v%d %s", math.max(2, n), suffix)
 end
 
+function W.PetriDisengage(record)
+    local participants={[record.playerGUID or ""]=not record.playerDied}
+    for _,enemy in ipairs(record.enemies or {}) do
+        if enemy.guid then participants[enemy.guid]=not enemy.died end
+    end
+    local function IsPetri(entry)
+        return tonumber(entry.spellID)==17624 or tonumber(entry.itemID)==13506 or
+            entry.spellName=="Petrification" or entry.spellName=="Flask of Petrification" or
+            entry.itemName=="Flask of Petrification" or entry.name=="Flask of Petrification"
+    end
+    for _,entry in ipairs(record.session and record.session.worldCombatLog or {}) do
+        if IsPetri(entry) and (entry.event=="SPELL_CAST_SUCCESS" or entry.event=="SPELL_AURA_APPLIED" or entry.event=="SPELL_AURA_REFRESH") then
+            local guid=entry.event=="SPELL_CAST_SUCCESS" and entry.sourceGUID or entry.destGUID
+            if participants[guid] then return true end
+        end
+    end
+    for _,entry in ipairs(record.session and record.session.worldUsage and record.session.worldUsage.events or {}) do
+        if participants[entry.guid or entry.sourceGUID] and IsPetri(entry) then return true end
+    end
+    return false
+end
+
 local function Outcome(record)
     if record.playerDied and record.playerDeathCause=="FALLING" then return "FALL DAMAGE","fall_damage" end
     local enemies = record.enemyCount or 0
@@ -1460,6 +1486,11 @@ local function Outcome(record)
     if record.playerDied then return "DEATH", "death" end
     if survived and kills > 0 then return kills == 1 and "1 KILL" or (tostring(kills) .. " KILLS"), "kills" end
     if survived and BubbleHearthEnemy(record) then return "BUBBLE HEARTHED", "bubble_hearth" end
+    if W.PetriDisengage(record) then
+        record.resultSubcategory="petri"
+        return "DISENGAGED • PETRI", "disengaged"
+    end
+    record.resultSubcategory=nil
     return "DISENGAGED", "disengaged"
 end
 
@@ -1485,6 +1516,7 @@ end
 
 local function HeaderOutcomeText(record)
     local key = record and record.resultKey
+    if key=="disengaged" and record.resultSubcategory=="petri" then return "Disengaged • PETRI" end
     local compact = record and W.CompactEncounterLabel(record)
     if compact then return compact end
     local labels = {
@@ -1712,6 +1744,7 @@ local function BuildRecord(session, reason)
         playerDied = session.playerDied and true or false,
         playerDiedAt = session.playerDiedAt,
         playerDeathCause = session.playerDeathCause,
+        killLocations = session.killLocations,
         engagementHealthPercent = session.engagementHealthPercent,
         lowHealthEngagement = session.lowHealthEngagement,
         killingBlows = session.killingBlows or 0,
@@ -2140,6 +2173,9 @@ function W.Initialize(observer, db, callbacks)
             BubbleHearthEnemy(record)
             record.resultLabel, record.resultKey = Outcome(record)
             record.outcomeModelVersion = 6
+        end
+        if record.resultKey=="disengaged" then
+            record.resultLabel,record.resultKey=Outcome(record)
         end
         record.resultLabel = W.CompactEncounterLabel(record) or record.resultLabel
         SortEnemiesByRelevance(record)
@@ -2590,6 +2626,13 @@ function W.Combat(playerGUID)
         local enemy = session.enemies[info[8]]
         if enemy and not IsUnconsciousDeathEvent(info) then
             enemy.level = enemy.level or ResolvePlayerLevel(enemy.guid)
+            if not enemy.died then
+                local location=PlayerPosition()
+                if location then
+                    session.killLocations=session.killLocations or {}
+                    session.killLocations[#session.killLocations+1]=location
+                end
+            end
             enemy.died = true; enemy.killedAt = GetTime() - session.startedElapsed
             session.lastKillPosition = PlayerPosition() or session.lastKillPosition
             if info[4] == playerGUID and not enemy.killingBlow then
@@ -2612,6 +2655,10 @@ function W.Combat(playerGUID)
             elseif session.enemies[info[8]] then
                 local enemy = session.enemies[info[8]]
                 enemy.level = enemy.level or ResolvePlayerLevel(info[8])
+                if not enemy.died then
+                    local location=PlayerPosition()
+                    if location then session.killLocations=session.killLocations or {};session.killLocations[#session.killLocations+1]=location end
+                end
                 enemy.died = true
                 enemy.killedAt = GetTime() - session.startedElapsed
                 session.lastKillPosition = PlayerPosition() or session.lastKillPosition
@@ -3602,6 +3649,11 @@ function W.Summary()
         enemyGoldPricedCount = math.max(0, tonumber(store and store.enemyGoldArchivedPricedCount) or 0),
         enemyGoldUnpricedCount = math.max(0, tonumber(store and store.enemyGoldArchivedUnpricedCount) or 0)}
     local streak, rivals, zones, rivalStats = 0, {}, {}, {}
+    summary.worldBuffsRemoved,summary.worldBuffRemovalCount={},0
+    for id,name in pairs(WORLD_BUFFS) do
+        local existing=summary.worldBuffsRemoved[name]
+        if not existing or id<existing.spellID then summary.worldBuffsRemoved[name]={name=name,spellID=id,count=0} end
+    end
     summary.enemyGoldCategories = {}
     DP.SpendChart.Merge(summary.enemyGoldCategories, store and store.enemyGoldArchivedCategories)
     local archivedCategorized = 0
@@ -3615,14 +3667,19 @@ function W.Summary()
         summary.enemyGoldPricedCount = summary.enemyGoldPricedCount + enemyPriced
         summary.enemyGoldUnpricedCount = summary.enemyGoldUnpricedCount + enemyUnpriced
         if enemyPartial then summary.enemyGoldSpentPartial = true end
+        DP.OverviewCharts.AddBuffs(summary,record,WORLD_BUFFS)
         summary.encounters = summary.encounters + 1
         local recordKills = record.enemyDeaths or 0
         summary.kills = summary.kills + recordKills
         local zone = SummaryZoneName(record.location)
         if recordKills > 0 and zone and zone ~= "" and zone ~= "Unknown" then
-            local z = zones[zone] or {kills = 0, encounters = 0}
+            local z = zones[zone] or {name=zone,kills=0,encounters=0,points={}}
             z.kills = z.kills + recordKills
             z.encounters = z.encounters + 1
+            local locations=record.killLocations or {record.location}
+            for _,location in ipairs(locations) do
+                if location and location.mapID and location.x and location.y then z.points[#z.points+1]=location end
+            end
             zones[zone] = z
         end
         if record.playerDied then summary.deaths = summary.deaths + 1 end
@@ -3680,6 +3737,7 @@ function W.Summary()
     end
     summary.currentStreak = streak
     summary.rivals = Count(rivals)
+    summary.topZones=DP.OverviewCharts.RankZones(zones)
     local bestZone, best
     for zone, stats in pairs(zones) do
         if not best or stats.kills > best.kills or
@@ -4193,7 +4251,7 @@ function W.InstallOverview(overview, duelPage)
         GameTooltip:AddLine("Low-health deaths (engaged at 50% health or less) are excluded from solo losses.", .75, .78, .84, true)
         GameTooltip:AddLine(string.format("Record: %d-%d", summary.soloWins or 0, summary.soloLosses or 0), .4, .9, .68)
     end)
-    SlabTooltip(right, "Solo 1vN", function(summary)
+    SlabTooltip(right, "Solo Multikill", function(summary)
         local best = (summary.longestOutnumbered or 0) >= 2 and ("1v" .. tostring(summary.longestOutnumbered)) or "—"
         GameTooltip:AddLine("Solo wins against overlapping pressure from 2+ enemies.", 1, 1, 1, true)
         GameTooltip:AddLine(string.format("Wins: %d • Best: %s", summary.outnumberedVictories or 0, best), 1, .82, .42)
@@ -4227,15 +4285,15 @@ function W.InstallOverview(overview, duelPage)
         holder:SetPoint("TOPLEFT", bottom, "TOPLEFT", x, y)
         holder:SetSize(148, 37)
         local label = holder:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-        label:SetPoint("CENTER", holder, "CENTER", 0, 7); label:SetWidth(132); label:SetJustifyH("CENTER")
+        label:SetPoint("CENTER", holder, "CENTER", 0, 8); label:SetWidth(132); label:SetJustifyH("CENTER")
         local value = holder:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        value:SetPoint("CENTER", holder, "CENTER", 0, -8); value:SetWidth(132); value:SetJustifyH("CENTER")
+        value:SetPoint("CENTER", holder, "CENTER", 0, -6); value:SetWidth(132); value:SetJustifyH("CENTER")
         holder:EnableMouse(true)
         return holder, label, value
     end
-    local hkBox, hkL, hkV = quadrant(0, 0)
-    local gankBox, gankL, gankV = quadrant(148, 0)
-    local mostBox, mostL, mostV = quadrant(0, -37)
+    local hkBox, hkL, hkV = quadrant(148, 0)
+    local gankBox, gankL, gankV = quadrant(0, -37)
+    local mostBox, mostL, mostV = quadrant(0, 0)
     local goldBox, goldL, goldV = quadrant(148, -37)
     W.overviewStatLabels = {hkL=hkL, hkV=hkV, gankL=gankL, gankV=gankV,
         mostL=mostL, mostV=mostV, goldL=goldL, goldV=goldV}
@@ -4251,14 +4309,10 @@ function W.InstallOverview(overview, duelPage)
         end)
         box:SetScript("OnLeave", function() GameTooltip:Hide() end)
     end
-    StatTooltip(hkBox, "Honorable kills", function(summary)
-        GameTooltip:AddLine("Blizzard-awarded HKs recorded by Rivals.", 1, 1, 1, true)
-        GameTooltip:AddLine(string.format("Total: %d", summary.honorableKills or 0), 1, .82, .42)
-    end)
-    StatTooltip(gankBox, "Ganks", function(summary)
-        GameTooltip:AddLine("Kills against lower-level players.", 1, 1, 1, true)
-        GameTooltip:AddLine(string.format("%d total • %d were 5+ levels below", summary.ganks or 0, summary.lowbieGanks or 0), 1, .68, .40)
-    end)
+    hkBox:SetScript("OnEnter",function(self) GameTooltip:Hide();DP.OverviewCharts.ShowBuffs(self,W.Summary()) end)
+    hkBox:SetScript("OnLeave",DP.OverviewCharts.HideBuffs);hkBox:SetScript("OnHide",DP.OverviewCharts.HideBuffs)
+    gankBox:SetScript("OnEnter",function(self) GameTooltip:Hide();DP.OverviewCharts.ShowZones(self,W.Summary()) end)
+    gankBox:SetScript("OnLeave",DP.OverviewCharts.HideZones);gankBox:SetScript("OnHide",DP.OverviewCharts.HideZones)
     mostBox:SetScript("OnEnter",function(self)
         GameTooltip:Hide();DP.RivalChart.Show(self,W.Summary())
     end)
@@ -4290,9 +4344,7 @@ function W.InstallOverview(overview, duelPage)
         GameTooltip:AddLine(string.format("Deaths  %d", summary.deaths or 0), 1, .45, .45)
         GameTooltip:AddLine(string.format("K/D  %.2f", (summary.kills or 0) / math.max(1, summary.deaths or 0)), 1, .82, .42)
         GameTooltip:AddLine(string.format("Fights recorded  %d   Rivals  %d", summary.encounters or 0, summary.rivals or 0), .75, .78, .84)
-        if summary.favoriteZone then
-            GameTooltip:AddLine(string.format("Favorite zone  %s (%d kills)", summary.favoriteZone, summary.favoriteZoneKills or 0), 1, .82, .42)
-        end
+        GameTooltip:AddLine(string.format("Honorable kills  %d • Ganks  %d (%d lowbie)",summary.honorableKills or 0,summary.ganks or 0,summary.lowbieGanks or 0),1,.82,.42)
         GameTooltip:Show()
     end)
     cardHover:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -4421,12 +4473,7 @@ function W.RefreshOverview()
     local s = W.Summary()
     W.overviewHeadline:SetText(string.format("|cff65e6ad%d KILLS|r", s.kills or 0))
     if W.overviewSubtitle then
-        if s.favoriteZone and (s.favoriteZoneKills or 0) > 0 then
-            local noun = s.favoriteZoneKills == 1 and "kill" or "kills"
-            W.overviewSubtitle:SetText(string.format("|cff9f9f9fFavorite zone|r  |cffffce70%s|r  •  %d %s", s.favoriteZone, s.favoriteZoneKills, noun))
-        else
-            W.overviewSubtitle:SetText("Open-world record")
-        end
+        W.overviewSubtitle:SetText(string.format("|cffffce70%d|r honorable kills  •  |cffffad66%d|r ganks",s.honorableKills or 0,s.ganks or 0))
     end
     if W.overviewCurrentStreak then W.overviewCurrentStreak:SetText(string.format("|cff65e6ad%d|r current streak", s.currentStreak or 0)) end
     if W.overviewBestStreak then W.overviewBestStreak:SetText(string.format("|cffffce70%d|r best streak", s.longestStreak or 0)) end
@@ -4440,17 +4487,24 @@ function W.RefreshOverview()
 
     local largest = (s.longestOutnumbered or 0) >= 2 and ("1v" .. tostring(s.longestOutnumbered)) or "—"
     if W.overviewOutTop then W.overviewOutTop:SetText(string.format("|cffffce70%d|r", s.outnumberedVictories or 0)) end
-    if W.overviewOutMid then W.overviewOutMid:SetText("Solo 1vN") end
+    if W.overviewOutMid then W.overviewOutMid:SetText("Solo Multikill") end
     if W.overviewOutBot then W.overviewOutBot:SetText("Best " .. largest) end
 
     local L = W.overviewStatLabels or {}
-    if L.hkL then L.hkL:SetText("HONORABLE KILLS") end
-    if L.hkV then L.hkV:SetText(string.format("|cffffce70%d|r", s.honorableKills or 0)) end
-    if L.gankL then L.gankL:SetText("GANKS") end
-    if L.gankV then L.gankV:SetText(string.format("|cffffad66%d|r", s.ganks or 0)) end
+    for _,key in ipairs({"hkL","mostL","gankL","goldL"}) do
+        local label=L[key]
+        if label then
+            local font,_,flags=label:GetFont()
+            label:SetFont(font,9,flags);label:SetWordWrap(false)
+        end
+    end
+    if L.hkL then L.hkL:SetText("WORLD BUFFS REMOVED") end
+    if L.hkV then L.hkV:SetText(string.format("|cffffce70%d|r", s.worldBuffRemovalCount or 0)) end
+    if L.gankL then L.gankL:SetText("FAVORITE ZONE") end
+    if L.gankV then L.gankV:SetText(s.favoriteZone or "—") end
     if L.mostL then L.mostL:SetText("MOST KILLED") end
     if L.mostV then
-        local value = s.mostKilledName and string.format("%s |cffadb5c2×%d|r", DP.Theme.ClassName(s.mostKilledName, s.mostKilledClass), s.mostKilledKills or 0) or "—"
+        local value = s.mostKilledName and DP.Theme.ClassName(s.mostKilledName, s.mostKilledClass) or "—"
         L.mostV:SetText(value)
     end
     if L.goldL then L.goldL:SetText("ENEMY GOLD SPENT") end
@@ -6975,6 +7029,8 @@ local function ShowRaceClassPortraitFallback(card, enemy, temporary)
     end
     return false
 end
+
+W.ShowRaceClassPortraitFallback=ShowRaceClassPortraitFallback
 
 function W.RecordPortraitsReady(record)
     if not record then return true end

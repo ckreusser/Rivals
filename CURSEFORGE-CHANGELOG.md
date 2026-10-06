@@ -1,12 +1,11 @@
-## Rivals 1.0.143
+## Rivals 1.0.144
 
-Changes since 1.0.142.
+Changes since 1.0.143.
 
-- Added an animated Enemy Gold Spent pie chart with raised, textured slices and item-inspired colors.
-- Added separate Flask of Petrification, Magic Dust, Arcane Bomb, Potions, Elixirs, Bandages, Bombs, Gadgets, and Other Consumables categories.
-- Hide slices too small to see, trim the breakdown to visible categories, and preserve category totals when old encounters leave history.
-- Added animated top-five Most Killed and top-three Nemeses charts with class-colored raised bars, names inside, and compact KB/death counts.
-- Restart animations on every mouseover and keep chart tooltips inset from screen edges.
-- Fixed duel portrait loading and fitting within its frame.
-- Added FALL DAMAGE classification; lethal falls no longer credit opponents, nemeses, or solo losses.
-- Added a one-time reload correction for the user-confirmed latest Coldbully fall death.
+- Added animated Favorite Zone map bars using explored terrain, kill-centered crops, bright fills, and darkened unfilled lengths. Maraudon uses its approximate entrance location on the Classic Era Desolace map.
+- Added World Buffs Removed image bars from the supplied screenshots, larger icons, compact spacing, and subtle bronze borders. Include zero-removal buffs without displaying zero labels.
+- Consolidated Darkmoon Faire buffs into one removal column and removed the alternate-era Dragonslayer variant.
+- Added PETRI as a Disengaged subcategory; retained combat and item-use evidence reclassifies qualifying existing records on reload without changing kill or death outcomes.
+- Added subtle class-themed textures to Most Killed and Nemeses bars, preserving class colors and fixed-scale reveals; added text shadows for readability.
+- Tightened chart headers, added matching subtle borders to Favorite Zone bars, and adjusted quadrant plaque text spacing.
+- Reordered the plaque: Most Killed and Favorite Zone on the left; World Buffs Removed and Enemy Gold Spent on the right. Most Killed now shows only the opponent name.

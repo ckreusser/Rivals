@@ -1,0 +1,10 @@
+Rivals 1.0.144 validation
+
+29 standalone Python regression checks passed, including class bars, overview charts, PETRI classification, portrait lifecycle/loading, spend charts, and Lua syntax checks.
+
+Known existing harness limitations, reproduced on unchanged 1.0.143:
+- tests/run.py: verification.lua line 42 assertion fails.
+- tests/run_encounter_fixes.py: UI fixture omits RivalChart; current build also needs OverviewCharts.
+- tests/inspect_portrait_log.py: requires saved game data outside the release checkout.
+
+Visual behavior requires in-game reload for final review.
