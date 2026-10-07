@@ -1,0 +1,14 @@
+Rivals 1.0.174 release validation - October 7, 2026
+Baseline: GitHub main c1b4355 (1.0.173)
+Source: installed Classic Era Rivals
+
+PASS: 32 standalone Python regression scripts. The version assertion in multikill.py was updated for 1.0.174 and rerun successfully.
+PASS: Lua 5.1 syntax compilation of all 67 Lua files.
+PASS: every Rivals.toc file exists; TOC, Core, and README versions are 1.0.174.
+PASS: Feign Death screenshot guards, delayed capture cancellation, genuine kills, and duplicate suppression.
+PASS: streak resets, archived opponent/rank data, top-three ranking, compact date ranges, and paging through 10,000 opponents with a single summary scan.
+
+Known validation limits inherited from 1.0.173:
+- tests/run.py and tests/run_encounter_fixes.py were excluded because their documented baseline failures and stale mocks remain unresolved.
+- tests/inspect_portrait_log.py was excluded because its required SavedVariables fixture is unavailable.
+- Visual changes were iterated using user-provided in-game screenshots; no automated in-game validation was performed.

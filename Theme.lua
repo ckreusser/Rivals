@@ -582,12 +582,24 @@ function T.StatDivider(parent, x, y, height)
         local h = height or 42
         local aspect = (nativeW and nativeH and nativeH > 0) and (nativeW / nativeH) or .30
         divider:SetSize(math.max(10, h * aspect), h)
-        divider:SetVertexColor(.84, .56, .31, .92)
     else
         divider:SetTexture("Interface\\Buttons\\WHITE8X8")
         divider:SetSize(2, height or 42)
-        divider:SetVertexColor(.84, .56, .31, .92)
     end
+    divider:SetDesaturated(true)
+    divider:SetVertexColor(1, .54, .17, .96)
+    -- Both overview dividers use the crossbar's bronze hue in every layer.
+    local copperLight = parent:CreateTexture(nil, "OVERLAY", nil, 1)
+    if copperLight.SetAtlas then
+        copperLight:SetAtlas("BattleBar-ButtonBG-Divider", false)
+    else
+        copperLight:SetTexture("Interface\\Buttons\\WHITE8X8")
+    end
+    copperLight:SetAllPoints(divider)
+    copperLight:SetDesaturated(true)
+    copperLight:SetVertexColor(1, .54, .17, .80)
+    copperLight:SetBlendMode("ADD")
+    divider.copperLight = copperLight
     return divider
 end
 

@@ -286,7 +286,8 @@ function DP.InstallCharacterTab(getRating, getRecords)
         local function AddNumberFlourish(side, mirrored)
             local flourish = duelPage:CreateTexture(nil, "OVERLAY")
             local shadow = duelPage:CreateTexture(nil, "ARTWORK")
-            flourish:SetVertexColor(.84, .56, .31, .96)
+            -- Neutralize the baked-in brown before applying copper to the original swirl art.
+            flourish:SetVertexColor(1, .58, .20, 1)
             shadow:SetVertexColor(0, 0, 0, .35)
             if flourish.SetAtlas then
                 flourish:SetAtlas("PetJournal-PetBattleAchievementBG", true)
@@ -303,9 +304,23 @@ function DP.InstallCharacterTab(getRating, getRecords)
                 flourish:SetSize(13, 13)
                 shadow:SetSize(13, 13)
             end
+            flourish:SetDesaturated(true)
+            -- Lift the dark source highlights without changing the artwork or silhouette.
+            local copperLight = duelPage:CreateTexture(nil, "OVERLAY", nil, 1)
+            if copperLight.SetAtlas then
+                copperLight:SetAtlas("PetJournal-PetBattleAchievementBG", false)
+            else
+                copperLight:SetTexture("Interface\\Buttons\\WHITE8X8")
+            end
+            copperLight:SetAllPoints(flourish)
+            copperLight:SetDesaturated(true)
+            copperLight:SetVertexColor(1, .58, .20, .80)
+            copperLight:SetBlendMode("ADD")
+            flourish.copperLight = copperLight
             if mirrored then
                 flourish:SetTexCoord(1, 0, 0, 1)
                 shadow:SetTexCoord(1, 0, 0, 1)
+                copperLight:SetTexCoord(1, 0, 0, 1)
             end
             if side == "left" then
                 flourish:SetPoint("CENTER", number, "CENTER", -40, -2)

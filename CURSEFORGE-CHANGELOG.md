@@ -1,12 +1,10 @@
-## Rivals 1.0.173
+## Rivals 1.0.174
 
-Changes since GitHub build 1.0.144.
+Changes since GitHub build 1.0.173.
 
-- Preserve lifetime World PvP Overview statistics when encounters age out of the 250 unstarred-record History limit. Compact archives retain kills, deaths, solo results, rivals, streaks, favorite zones, and removed world buffs without retaining combat logs or portraits; enemy consumable spending remains counted once.
-- Add duplicate-safe, one-time recovery of aged-out records from the bundled pre-trim snapshot for the matching character, without filling deliberate gaps within retained History.
-- Snapshot observed opponents' Classic PvP/Honor rank index, localized title, numeric rank, and capture time in World PvP and formal-duel identity data.
-- Give Current Streak and Best Streak larger dedicated values and independent hover highlights. Move Honorable Kills and Ganks into aligned record-tooltip rows.
-- Expand Solo Multikills hover details with victory totals, largest solo sweep, and a 1vN victory breakdown.
-- Add Duel Rating Overview tooltips for rating/status, placement progress, rated record, personal best, and latest duel.
-- Refine Overview headline flourishes, bronze dividers, subdued labels, and green hover highlights; brighten Duel Details header trim.
-- Refresh the in-addon rotation with 14 messages covering World PvP history, streaks, solo multikills, outnumbered victories, encounter evidence, enemy buffs, consumable costs, rival histories, and duel records.
+- Refine plaque filigrees, dividers, and the quadrant crossbar with a consistent copper/bronze finish; align the crossbar endcaps and balance the vertical bar's brightness.
+- Give Current Streak and Best Streak separate tooltips with adjoining hover areas.
+- List current-streak opponents with class-colored names, realm suffixes removed, recorded PvP rank icons, and repeat-kill counts. Long lists support mouse-wheel paging, and archived history remains included.
+- Show the top three kill streaks with compact date ranges, gold/silver/bronze placements, and a Current marker when applicable.
+- Move Favorite Zone to the top-right quadrant and World Buffs Removed to the bottom-left, including their hover charts.
+- Prevent Feign Death from triggering automatic World PvP screenshots by checking observed feign state and rechecking delayed captures.

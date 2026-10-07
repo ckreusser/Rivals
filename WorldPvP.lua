@@ -1097,6 +1097,40 @@ local function UpdatePeaks(session)
     UpdateEnemyPressure(session)
 end
 
+function W.IsFeigningDeath(session, guid)
+    if not guid then return false end
+    local unit = W.VisibleUnitForGUID(guid)
+    if unit and UnitIsFeignDeath and UnitIsFeignDeath(unit) then return true end
+    local untilTime = session and session.feignDeathUntil and session.feignDeathUntil[guid]
+    return untilTime ~= nil and GetTime() < untilTime
+end
+
+function W.ObserveFeignDeath(session, info)
+    local event, spellID = info[2], tonumber(info[12])
+    local guid
+    if spellID == 5384 and (event == "SPELL_CAST_SUCCESS" or event == "SPELL_AURA_APPLIED" or
+        event == "SPELL_AURA_REFRESH" or event == "SPELL_AURA_REMOVED") then
+        guid = event == "SPELL_CAST_SUCCESS" and info[4] or info[8]
+        if not guid then return end
+        session.feignDeathUntil = session.feignDeathUntil or {}
+        -- A cast bridges event ordering; the aura tracks the full feign even
+        -- after the hunter disappears from target/nameplate unit tokens.
+        session.feignDeathUntil[guid] = event ~= "SPELL_AURA_REMOVED" and
+            (GetTime() + (event == "SPELL_CAST_SUCCESS" and 2 or 360)) or nil
+        if event ~= "SPELL_AURA_REMOVED" and session.rivalsScreenshotDeaths and
+            session.rivalsScreenshotDeaths[guid] == "pending" then
+            session.rivalsScreenshotDeaths[guid] = nil
+        end
+    elseif event == "SPELL_RESURRECT" or event == "PARTY_KILL" then
+        guid = info[8]
+    elseif event == "SPELL_CAST_SUCCESS" or event == "SWING_DAMAGE" or event == "SWING_MISSED" then
+        guid = info[4]
+    end
+    if guid and spellID ~= 5384 and session.feignDeathUntil then
+        session.feignDeathUntil[guid] = nil
+    end
+end
+
 local function IsUnconsciousDeathEvent(info)
     if not info then return false end
     local event = info[2]
@@ -1105,6 +1139,7 @@ local function IsUnconsciousDeathEvent(info)
         -- UNIT_DIED payload: recapID, unconsciousOnDeath.  Hunter Feign Death
         -- intentionally uses the unconscious form of the death event.
         flag = info[13]
+        if W.IsFeigningDeath(W.active, info[8]) then return true end
     elseif event == "PARTY_KILL" then
         -- Blizzard's combat-log processor also exposes unconsciousOnDeath for
         -- PARTY_KILL as its fifth event-specific value. Classic normally does
@@ -2515,12 +2550,17 @@ end
 
 local function ScreenshotEnemyDeath(session, enemy, delay)
     if not session or not enemy or not enemy.guid then return end
+    if W.IsFeigningDeath(session, enemy.guid) then return end
     session.rivalsScreenshotDeaths = session.rivalsScreenshotDeaths or {}
     if session.rivalsScreenshotDeaths[enemy.guid] then return end
 
     local guid, name = enemy.guid, enemy.name
     local function Capture()
         if not session.rivalsScreenshotDeaths or session.rivalsScreenshotDeaths[guid] ~= "pending" then return end
+        if not enemy.died or W.IsFeigningDeath(session, guid) then
+            session.rivalsScreenshotDeaths[guid] = nil
+            return
+        end
         if DP.TakeRivalsScreenshot and DP.TakeRivalsScreenshot("world", name) then
             session.rivalsScreenshotDeaths[guid] = true
         else
@@ -2617,6 +2657,7 @@ function W.Combat(playerGUID)
     -- Explicit resurrection, or a dead enemy actively casting again, reopens
     -- that life while the encounter is still unfinished. Periodic damage and
     -- corpse aura removals are not evidence of resurrection.
+    W.ObserveFeignDeath(session, info)
     W.ObserveEnemyRevival(session, info)
     MarkInteraction(session, info)
     TrackSpecialEscape(session, info)
@@ -3695,6 +3736,21 @@ function W.Summary()
         enemyGoldPricedCount = math.max(0, tonumber(store and store.enemyGoldArchivedPricedCount) or 0),
         enemyGoldUnpricedCount = math.max(0, tonumber(store and store.enemyGoldArchivedUnpricedCount) or 0)}
     local streak, rivals, zones, rivalStats = 0, {}, {}, {}
+    local streakOpponents, streakUnknownKills = {}, 0
+    local streakStartedAt, streakLastAt
+    summary.topStreaks = {}
+    local function KeepStreak(endedAt, current)
+        if streak <= 0 then return end
+        local top = summary.topStreaks
+        top[#top + 1] = {kills = streak, startedAt = streakStartedAt,
+            endedAt = endedAt or streakLastAt, current = current == true}
+        table.sort(top, function(a, b)
+            if a.kills ~= b.kills then return a.kills > b.kills end
+            if a.current ~= b.current then return a.current end
+            return (a.endedAt or 0) > (b.endedAt or 0)
+        end)
+        if #top > 3 then table.remove(top) end
+    end
     summary.worldBuffsRemoved,summary.worldBuffRemovalCount={},0
     for id,name in pairs(WORLD_BUFFS) do
         local existing=summary.worldBuffsRemoved[name]
@@ -3780,12 +3836,47 @@ function W.Summary()
         -- resets it. This keeps Overview consistent with the headline kill
         -- count (e.g. 79 kills / 0 deaths => a current streak of 79).
         if recordKills > 0 then
+            if streak == 0 then streakStartedAt = record.timestamp end
+            streakLastAt = record.timestamp
             streak = streak + recordKills
             summary.longestStreak = math.max(summary.longestStreak, streak)
+            local namedKills = 0
+            for _, enemy in ipairs(record.enemies or {}) do
+                if enemy.died and enemy.name and enemy.name ~= "" then
+                    local key = enemy.guid or enemy.name
+                    local opponent = streakOpponents[key]
+                    if not opponent then
+                        opponent = {name = enemy.name, kills = 0}
+                        streakOpponents[key] = opponent
+                    end
+                    opponent.kills = opponent.kills + 1
+                    opponent.class = enemy.class or opponent.class
+                    if enemy.pvpRankObserved or enemy.pvpRankNumber ~= nil or enemy.pvpRankIndex ~= nil then
+                        opponent.pvpRankNumber = enemy.pvpRankNumber
+                        opponent.pvpRankIndex = enemy.pvpRankIndex
+                    end
+                    namedKills = namedKills + 1
+                end
+            end
+            streakUnknownKills = streakUnknownKills + math.max(0, recordKills - namedKills)
         end
-        if record.playerDied then streak = 0 end
+        if record.playerDied then
+            KeepStreak(record.timestamp, false)
+            streak, streakOpponents, streakUnknownKills = 0, {}, 0
+            streakStartedAt, streakLastAt = nil, nil
+        end
     end
+    KeepStreak(nil, true)
     summary.currentStreak = streak
+    summary.currentStreakOpponents = {}
+    for _, opponent in pairs(streakOpponents) do
+        summary.currentStreakOpponents[#summary.currentStreakOpponents + 1] = opponent
+    end
+    table.sort(summary.currentStreakOpponents, function(a, b)
+        if a.kills ~= b.kills then return a.kills > b.kills end
+        return a.name < b.name
+    end)
+    summary.currentStreakUnknownKills = streakUnknownKills
     summary.rivals = Count(rivals)
     summary.topZones=DP.OverviewCharts.RankZones(zones)
     local bestZone, best
@@ -4279,7 +4370,8 @@ function W.InstallOverview(overview, duelPage)
         local function CreateHeadlineFlourish(mirrored)
             local flourish = world:CreateTexture(nil, "OVERLAY")
             local shadow = world:CreateTexture(nil, "ARTWORK")
-            flourish:SetVertexColor(.93, .72, .44, .98)
+            -- Neutralize the baked-in brown before applying copper to the original swirl art.
+            flourish:SetVertexColor(1, .58, .20, 1)
             shadow:SetVertexColor(0, 0, 0, .35)
             if flourish.SetAtlas then
                 flourish:SetAtlas("PetJournal-PetBattleAchievementBG", true)
@@ -4296,14 +4388,29 @@ function W.InstallOverview(overview, duelPage)
                 flourish:SetSize(13, 13)
                 shadow:SetSize(13, 13)
             end
+            flourish:SetDesaturated(true)
+            -- Lift the dark source highlights without changing the artwork or silhouette.
+            local copperLight = world:CreateTexture(nil, "OVERLAY", nil, 1)
+            if copperLight.SetAtlas then
+                copperLight:SetAtlas("PetJournal-PetBattleAchievementBG", false)
+            else
+                copperLight:SetTexture("Interface\\Buttons\\WHITE8X8")
+            end
+            copperLight:SetAllPoints(flourish)
+            copperLight:SetDesaturated(true)
+            copperLight:SetVertexColor(1, .58, .20, .80)
+            copperLight:SetBlendMode("ADD")
+            flourish.copperLight = copperLight
             if mirrored then
                 flourish:SetTexCoord(1, 0, 0, 1)
                 shadow:SetTexCoord(1, 0, 0, 1)
+                copperLight:SetTexCoord(1, 0, 0, 1)
             end
             shadow:SetPoint("CENTER", flourish, "CENTER", 1, -1)
             flourish.shadow = shadow
             flourish:Hide()
             shadow:Hide()
+            copperLight:Hide()
             return flourish
         end
         W.overviewHeadlineFiligree = nil
@@ -4314,9 +4421,6 @@ function W.InstallOverview(overview, duelPage)
     local left = DP.Theme.StatSlab(world, 26, -240, 140, 58, false)
     local right = DP.Theme.StatSlab(world, 186, -240, 140, 58, true)
     W.overviewSlabDivider = DP.Theme.StatDivider(world, 176, -269, 46)
-    if W.overviewSlabDivider and W.overviewSlabDivider.SetVertexColor then
-        W.overviewSlabDivider:SetVertexColor(.93, .72, .44, .96)
-    end
     local soloTop = left:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     soloTop:SetPoint("TOPLEFT", left, "TOPLEFT", 8, -8); soloTop:SetPoint("TOPRIGHT", left, "TOPRIGHT", -8, -8); soloTop:SetJustifyH("CENTER")
     local soloMid = left:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -4406,10 +4510,14 @@ function W.InstallOverview(overview, duelPage)
     -- Replace the flat one-pixel rules with Blizzard metal-frame art so the
     -- quadrant split looks like a deliberate cross instead of drawn lines.
     do
-        local bronze = {.93, .72, .44, .98}
+        local bronze = {1, .54, .17, 1}
         local hThickness, vThickness = 6, 6
         local endpointW, endpointH = 10, 8
         local hInset, vInset = 12, 8
+        local pixel = 1 / math.max(.01, bottom:GetEffectiveScale())
+        -- Keep the post on the plaque center. The endcaps compensate only their
+        -- own rotated artwork padding; shifting this anchor misaligns the spine.
+        local postOffsetX = 0
 
         local function Unsnap(tex)
             if tex.SetSnapToPixelGrid then tex:SetSnapToPixelGrid(false) end
@@ -4426,7 +4534,8 @@ function W.InstallOverview(overview, duelPage)
             hBar:SetTexture("Interface\\Buttons\\WHITE8X8")
         end
         Unsnap(hBar)
-        hBar:SetVertexColor(.97, .77, .49, 1)
+        hBar:SetDesaturated(true)
+        hBar:SetVertexColor(bronze[1], bronze[2], bronze[3], bronze[4])
         hBar:SetPoint("LEFT", bottom, "LEFT", hInset, 0)
         hBar:SetPoint("RIGHT", bottom, "RIGHT", -hInset, 0)
         hBar:SetHeight(hThickness)
@@ -4438,7 +4547,8 @@ function W.InstallOverview(overview, duelPage)
             hGlow:SetTexture("Interface\\Buttons\\WHITE8X8")
         end
         Unsnap(hGlow)
-        hGlow:SetVertexColor(.98, .76, .48, .42)
+        hGlow:SetDesaturated(true)
+        hGlow:SetVertexColor(bronze[1], bronze[2], bronze[3], .80)
         if hGlow.SetBlendMode then hGlow:SetBlendMode("ADD") end
         hGlow:SetPoint("LEFT", hBar, "LEFT", 0, 0)
         hGlow:SetPoint("RIGHT", hBar, "RIGHT", 0, 0)
@@ -4451,10 +4561,30 @@ function W.InstallOverview(overview, duelPage)
             vBar:SetTexture("Interface\\Buttons\\WHITE8X8")
         end
         Unsnap(vBar)
-        vBar:SetVertexColor(bronze[1], bronze[2], bronze[3], bronze[4])
-        vBar:SetPoint("TOP", bottom, "TOP", 0, -vInset)
-        vBar:SetPoint("BOTTOM", bottom, "BOTTOM", 0, vInset)
+        vBar:SetDesaturated(true)
+        -- The right-border source is much brighter than the horizontal trim.
+        vBar:SetVertexColor(bronze[1], bronze[2], bronze[3], .65)
+        vBar:SetPoint("TOP", bottom, "TOP", postOffsetX, -vInset)
+        vBar:SetPoint("BOTTOM", bottom, "BOTTOM", postOffsetX, vInset)
         vBar:SetWidth(vThickness)
+
+        local function CopperLight(tex, atlas, layer, rotation)
+            local light = bottom:CreateTexture(nil, layer, nil, 1)
+            if light.SetAtlas then
+                light:SetAtlas(atlas, false)
+            else
+                light:SetTexture("Interface\\Buttons\\WHITE8X8")
+            end
+            Unsnap(light)
+            light:SetAllPoints(tex)
+            light:SetDesaturated(true)
+            light:SetVertexColor(bronze[1], bronze[2], bronze[3], .80)
+            light:SetBlendMode("ADD")
+            if rotation and light.SetRotation then light:SetRotation(rotation) end
+            return light
+        end
+        vBar.copperLight = CopperLight(vBar, "battlefieldminimap-border-right", "ARTWORK")
+        vBar.copperLight:SetVertexColor(bronze[1], bronze[2], bronze[3], .35)
 
         local function Endpoint(relativeTo, relativePoint, dx, dy, rotation)
             local tex = bottom:CreateTexture(nil, "OVERLAY")
@@ -4464,15 +4594,18 @@ function W.InstallOverview(overview, duelPage)
                 tex:SetTexture("Interface\\Buttons\\WHITE8X8")
             end
             Unsnap(tex)
+            tex:SetDesaturated(true)
             tex:SetVertexColor(bronze[1], bronze[2], bronze[3], bronze[4])
             tex:SetSize(endpointW, endpointH)
             tex:SetPoint("CENTER", relativeTo, relativePoint, dx or 0, dy or 0)
             if rotation and tex.SetRotation then tex:SetRotation(rotation) end
+            tex.copperLight = CopperLight(tex, "GarrMission_EncounterBar-End", "OVERLAY", rotation)
             return tex
         end
 
         local overlap = 2
-        local topEndpointX = .5
+        -- Compensate the rotated endcap's visible tip, rather than its padded bounds.
+        local topEndpointX = .5 * pixel
         local bottomEndpointX = 0
         Endpoint(hBar, "LEFT", overlap, 0, 0)
         Endpoint(hBar, "RIGHT", -overlap, 0, math.pi)
@@ -4491,8 +4624,8 @@ function W.InstallOverview(overview, duelPage)
         holder:EnableMouse(true)
         return holder, label, value
     end
-    local hkBox, hkL, hkV = quadrant(148, 0)
-    local gankBox, gankL, gankV = quadrant(0, -37)
+    local hkBox, hkL, hkV = quadrant(0, -37)
+    local gankBox, gankL, gankV = quadrant(148, 0)
     local mostBox, mostL, mostV = quadrant(0, 0)
     local goldBox, goldL, goldV = quadrant(148, -37)
     W.overviewStatLabels = {hkL=hkL, hkV=hkV, gankL=gankL, gankV=gankV,
@@ -4553,34 +4686,111 @@ function W.InstallOverview(overview, duelPage)
     end
 
     local cardHover = CreateFrame("Button", nil, world)
-    cardHover:SetSize(300, 96); cardHover:SetPoint("TOPLEFT", 26, -130)
+    cardHover:SetSize(300, 46); cardHover:SetPoint("TOPLEFT", 26, -130)
     cardHover:SetFrameLevel(world:GetFrameLevel() + 8)
     cardHover:SetScript("OnEnter", function(self) ShowRecordTooltip(self) end)
     cardHover:SetScript("OnLeave", function() GameTooltip:Hide() end)
     W.overviewCardHover = cardHover
 
-    -- Give the two streak fields independent hover zones above the broad card
-    -- hover so each grey label can react on its own.
+    local function ShowStreakTooltip(owner, best)
+        -- Reuse the hover snapshot when paging a long streak rather than
+        -- rescanning and sorting the entire encounter archive on every wheel tick.
+        local summary = owner.streakSummary or W.Summary()
+        if not best then owner.streakSummary = summary end
+        GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
+        GameTooltip:SetText(best and "Best Streak" or "Current Streak")
+        if not best then
+            GameTooltip:AddDoubleLine("Kills without dying", tostring(summary.currentStreak or 0),
+                .75, .78, .84, 1, .82, .42)
+            local opponents = summary.currentStreakOpponents or {}
+            local pageSize = 12
+            local lastOffset = math.floor(math.max(0, #opponents - 1) / pageSize) * pageSize
+            local offset = math.max(0, math.min(owner.streakOpponentOffset or 0, lastOffset))
+            owner.streakOpponentOffset = offset
+            GameTooltip:AddLine(" ")
+            GameTooltip:AddLine("OPPONENTS KILLED", 1, .82, .42)
+            for index = offset + 1, math.min(offset + pageSize, #opponents) do
+                local opponent = opponents[index]
+                local name = DP.Theme.ClassName(ShortName(opponent.name), opponent.class)
+                local rank = tonumber(opponent.pvpRankNumber)
+                if not rank and opponent.pvpRankIndex and GetPVPRankInfo then
+                    local _, rankNumber = GetPVPRankInfo(opponent.pvpRankIndex)
+                    rank = tonumber(rankNumber)
+                end
+                if rank and rank >= 1 and rank <= 14 and rank == math.floor(rank) then
+                    name = string.format("|TInterface\\PvPRankBadges\\PvPRank%02d:14:14:0:0|t %s", rank, name)
+                end
+                GameTooltip:AddDoubleLine(name, tostring(opponent.kills), 1, 1, 1, 1, .82, .42)
+            end
+            if #opponents == 0 and (summary.currentStreak or 0) == 0 then
+                GameTooltip:AddLine("No kills in the current streak.", .75, .78, .84)
+            end
+            if (summary.currentStreakUnknownKills or 0) > 0 then
+                GameTooltip:AddDoubleLine("Opponent details unavailable", tostring(summary.currentStreakUnknownKills), .75, .78, .84, 1, .82, .42)
+            end
+            if #opponents > pageSize then
+                GameTooltip:AddLine(string.format("%d–%d of %d opponents · Mouse wheel to browse",
+                    offset + 1, math.min(offset + pageSize, #opponents), #opponents), .75, .78, .84)
+            end
+        else
+            local function DateRange(first, last)
+                if not date or not first or first <= 0 then return "" end
+                last = last and last > 0 and last or first
+                local startDay = date("%b %d", first):gsub(" 0", " ")
+                local startYear, endYear = date("%Y", first), date("%Y", last)
+                if date("%Y%m%d", first) == date("%Y%m%d", last) then
+                    return startDay .. ", " .. startYear
+                elseif date("%Y%m", first) == date("%Y%m", last) then
+                    return startDay .. "–" .. tostring(tonumber(date("%d", last))) .. ", " .. startYear
+                elseif startYear == endYear then
+                    return startDay .. "–" .. date("%b %d", last):gsub(" 0", " ") .. ", " .. startYear
+                end
+                return startDay .. ", " .. startYear .. "–" .. date("%b %d", last):gsub(" 0", " ") .. ", " .. endYear
+            end
+            local top = summary.topStreaks or {}
+            local rankColors = {"ffd700", "c0c0c0", "cd7f32"}
+            for index, entry in ipairs(top) do
+                local dates = DateRange(entry.startedAt, entry.endedAt)
+                local label = string.format("|cff%s#%d|r  %s%s", rankColors[index] or "999999", index, dates,
+                    entry.current and "  |cff65e6adCurrent|r" or "")
+                GameTooltip:AddDoubleLine(label, string.format("%d kills", entry.kills),
+                    .75, .78, .84, 1, .82, .42)
+            end
+            if #top == 0 then GameTooltip:AddLine("No recorded kill streaks yet.", .75, .78, .84) end
+        end
+        GameTooltip:Show()
+    end
+
+    -- Tile the lower plaque with two adjoining halves. The record tooltip
+    -- owns only the headline above them, so no record-hover strip can intervene.
     local currentStreakHover = CreateFrame("Button", nil, world)
-    currentStreakHover:SetPoint("TOPLEFT", 38, -176)
-    currentStreakHover:SetSize(124, 39)
+    currentStreakHover:SetPoint("TOPLEFT", 26, -176)
+    currentStreakHover:SetSize(150, 50)
     currentStreakHover:SetFrameLevel(world:GetFrameLevel() + 9)
     currentStreakHover:SetScript("OnEnter", function(self)
         currentStreakLabel:SetTextColor(.40, .90, .68)
-        ShowRecordTooltip(self)
+        self.streakOpponentOffset = 0
+        self.streakSummary = nil
+        ShowStreakTooltip(self, false)
     end)
-    currentStreakHover:SetScript("OnLeave", function()
+    currentStreakHover:EnableMouseWheel(true)
+    currentStreakHover:SetScript("OnMouseWheel", function(self, delta)
+        self.streakOpponentOffset = (self.streakOpponentOffset or 0) - (delta > 0 and 12 or delta < 0 and -12 or 0)
+        ShowStreakTooltip(self, false)
+    end)
+    currentStreakHover:SetScript("OnLeave", function(self)
+        self.streakSummary = nil
         currentStreakLabel:SetTextColor(.58, .61, .66)
         GameTooltip:Hide()
     end)
 
     local bestStreakHover = CreateFrame("Button", nil, world)
-    bestStreakHover:SetPoint("TOPLEFT", 190, -176)
-    bestStreakHover:SetSize(124, 39)
+    bestStreakHover:SetPoint("TOPLEFT", currentStreakHover, "TOPRIGHT", 0, 0)
+    bestStreakHover:SetSize(150, 50)
     bestStreakHover:SetFrameLevel(world:GetFrameLevel() + 9)
     bestStreakHover:SetScript("OnEnter", function(self)
         bestStreakLabel:SetTextColor(.40, .90, .68)
-        ShowRecordTooltip(self)
+        ShowStreakTooltip(self, true)
     end)
     bestStreakHover:SetScript("OnLeave", function()
         bestStreakLabel:SetTextColor(.58, .61, .66)
@@ -4726,6 +4936,8 @@ function W.RefreshOverview()
             right:Show()
             if left.shadow then left.shadow:Show() end
             if right.shadow then right.shadow:Show() end
+            if left.copperLight then left.copperLight:Show() end
+            if right.copperLight then right.copperLight:Show() end
         end
     end
     if W.overviewCurrentStreak then W.overviewCurrentStreak:SetText(string.format("|cffffce70%d|r", s.currentStreak or 0)) end

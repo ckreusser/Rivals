@@ -3,7 +3,8 @@ local A={};DP.OverviewArchive=A
 local fields={"id","timestamp","playerGUID","playerLevel","playerDied","enemyDeaths","honorableKills",
     "friendlyCount","enemyCount","contestingEnemyCount","resultKey","pressureModelVersion",
     "completedSoloSweep","peakContestingEnemies"}
-local enemyFields={"guid","name","class","level","died","pressuredPlayer"}
+local enemyFields={"guid","name","class","level","died","pressuredPlayer",
+    "pvpRankObserved","pvpRankIndex","pvpRankNumber","pvpRankCapturedAt"}
 local function Copy(source,keys)
     local out={}
     for _,key in ipairs(keys) do out[key]=source[key] end
